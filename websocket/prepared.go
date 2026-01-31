@@ -132,6 +132,6 @@ func (c *Conn) WritePreparedMessage(pm *PreparedMessage) error {
 		return err
 	}
 
-	_, err = c.conn.Write(frameData)
+	_, err = c.rwc.Write(frameData)
 	return err
 }

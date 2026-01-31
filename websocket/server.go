@@ -67,8 +67,14 @@ func (u *Upgrader) selectSubprotocol(r *http.Request) string {
 }
 
 // Upgrade upgrades the HTTP server connection to the WebSocket protocol.
-// This implements the server-side opening handshake per RFC 6455, section 4.2.2.
+// This implements the server-side opening handshake per RFC 6455, section 4.2.2,
+// and RFC 8441 for HTTP/2 WebSocket bootstrapping.
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
+	// Check for HTTP/2 WebSocket upgrade (RFC 8441).
+	if r.ProtoMajor == 2 && r.Method == http.MethodConnect {
+		return u.upgradeHTTP2(w, r, responseHeader)
+	}
+
 	if !IsWebSocketUpgrade(r) {
 		u.returnError(w, r, http.StatusBadRequest, ErrBadHandshake)
 		return nil, ErrBadHandshake
@@ -172,6 +178,68 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 
 	if u.HandshakeTimeout > 0 {
 		_ = netConn.SetWriteDeadline(time.Time{})
+	}
+
+	conn := newConnFromBufio(netConn, brw, true, u.ReadBufferSize, u.WriteBufferSize, u.WriteBufferPool)
+	conn.subprotocol = subprotocol
+	conn.compressionEnabled = compress
+
+	return conn, nil
+}
+
+// upgradeHTTP2 handles WebSocket upgrade over HTTP/2 per RFC 8441.
+func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
+	// RFC 8441: The :protocol pseudo-header must be "websocket".
+	if r.Proto != "websocket" {
+		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: invalid :protocol for HTTP/2"))
+		return nil, ErrBadHandshake
+	}
+
+	checkOrigin := u.CheckOrigin
+	if checkOrigin == nil {
+		checkOrigin = checkSameOrigin
+	}
+	if !checkOrigin(r) {
+		u.returnError(w, r, http.StatusForbidden, errors.New("websocket: origin not allowed"))
+		return nil, ErrBadHandshake
+	}
+
+	subprotocol := u.selectSubprotocol(r)
+
+	// Negotiate permessage-deflate extension per RFC 7692.
+	var compress bool
+	if u.EnableCompression {
+		for _, ext := range parseExtensions(r.Header) {
+			if ext.name == "permessage-deflate" {
+				compress = true
+				break
+			}
+		}
+	}
+
+	// Set response headers.
+	for k, vs := range responseHeader {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+
+	if subprotocol != "" {
+		w.Header().Set("Sec-WebSocket-Protocol", subprotocol)
+	}
+
+	if compress {
+		w.Header().Set("Sec-WebSocket-Extensions", "permessage-deflate; server_no_context_takeover; client_no_context_takeover")
+	}
+
+	// RFC 8441: Response is 200 OK, not 101 Switching Protocols.
+	w.WriteHeader(http.StatusOK)
+
+	// Get the underlying connection via http.ResponseController.
+	rc := http.NewResponseController(w)
+	netConn, brw, err := rc.Hijack()
+	if err != nil {
+		return nil, err
 	}
 
 	conn := newConnFromBufio(netConn, brw, true, u.ReadBufferSize, u.WriteBufferSize, u.WriteBufferPool)

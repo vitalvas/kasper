@@ -125,8 +125,9 @@ const (
 
 // Conn represents a WebSocket connection.
 type Conn struct {
-	conn        net.Conn
-	br          io.Reader // buffered reader for reading frames
+	rwc         io.ReadWriteCloser // underlying connection
+	netConn     net.Conn           // optional, for net.Conn-specific methods
+	br          io.Reader          // buffered reader for reading frames
 	isServer    bool
 	subprotocol string
 
@@ -159,6 +160,10 @@ func newConn(conn net.Conn, isServer bool, readBufferSize, writeBufferSize int) 
 }
 
 func newConnWithPool(conn net.Conn, isServer bool, readBufferSize, writeBufferSize int, writeBufferPool BufferPool) *Conn {
+	return newConnFromRWC(conn, conn, isServer, readBufferSize, writeBufferSize, writeBufferPool)
+}
+
+func newConnFromRWC(rwc io.ReadWriteCloser, netConn net.Conn, isServer bool, readBufferSize, writeBufferSize int, writeBufferPool BufferPool) *Conn {
 	if readBufferSize <= 0 {
 		readBufferSize = defaultReadBufferSize
 	}
@@ -176,9 +181,15 @@ func newConnWithPool(conn net.Conn, isServer bool, readBufferSize, writeBufferSi
 		writeBuf = make([]byte, writeBufferSize+maxFrameHeaderSize)
 	}
 
+	var br io.Reader = rwc
+	if netConn != nil {
+		br = netConn
+	}
+
 	c := &Conn{
-		conn:             conn,
-		br:               conn, // default to reading directly from conn
+		rwc:              rwc,
+		netConn:          netConn,
+		br:               br,
 		isServer:         isServer,
 		readBuf:          make([]byte, readBufferSize),
 		writeBuf:         writeBuf,
@@ -205,39 +216,53 @@ func (c *Conn) Subprotocol() string {
 	return c.subprotocol
 }
 
-// Close closes the underlying network connection.
+// Close closes the underlying connection.
 func (c *Conn) Close() error {
 	// Return write buffer to pool if available.
 	if c.writeBufferPool != nil && c.writeBuf != nil {
 		c.writeBufferPool.Put(c.writeBuf)
 		c.writeBuf = nil
 	}
-	return c.conn.Close()
+	return c.rwc.Close()
 }
 
-// LocalAddr returns the local network address.
+// LocalAddr returns the local network address, or nil if not available.
 func (c *Conn) LocalAddr() net.Addr {
-	return c.conn.LocalAddr()
+	if c.netConn != nil {
+		return c.netConn.LocalAddr()
+	}
+	return nil
 }
 
-// RemoteAddr returns the remote network address.
+// RemoteAddr returns the remote network address, or nil if not available.
 func (c *Conn) RemoteAddr() net.Addr {
-	return c.conn.RemoteAddr()
+	if c.netConn != nil {
+		return c.netConn.RemoteAddr()
+	}
+	return nil
 }
 
-// UnderlyingConn returns the underlying net.Conn.
+// UnderlyingConn returns the underlying net.Conn, or nil for HTTP/2 connections.
 func (c *Conn) UnderlyingConn() net.Conn {
-	return c.conn
+	return c.netConn
 }
 
 // SetReadDeadline sets the read deadline on the underlying network connection.
+// Returns nil if the underlying connection does not support deadlines.
 func (c *Conn) SetReadDeadline(t time.Time) error {
-	return c.conn.SetReadDeadline(t)
+	if c.netConn != nil {
+		return c.netConn.SetReadDeadline(t)
+	}
+	return nil
 }
 
 // SetWriteDeadline sets the write deadline on the underlying network connection.
+// Returns nil if the underlying connection does not support deadlines.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
-	return c.conn.SetWriteDeadline(t)
+	if c.netConn != nil {
+		return c.netConn.SetWriteDeadline(t)
+	}
+	return nil
 }
 
 // SetReadLimit sets the maximum size in bytes for a message read from the peer.
@@ -309,7 +334,9 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 		return c.writeErr
 	}
 
-	_ = c.conn.SetWriteDeadline(deadline)
+	if c.netConn != nil {
+		_ = c.netConn.SetWriteDeadline(deadline)
+	}
 	frame := make([]byte, 2+len(data))
 	frame[0] = byte(messageType) | finalBit
 	frame[1] = byte(len(data))
@@ -324,7 +351,7 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 		copy(frame[2:], data)
 	}
 
-	_, err := c.conn.Write(frame)
+	_, err := c.rwc.Write(frame)
 	if messageType == CloseMessage {
 		c.writeErr = ErrCloseSent
 	}
@@ -665,15 +692,15 @@ func (c *Conn) writeFrameWithCompress(frameType int, data []byte, final bool, co
 	// If payload fits in writeBuf after header, use single write.
 	if headerLen+payloadLen <= len(c.writeBuf) {
 		copy(c.writeBuf[headerLen:], data)
-		_, err := c.conn.Write(c.writeBuf[:headerLen+payloadLen])
+		_, err := c.rwc.Write(c.writeBuf[:headerLen+payloadLen])
 		return payloadLen, err
 	}
 
 	// For large payloads, write header and data separately.
-	if _, err := c.conn.Write(c.writeBuf[:headerLen]); err != nil {
+	if _, err := c.rwc.Write(c.writeBuf[:headerLen]); err != nil {
 		return 0, err
 	}
-	_, err := c.conn.Write(data)
+	_, err := c.rwc.Write(data)
 	return payloadLen, err
 }
 

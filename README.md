@@ -6,7 +6,7 @@ HTTP toolkit for Go.
 
 ### websocket
 
-RFC 6455 compliant WebSocket implementation.
+RFC 6455 and RFC 8441 compliant WebSocket implementation.
 
 Features:
 
@@ -14,7 +14,7 @@ Features:
 - Text/binary messaging
 - Streaming API (NextReader/NextWriter)
 - Control frames (ping, pong, close)
-- Compression (permessage-deflate, RFC 7692)
+- Compression (permessage-deflate, RFC 7692, stateless)
 - Proxy support (HTTP CONNECT)
 - Subprotocol negotiation
 - JSON helpers

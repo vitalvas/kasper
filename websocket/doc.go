@@ -1,8 +1,10 @@
-// Package websocket implements the WebSocket protocol defined in RFC 6455.
+// Package websocket implements the WebSocket protocol defined in RFC 6455,
+// with HTTP/2 support per RFC 8441.
 //
 // This package provides a complete WebSocket implementation including:
 //   - Server-side connection upgrading via Upgrader
 //   - Client-side connection dialing via Dialer
+//   - HTTP/2 WebSocket bootstrapping (RFC 8441)
 //   - Per-message compression (permessage-deflate, RFC 7692)
 //   - JSON encoding/decoding helpers
 //   - Prepared messages for efficient broadcasting
@@ -66,5 +68,6 @@
 //
 // Per-message compression is negotiated during the WebSocket handshake when
 // EnableCompression is set to true on the Upgrader or Dialer. When compression
-// is enabled, messages are compressed using the permessage-deflate extension.
+// is enabled, messages are compressed using the permessage-deflate extension
+// (RFC 7692) with stateless compression (no context takeover).
 package websocket
