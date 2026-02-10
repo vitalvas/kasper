@@ -369,11 +369,17 @@ func TestRouteHeaderMatcher(t *testing.T) {
 }
 
 func TestRouteSkipClean(t *testing.T) {
-	t.Run("sets skipClean flag", func(t *testing.T) {
+	t.Run("returns false by default", func(t *testing.T) {
 		router := NewRouter()
 		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
-		route.SkipClean()
-		assert.True(t, route.skipClean)
+		assert.False(t, route.SkipClean())
+	})
+
+	t.Run("returns true when router has SkipClean enabled", func(t *testing.T) {
+		router := NewRouter()
+		router.SkipClean(true)
+		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
+		assert.True(t, route.SkipClean())
 	})
 }
 
@@ -607,13 +613,26 @@ func TestRouteBuildVarsDirect(t *testing.T) {
 }
 
 func TestRouteMatchMethodNotAllowed(t *testing.T) {
-	t.Run("returns false when path does not match and MethodNotAllowed is set", func(t *testing.T) {
+	t.Run("sets MatchErr on method mismatch", func(t *testing.T) {
 		router := NewRouter()
-		router.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {})
+		router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Methods(http.MethodGet)
 
-		req := httptest.NewRequest(http.MethodGet, "/posts/42", nil)
-		match := &RouteMatch{MethodNotAllowed: true}
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		match := &RouteMatch{}
 		assert.False(t, router.routes[0].Match(req, match))
+		assert.Equal(t, ErrMethodMismatch, match.MatchErr)
+	})
+
+	t.Run("does not set MatchErr when path does not match", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Methods(http.MethodGet)
+
+		req := httptest.NewRequest(http.MethodPost, "/posts", nil)
+		match := &RouteMatch{}
+		assert.False(t, router.routes[0].Match(req, match))
+		assert.Nil(t, match.MatchErr)
 	})
 
 	t.Run("returns false when route has error", func(t *testing.T) {
@@ -881,5 +900,40 @@ func TestRouteSubrouter(t *testing.T) {
 		route := router.Get("api-user")
 		require.NotNil(t, route)
 		assert.Equal(t, "api-user", route.GetName())
+	})
+
+	t.Run("subrouter inherits strictSlash", func(t *testing.T) {
+		router := NewRouter()
+		router.StrictSlash(true)
+		sub := router.PathPrefix("/api").Subrouter()
+		assert.True(t, sub.strictSlash)
+	})
+
+	t.Run("subrouter inherits skipClean", func(t *testing.T) {
+		router := NewRouter()
+		router.SkipClean(true)
+		sub := router.PathPrefix("/api").Subrouter()
+		assert.True(t, sub.skipClean)
+	})
+
+	t.Run("subrouter inherits useEncodedPath", func(t *testing.T) {
+		router := NewRouter()
+		router.UseEncodedPath()
+		sub := router.PathPrefix("/api").Subrouter()
+		assert.True(t, sub.useEncodedPath)
+	})
+
+	t.Run("subrouter strictSlash redirect works", func(t *testing.T) {
+		router := NewRouter()
+		router.StrictSlash(true)
+		sub := router.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users/", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMovedPermanently, w.Code)
 	})
 }

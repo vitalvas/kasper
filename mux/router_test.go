@@ -570,7 +570,7 @@ func TestRouterWalkSubrouterError(t *testing.T) {
 }
 
 func TestRouterMatchErrMethodMismatch(t *testing.T) {
-	t.Run("sets MethodNotAllowed on MatchErr", func(t *testing.T) {
+	t.Run("sets MatchErr to ErrMethodMismatch", func(t *testing.T) {
 		r := NewRouter()
 		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
 			Methods(http.MethodGet)
@@ -578,7 +578,7 @@ func TestRouterMatchErrMethodMismatch(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
 		match := &RouteMatch{}
 		assert.False(t, r.Match(req, match))
-		assert.True(t, match.MethodNotAllowed)
+		assert.Equal(t, ErrMethodMismatch, match.MatchErr)
 	})
 }
 
@@ -598,7 +598,7 @@ func TestRouterServeHTTPEncodedPath(t *testing.T) {
 }
 
 func TestRouterMatchErrMethodMismatchFromMatcher(t *testing.T) {
-	t.Run("sets MethodNotAllowed when MatchErr is ErrMethodMismatch", func(t *testing.T) {
+	t.Run("sets MatchErr when custom matcher signals method mismatch", func(t *testing.T) {
 		r := NewRouter()
 		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
 			MatcherFunc(func(_ *http.Request, match *RouteMatch) bool {
@@ -609,7 +609,7 @@ func TestRouterMatchErrMethodMismatchFromMatcher(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/users", nil)
 		match := &RouteMatch{}
 		assert.False(t, r.Match(req, match))
-		assert.True(t, match.MethodNotAllowed)
+		assert.Equal(t, ErrMethodMismatch, match.MatchErr)
 	})
 }
 

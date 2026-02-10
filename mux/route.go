@@ -46,9 +46,19 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 		return false
 	}
 
+	var methodMismatch bool
+
 	// Check all matchers.
 	for _, m := range r.matchers {
 		if !m.Match(req, match) {
+			if _, ok := m.(methodMatcher); ok {
+				methodMismatch = true
+				continue
+			}
+			if match.MatchErr == ErrMethodMismatch {
+				methodMismatch = true
+				continue
+			}
 			return false
 		}
 	}
@@ -63,9 +73,6 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 	// Check path regexp.
 	if r.regexp.path != nil {
 		if !r.regexp.path.Match(req, match) {
-			if match.MethodNotAllowed {
-				return false
-			}
 			return false
 		}
 	}
@@ -75,6 +82,12 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 		if !q.Match(req, match) {
 			return false
 		}
+	}
+
+	// If method didn't match but everything else did, record the mismatch.
+	if methodMismatch {
+		match.MatchErr = ErrMethodMismatch
+		return false
 	}
 
 	// If the handler is a Router (subrouter), delegate to it.
@@ -293,17 +306,19 @@ func (r *Route) BuildOnly() *Route {
 // Subrouter creates a new Router for the route.
 func (r *Route) Subrouter() *Router {
 	router := &Router{
-		parent:      r,
-		namedRoutes: r.namedRoutes,
+		parent:         r,
+		namedRoutes:    r.namedRoutes,
+		strictSlash:    r.strictSlash,
+		skipClean:      r.skipClean,
+		useEncodedPath: r.useEncodedPath,
 	}
 	r.handler = router
 	return router
 }
 
-// SkipClean sets a flag that the path should not be cleaned.
-func (r *Route) SkipClean() *Route {
-	r.skipClean = true
-	return r
+// SkipClean reports whether the path cleaning is disabled for this route.
+func (r *Route) SkipClean() bool {
+	return r.skipClean
 }
 
 // MatcherFunc adds a custom matcher function to the route.

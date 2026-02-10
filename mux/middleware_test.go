@@ -55,7 +55,7 @@ func TestRouterUse(t *testing.T) {
 		assert.Equal(t, []string{"first", "second", "handler"}, order)
 	})
 
-	t.Run("middleware applies to not-found without panic", func(t *testing.T) {
+	t.Run("middleware does not apply to not-found", func(t *testing.T) {
 		r := NewRouter()
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -69,6 +69,7 @@ func TestRouterUse(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/notfound", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Empty(t, w.Header().Get("X-MW"))
 	})
 
 	t.Run("middleware can modify response", func(t *testing.T) {
@@ -109,6 +110,35 @@ func TestRouterUse(t *testing.T) {
 	})
 }
 
+func TestSubrouterMiddlewareOrder(t *testing.T) {
+	t.Run("applies parent then subrouter middleware", func(t *testing.T) {
+		r := NewRouter()
+		var order []string
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "parent")
+				next.ServeHTTP(w, req)
+			})
+		})
+
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "sub")
+				next.ServeHTTP(w, req)
+			})
+		})
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, []string{"parent", "sub", "handler"}, order)
+	})
+}
+
 func TestCORSMethodMiddleware(t *testing.T) {
 	t.Run("sets Access-Control-Allow-Methods header", func(t *testing.T) {
 		r := NewRouter()
@@ -126,10 +156,9 @@ func TestCORSMethodMiddleware(t *testing.T) {
 		require.NotEmpty(t, allowMethods)
 		assert.Contains(t, allowMethods, http.MethodGet)
 		assert.Contains(t, allowMethods, http.MethodPost)
-		assert.Contains(t, allowMethods, http.MethodOptions)
 	})
 
-	t.Run("includes OPTIONS method", func(t *testing.T) {
+	t.Run("does not auto-add OPTIONS method", func(t *testing.T) {
 		r := NewRouter()
 		r.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {}).
 			Methods(http.MethodGet)
@@ -141,7 +170,7 @@ func TestCORSMethodMiddleware(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		allowMethods := w.Header().Get("Access-Control-Allow-Methods")
-		assert.Contains(t, allowMethods, http.MethodOptions)
+		assert.NotContains(t, allowMethods, http.MethodOptions)
 	})
 }
 
@@ -189,7 +218,7 @@ func TestGetAllMethodsForRoute(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, methods, http.MethodGet)
 		assert.Contains(t, methods, http.MethodPost)
-		assert.Contains(t, methods, http.MethodOptions)
+		assert.NotContains(t, methods, http.MethodOptions)
 	})
 
 	t.Run("returns error when no methods match", func(t *testing.T) {
@@ -202,7 +231,7 @@ func TestGetAllMethodsForRoute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("does not duplicate OPTIONS when already registered", func(t *testing.T) {
+	t.Run("includes OPTIONS only when explicitly registered", func(t *testing.T) {
 		r := NewRouter()
 		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
 			Methods(http.MethodGet, http.MethodOptions)
@@ -210,13 +239,8 @@ func TestGetAllMethodsForRoute(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/users", nil)
 		methods, err := getAllMethodsForRoute(r, req)
 		require.NoError(t, err)
-		count := 0
-		for _, m := range methods {
-			if m == http.MethodOptions {
-				count++
-			}
-		}
-		assert.Equal(t, 1, count)
+		assert.Contains(t, methods, http.MethodGet)
+		assert.Contains(t, methods, http.MethodOptions)
 	})
 
 	t.Run("skips routes without methods", func(t *testing.T) {
@@ -231,6 +255,5 @@ func TestGetAllMethodsForRoute(t *testing.T) {
 		methods, err := getAllMethodsForRoute(r, req)
 		require.NoError(t, err)
 		assert.Contains(t, methods, http.MethodGet)
-		assert.Contains(t, methods, http.MethodOptions)
 	})
 }

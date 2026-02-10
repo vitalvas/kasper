@@ -46,10 +46,5 @@ func getAllMethodsForRoute(router *Router, req *http.Request) ([]string, error) 
 		return nil, ErrNotFound
 	}
 
-	// Add OPTIONS if not already present.
-	if !matchInArray(allMethods, http.MethodOptions) {
-		allMethods = append(allMethods, http.MethodOptions)
-	}
-
 	return allMethods, nil
 }

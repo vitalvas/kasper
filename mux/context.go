@@ -59,13 +59,13 @@ type RouteMatch struct {
 	Handler http.Handler
 	Vars    map[string]string
 
-	// MatchErr is set to ErrMethodNotAllowed when the request method
+	// MatchErr is set to ErrMethodMismatch when the request method
 	// does not match but the path does.
 	MatchErr error
 
-	// MethodNotAllowed is set to true when the request method does not
+	// methodNotAllowed is set to true when the request method does not
 	// match but the path does.
-	MethodNotAllowed bool
+	methodNotAllowed bool
 }
 
 // MatcherFunc is the function signature used by custom matchers.
@@ -101,11 +101,7 @@ var ErrMethodMismatch = errors.New("method is not allowed")
 // ErrNotFound is returned when no route match is found.
 var ErrNotFound = errors.New("no matching route was found")
 
-// ErrSkipRouter is used as a return value from WalkFunc to indicate that the
+// SkipRouter is used as a return value from WalkFunc to indicate that the
 // router that walk is about to descend into should be skipped.
-//
-// SkipRouter is an alias kept for gorilla/mux API compatibility.
-var ErrSkipRouter = errors.New("skip this router")
-
-// SkipRouter is an alias for ErrSkipRouter, kept for gorilla/mux compatibility.
-var SkipRouter = ErrSkipRouter
+// Named without Err prefix for gorilla/mux API compatibility.
+var SkipRouter = errors.New("skip this router") //nolint:revive,staticcheck // gorilla/mux API compatibility

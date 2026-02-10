@@ -68,7 +68,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		req = setRouteContext(req, match.Route, match.Vars)
 	} else {
-		if match.MethodNotAllowed {
+		if match.methodNotAllowed {
 			handler = r.MethodNotAllowedHandler
 			if handler == nil {
 				handler = methodNotAllowedHandler()
@@ -103,7 +103,6 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	handler = r.applyMiddleware(handler)
 	handler.ServeHTTP(w, req)
 }
 
@@ -114,57 +113,19 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 			continue
 		}
 		if route.Match(req, match) {
+			if match.Handler != nil {
+				match.Handler = r.applyMiddleware(match.Handler)
+			}
 			return true
 		}
 	}
 
-	// Check for method not allowed.
 	if match.MatchErr == ErrMethodMismatch {
-		match.MethodNotAllowed = true
-		return false
-	}
-
-	// Check if any route matches the path but not the method.
-	if r.methodNotAllowedCheck(req, match) {
-		match.MethodNotAllowed = true
+		match.methodNotAllowed = true
 		return false
 	}
 
 	match.MatchErr = ErrNotFound
-	return false
-}
-
-// methodNotAllowedCheck checks if the path matches any route with different methods.
-func (r *Router) methodNotAllowedCheck(req *http.Request, _ *RouteMatch) bool {
-	for _, route := range r.routes {
-		if route.buildOnly {
-			continue
-		}
-		methods, err := route.GetMethods()
-		if err != nil {
-			continue
-		}
-
-		// Try matching with different methods.
-		for _, method := range []string{
-			http.MethodGet, http.MethodHead, http.MethodPost,
-			http.MethodPut, http.MethodPatch, http.MethodDelete,
-			http.MethodConnect, http.MethodOptions, http.MethodTrace,
-		} {
-			if method == req.Method {
-				continue
-			}
-			if matchInArray(methods, method) {
-				// Check if the route would match with this method.
-				testReq := req.Clone(req.Context())
-				testReq.Method = method
-				testMatch := &RouteMatch{}
-				if route.Match(testReq, testMatch) {
-					return true
-				}
-			}
-		}
-	}
 	return false
 }
 
