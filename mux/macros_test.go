@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +27,7 @@ func TestExpandMacro(t *testing.T) {
 		{name: "alphanum", input: "alphanum", expected: `[a-zA-Z0-9]+`, expectCompiled: true},
 		{name: "date", input: "date", expected: `[0-9]{4}-[0-9]{2}-[0-9]{2}`, expectCompiled: true},
 		{name: "hex", input: "hex", expected: `[0-9a-fA-F]+`, expectCompiled: true},
+		{name: "domain", input: "domain", expected: `(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?`, expectCompiled: true},
 		{name: "unknown returns input unchanged", input: "[0-9]+", expected: `[0-9]+`, expectCompiled: false},
 		{name: "empty string", input: "", expected: "", expectCompiled: false},
 	}
@@ -40,6 +43,35 @@ func TestExpandMacro(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLengthMatcher(t *testing.T) {
+	re := regexp.MustCompile(`^[a-z]+$`)
+	m := &lengthMatcher{re: re, maxLen: 5}
+
+	t.Run("matches within limit", func(t *testing.T) {
+		assert.True(t, m.MatchString("abc"))
+	})
+
+	t.Run("matches at exact limit", func(t *testing.T) {
+		assert.True(t, m.MatchString("abcde"))
+	})
+
+	t.Run("rejects over limit", func(t *testing.T) {
+		assert.False(t, m.MatchString("abcdef"))
+	})
+
+	t.Run("rejects regex mismatch within limit", func(t *testing.T) {
+		assert.False(t, m.MatchString("123"))
+	})
+
+	t.Run("matches empty string", func(t *testing.T) {
+		assert.False(t, m.MatchString(""))
+	})
+
+	t.Run("String returns regex pattern", func(t *testing.T) {
+		assert.Equal(t, `^[a-z]+$`, m.String())
+	})
 }
 
 func TestRouteMacroPatterns(t *testing.T) {
@@ -69,6 +101,18 @@ func TestRouteMacroPatterns(t *testing.T) {
 		{name: "date rejects invalid format", path: "/events/{d:date}", requestPath: "/events/01-15-2024", shouldMatch: false},
 		{name: "hex matches hex string", path: "/colors/{h:hex}", requestPath: "/colors/deadBEEF", shouldMatch: true},
 		{name: "hex rejects non-hex", path: "/colors/{h:hex}", requestPath: "/colors/xyz", shouldMatch: false},
+		{name: "domain matches simple", path: "/sites/{d:domain}", requestPath: "/sites/example.com", shouldMatch: true},
+		{name: "domain matches subdomain", path: "/sites/{d:domain}", requestPath: "/sites/sub.example.com", shouldMatch: true},
+		{name: "domain matches hyphenated", path: "/sites/{d:domain}", requestPath: "/sites/my-site.example.co.uk", shouldMatch: true},
+		{name: "domain matches single char", path: "/sites/{d:domain}", requestPath: "/sites/a", shouldMatch: true},
+		{name: "domain matches single char label with TLD", path: "/sites/{d:domain}", requestPath: "/sites/a.b", shouldMatch: true},
+		{name: "domain matches single label", path: "/sites/{d:domain}", requestPath: "/sites/localhost", shouldMatch: true},
+		{name: "domain matches 63-char label", path: "/sites/{d:domain}", requestPath: "/sites/a" + strings.Repeat("b", 61) + "c.com", shouldMatch: true},
+		{name: "domain rejects 64-char label", path: "/sites/{d:domain}", requestPath: "/sites/a" + strings.Repeat("b", 62) + "c.com", shouldMatch: false},
+		{name: "domain rejects leading hyphen", path: "/sites/{d:domain}", requestPath: "/sites/-bad.com", shouldMatch: false},
+		{name: "domain rejects trailing hyphen", path: "/sites/{d:domain}", requestPath: "/sites/bad-.com", shouldMatch: false},
+		{name: "domain matches 253-char total", path: "/sites/{d:domain}", requestPath: "/sites/" + strings.Repeat("a.", 126) + "b", shouldMatch: true},
+		{name: "domain rejects 254-char total", path: "/sites/{d:domain}", requestPath: "/sites/" + strings.Repeat("a.", 126) + "bb", shouldMatch: false},
 		{name: "raw regex still works", path: "/items/{id:[0-9]+}", requestPath: "/items/123", shouldMatch: true},
 	}
 

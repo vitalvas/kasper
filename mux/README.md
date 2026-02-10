@@ -33,7 +33,60 @@ r.HandleFunc("/users/{id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) 
     fmt.Fprintf(w, "user %s", vars["id"])
 })
 
-http.ListenAndServe(":8080", r)
+srv := &http.Server{
+    Addr:         ":8080",
+    Handler:      r,
+    ReadTimeout:  5 * time.Second,
+    WriteTimeout: 10 * time.Second,
+}
+
+srv.ListenAndServe()
+```
+
+## Server Usage
+
+### Plain HTTP
+
+```go
+srv := &http.Server{
+    Addr:         ":8080",
+    Handler:      r,
+    ReadTimeout:  5 * time.Second,
+    WriteTimeout: 10 * time.Second,
+}
+
+srv.ListenAndServe()
+```
+
+### TLS
+
+```go
+srv := &http.Server{
+    Addr:         ":8443",
+    Handler:      r,
+    ReadTimeout:  5 * time.Second,
+    WriteTimeout: 10 * time.Second,
+}
+
+srv.ListenAndServeTLS("cert.pem", "key.pem")
+```
+
+### Unix Socket
+
+```go
+listener, err := net.Listen("unix", "/var/run/app.sock")
+if err != nil {
+    log.Fatal(err)
+}
+defer listener.Close()
+
+srv := &http.Server{
+    Handler:      r,
+    ReadTimeout:  5 * time.Second,
+    WriteTimeout: 10 * time.Second,
+}
+
+srv.Serve(listener)
 ```
 
 ## Path Variables
@@ -62,6 +115,7 @@ r.HandleFunc("/events/{d:date}", handler)
 r.HandleFunc("/colors/{h:hex}", handler)
 r.HandleFunc("/names/{name:alpha}", handler)
 r.HandleFunc("/tokens/{token:alphanum}", handler)
+r.HandleFunc("/sites/{d:domain}", handler)
 ```
 
 | Macro | Description | Example match |
@@ -74,6 +128,7 @@ r.HandleFunc("/tokens/{token:alphanum}", handler)
 | `alphanum` | Alphanumeric characters | `abc123` |
 | `date` | ISO 8601 date | `2024-01-15` |
 | `hex` | Hexadecimal string | `deadBEEF` |
+| `domain` | Domain name (RFC 1123) | `example.com`, `sub.example.co.uk` |
 
 If the name after the colon does not match a known macro, it is treated as a raw regular expression:
 

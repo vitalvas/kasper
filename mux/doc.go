@@ -58,6 +58,7 @@
 //	alphanum - alphanumeric characters (e.g. abc123)
 //	date     - ISO 8601 date (e.g. 2024-01-15)
 //	hex      - hexadecimal string (e.g. deadBEEF)
+//	domain   - domain name per RFC 1123 (e.g. example.com, sub.example.co.uk)
 //
 // If the name after the colon does not match a known macro, it is
 // treated as a raw regular expression for full backward compatibility.

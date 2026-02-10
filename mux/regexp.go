@@ -37,8 +37,12 @@ type routeRegexp struct {
 	reverse string
 	// varsN are the variable names in order.
 	varsN []string
-	// varsR are the compiled regexps for validating each variable value.
-	varsR []*regexp.Regexp
+	// varsR are the compiled matchers for validating each variable value.
+	varsR []varMatcher
+	// needsVarValidation is true when any varsR entry enforces constraints
+	// beyond regex (e.g. length limits), requiring per-variable validation
+	// during route matching.
+	needsVarValidation bool
 	// wildcard indicates a prefix match (no $ anchor).
 	wildcard bool
 	// queryKey is the query parameter key (only for query type).
@@ -88,7 +92,7 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		pattern  bytes.Buffer
 		reverse  bytes.Buffer
 		varsN    []string
-		varsR    []*regexp.Regexp
+		varsR    []varMatcher
 		end      int
 		wildcard bool
 	)
@@ -104,7 +108,7 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		parts := strings.SplitN(tpl[idxs[i]+1:end-1], ":", 2)
 		name := parts[0]
 		patt := defaultPattern
-		var compiledVarR *regexp.Regexp
+		var compiledVarR varMatcher
 		if len(parts) == 2 {
 			patt, compiledVarR = expandMacro(parts[1])
 		}
@@ -162,18 +166,29 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		return nil, err
 	}
 
+	// Check if any variable matcher requires validation beyond regex
+	// (e.g. length constraints).
+	needsValidation := false
+	for _, v := range varsR {
+		if _, isRegexp := v.(*regexp.Regexp); !isRegexp {
+			needsValidation = true
+			break
+		}
+	}
+
 	return &routeRegexp{
-		template:       template,
-		matchHost:      typ == regexpTypeHost,
-		matchQuery:     typ == regexpTypeQuery,
-		strictSlash:    options.strictSlash,
-		useEncodedPath: options.useEncodedPath,
-		regexp:         reg,
-		reverse:        reverse.String(),
-		varsN:          varsN,
-		varsR:          varsR,
-		wildcard:       wildcard,
-		queryKey:       queryKey,
+		template:           template,
+		matchHost:          typ == regexpTypeHost,
+		matchQuery:         typ == regexpTypeQuery,
+		strictSlash:        options.strictSlash,
+		useEncodedPath:     options.useEncodedPath,
+		regexp:             reg,
+		reverse:            reverse.String(),
+		varsN:              varsN,
+		varsR:              varsR,
+		needsVarValidation: needsValidation,
+		wildcard:           wildcard,
+		queryKey:           queryKey,
 	}, nil
 }
 
@@ -187,7 +202,7 @@ func (r *routeRegexp) Match(req *http.Request, _ *RouteMatch) bool {
 	}
 	if r.matchHost {
 		host := getHost(req)
-		return r.regexp.MatchString(host)
+		return r.matchAndValidate(host)
 	}
 
 	p := req.URL.Path
@@ -195,7 +210,29 @@ func (r *routeRegexp) Match(req *http.Request, _ *RouteMatch) bool {
 	if r.useEncodedPath {
 		p = requestURIPath(req.URL)
 	}
-	return r.regexp.MatchString(p)
+	return r.matchAndValidate(p)
+}
+
+// matchAndValidate checks the full regexp and then validates each
+// captured variable against its varMatcher (which may enforce
+// constraints beyond regex, such as maximum length).
+func (r *routeRegexp) matchAndValidate(input string) bool {
+	if !r.needsVarValidation {
+		return r.regexp.MatchString(input)
+	}
+
+	matches := r.regexp.FindStringSubmatch(input)
+	if matches == nil {
+		return false
+	}
+
+	for i := range r.varsN {
+		if i+1 < len(matches) && !r.varsR[i].MatchString(matches[i+1]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // url builds a URL part from the template and the given variable values.
