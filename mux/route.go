@@ -91,9 +91,22 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 	}
 
 	// If the handler is a Router (subrouter), delegate to it.
+	// If the subrouter has a NotFoundHandler and the prefix matched but no
+	// sub-route matched (and it's not a method mismatch), use the subrouter's
+	// NotFoundHandler instead of propagating the 404 to the parent.
 	if r.handler != nil {
 		if router, ok := r.handler.(*Router); ok {
-			return router.Match(req, match)
+			if router.Match(req, match) {
+				return true
+			}
+			if router.NotFoundHandler != nil && match.MatchErr != ErrMethodMismatch {
+				match.Route = r
+				match.Handler = router.applyMiddleware(router.NotFoundHandler)
+				match.MatchErr = nil
+				r.regexp.setMatch(req, match, r)
+				return true
+			}
+			return false
 		}
 	}
 

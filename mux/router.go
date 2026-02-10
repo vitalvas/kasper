@@ -25,9 +25,6 @@ type Router struct {
 	// this handler is invoked.
 	MethodNotAllowedHandler http.Handler
 
-	// KeepContext is a deprecated no-op field kept for API compatibility.
-	KeepContext bool
-
 	parent      parentRoute
 	routes      []*Route
 	namedRoutes map[string]*Route

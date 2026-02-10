@@ -805,6 +805,105 @@ func TestSubrouterMethodNotAllowed(t *testing.T) {
 	})
 }
 
+func TestSubrouterNotFoundHandler(t *testing.T) {
+	t.Run("subrouter custom handler", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "subrouter 404")
+		})
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, "subrouter 404", w.Body.String())
+	})
+
+	t.Run("subrouter falls through without handler", func(t *testing.T) {
+		r := NewRouter()
+		r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "root 404")
+		})
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, "root 404", w.Body.String())
+	})
+
+	t.Run("subrouter preserves method not allowed", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "should not appear")
+		})
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.NotContains(t, w.Body.String(), "should not appear")
+	})
+
+	t.Run("subrouter middleware applied", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		var middlewareCalled bool
+		sub.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				middlewareCalled = true
+				next.ServeHTTP(w, req)
+			})
+		})
+		sub.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "sub 404")
+		})
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, "sub 404", w.Body.String())
+		assert.True(t, middlewareCalled)
+	})
+
+	t.Run("nested subrouter handler", func(t *testing.T) {
+		r := NewRouter()
+		r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "root 404")
+		})
+		api := r.PathPrefix("/api").Subrouter()
+		api.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "api 404")
+		})
+		v1 := api.PathPrefix("/v1").Subrouter()
+		v1.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "v1 404")
+		})
+		v1.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/unknown", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, "v1 404", w.Body.String())
+	})
+}
+
 func TestMethodNotAllowedAllowHeader(t *testing.T) {
 	t.Run("sets sorted Allow header on 405", func(t *testing.T) {
 		r := NewRouter()

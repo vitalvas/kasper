@@ -26,6 +26,39 @@ func TestVars(t *testing.T) {
 	})
 }
 
+func TestVarGet(t *testing.T) {
+	t.Run("returns false for request without vars", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		val, ok := VarGet(r, "id")
+		assert.False(t, ok)
+		assert.Empty(t, val)
+	})
+
+	t.Run("returns false for missing key", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{"name": "test"})
+		val, ok := VarGet(r, "id")
+		assert.False(t, ok)
+		assert.Empty(t, val)
+	})
+
+	t.Run("returns value and true for existing key", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{"id": "42", "name": "test"})
+		val, ok := VarGet(r, "id")
+		assert.True(t, ok)
+		assert.Equal(t, "42", val)
+	})
+
+	t.Run("returns false for nil vars map", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, nil)
+		val, ok := VarGet(r, "id")
+		assert.False(t, ok)
+		assert.Empty(t, val)
+	})
+}
+
 func TestCurrentRoute(t *testing.T) {
 	t.Run("returns nil for request without route", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)

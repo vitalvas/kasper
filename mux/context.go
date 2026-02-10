@@ -26,6 +26,16 @@ func Vars(r *http.Request) map[string]string {
 	return nil
 }
 
+// VarGet returns the value of a single route variable by name and a boolean
+// indicating whether the variable exists.
+func VarGet(r *http.Request, name string) (string, bool) {
+	if rc, ok := r.Context().Value(ctxKey).(*routeContext); ok && rc.vars != nil {
+		val, exists := rc.vars[name]
+		return val, exists
+	}
+	return "", false
+}
+
 // CurrentRoute returns the matched route for the current request, if any.
 // This only works when called inside the handler of the matched route
 // because the matched route is stored in the request context.
@@ -55,9 +65,14 @@ func setRouteContext(r *http.Request, route *Route, vars map[string]string) *htt
 
 // RouteMatch stores information about a matched route.
 type RouteMatch struct {
-	Route   *Route
+	// Route is the matched route, if any.
+	Route *Route
+
+	// Handler is the handler to use for the matched route.
 	Handler http.Handler
-	Vars    map[string]string
+
+	// Vars contains the extracted path variables from the matched route.
+	Vars map[string]string
 
 	// MatchErr is set to ErrMethodMismatch when the request method
 	// does not match but the path does. This triggers a 405 response

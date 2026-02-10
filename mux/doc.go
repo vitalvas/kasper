@@ -18,14 +18,16 @@
 //   - Reverse URL building
 //   - Walking registered routes
 //
-// Router Example:
+// # Router
+//
+// Create a new router and register handlers:
 //
 //	r := mux.NewRouter()
 //	r.HandleFunc("/articles/{category}/{id:[0-9]+}", ArticleHandler)
 //	r.HandleFunc("/products/{key}", ProductHandler)
 //	http.Handle("/", r)
 //
-// Path Variables:
+// # Path Variables
 //
 // Routes can have variables enclosed in curly braces, optionally followed
 // by a colon and a regular expression pattern:
@@ -38,7 +40,7 @@
 //	vars := mux.Vars(r)
 //	category := vars["category"]
 //
-// Pattern Macros:
+// # Pattern Macros
 //
 // Instead of writing full regex patterns, you can use named macros
 // in variable definitions with the {name:macro} syntax:
@@ -63,7 +65,34 @@
 // If the name after the colon does not match a known macro, it is
 // treated as a raw regular expression for full backward compatibility.
 //
-// Subrouters:
+// # Matchers
+//
+// Routes support multiple matchers that can be combined:
+//
+//	// Method matching
+//	r.HandleFunc("/users", handler).Methods(http.MethodGet, http.MethodPost)
+//
+//	// Host matching
+//	r.Host("{subdomain}.example.com").Path("/api").HandlerFunc(handler)
+//
+//	// Header matching
+//	r.HandleFunc("/api", handler).Headers("Content-Type", "application/json")
+//
+//	// Header regex matching
+//	r.HandleFunc("/api", handler).HeadersRegexp("Content-Type", "application/.*")
+//
+//	// Query parameter matching
+//	r.HandleFunc("/search", handler).Queries("q", "{query}")
+//
+//	// Scheme matching
+//	r.HandleFunc("/secure", handler).Schemes("https")
+//
+//	// Custom matcher function
+//	r.HandleFunc("/custom", handler).MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+//	    return r.Header.Get("X-Custom") != ""
+//	})
+//
+// # Subrouters
 //
 // Subrouters can be used to group routes under a common path prefix,
 // host constraint, or other matchers:
@@ -71,16 +100,144 @@
 //	s := r.PathPrefix("/api").Subrouter()
 //	s.HandleFunc("/users", UsersHandler)
 //
-// Middleware:
+// Subrouters support their own NotFoundHandler. When a subrouter's prefix
+// matches but no sub-route matches, the subrouter's NotFoundHandler is used
+// instead of propagating the 404 to the parent router:
+//
+//	s := r.PathPrefix("/api").Subrouter()
+//	s.NotFoundHandler = http.HandlerFunc(apiNotFoundHandler)
+//	s.HandleFunc("/users", UsersHandler)
+//
+// # Error Handling
+//
+// The Router provides two handler fields for error responses:
+//
+// NotFoundHandler is called when no route matches a request. If nil,
+// http.NotFoundHandler() is used. Corresponds to 404 Not Found per
+// RFC 9110 Section 15.5.5.
+//
+// MethodNotAllowedHandler is called when a route matches the path but not
+// the method. If nil, a default 405 handler is used. The Allow header is
+// always set before this handler is invoked, per RFC 9110 Section 15.5.6.
+//
+//	r.NotFoundHandler = http.HandlerFunc(custom404Handler)
+//	r.MethodNotAllowedHandler = http.HandlerFunc(custom405Handler)
+//
+// # Route Matching
+//
+// Use Router.Match to test whether a request matches any registered route
+// without dispatching it:
+//
+//	var match mux.RouteMatch
+//	if r.Match(req, &match) {
+//	    // match.Route, match.Handler, match.Vars are populated
+//	}
+//
+// The RouteMatch.MatchErr field indicates the type of match failure:
+// ErrMethodMismatch for 405 errors and ErrNotFound for 404 errors.
+//
+// # Context Functions
+//
+// Vars returns all route variables for the current request as a map:
+//
+//	vars := mux.Vars(r)
+//
+// VarGet returns a single route variable by name and a boolean indicating
+// whether it exists:
+//
+//	id, ok := mux.VarGet(r, "id")
+//
+// CurrentRoute returns the matched route for the current request. This only
+// works when called inside the handler of the matched route:
+//
+//	route := mux.CurrentRoute(r)
+//	tpl, _ := route.GetPathTemplate()
+//
+// SetURLVars sets the URL variables for the given request, intended for
+// testing route handlers:
+//
+//	req = mux.SetURLVars(req, map[string]string{"id": "42"})
+//
+// # Middleware
 //
 // Middleware can be added to a router or subrouter to wrap matched handlers:
 //
-//	r.Use(loggingMiddleware)
+//	r.Use(mux.MiddlewareFunc(loggingMiddleware))
 //
-// URL Building:
+// Subrouter middleware is applied after parent router middleware.
+//
+// # CORS
+//
+// CORSMethodMiddleware automatically sets the Access-Control-Allow-Methods
+// response header based on registered route methods:
+//
+//	r.Use(mux.CORSMethodMiddleware(r))
+//
+// # URL Building
 //
 // Named routes support reverse URL building:
 //
 //	r.HandleFunc("/articles/{category}/{id:[0-9]+}", handler).Name("article")
 //	url, err := r.Get("article").URL("category", "tech", "id", "42")
+//
+// Routes also provide URLHost and URLPath for building individual URL
+// components:
+//
+//	hostURL, _ := route.URLHost("subdomain", "api")
+//	pathURL, _ := route.URLPath("category", "tech", "id", "42")
+//
+// # Route Inspection
+//
+// Routes expose methods to inspect their configuration:
+//
+//	tpl, _ := route.GetPathTemplate()     // e.g. "/articles/{category}/{id}"
+//	re, _ := route.GetPathRegexp()        // compiled path regexp string
+//	host, _ := route.GetHostTemplate()    // e.g. "{subdomain}.example.com"
+//	methods, _ := route.GetMethods()      // e.g. ["GET", "POST"]
+//	queries, _ := route.GetQueriesTemplates() // e.g. ["q={query}"]
+//	qre, _ := route.GetQueriesRegexp()    // compiled query regexp strings
+//	vars, _ := route.GetVarNames()        // e.g. ["category", "id"]
+//
+// # Strict Slash
+//
+// StrictSlash defines the trailing slash behavior for new routes. When true,
+// if the route path is "/path/", accessing "/path" will redirect to "/path/"
+// and vice versa. Uses 308 Permanent Redirect (RFC 7538) to preserve the
+// original request method:
+//
+//	r.StrictSlash(true)
+//
+// # Path Cleaning
+//
+// By default, the router cleans request paths by removing dot segments per
+// RFC 3986 Section 5.2.4. SkipClean disables this behavior:
+//
+//	r.SkipClean(true)
+//
+// UseEncodedPath tells the router to match the percent-encoded original path
+// (RFC 3986 Section 2.1) instead of the decoded path:
+//
+//	r.UseEncodedPath()
+//
+// # Build-Only Routes
+//
+// Routes can be marked as build-only, meaning they are used only for URL
+// building and not for request matching:
+//
+//	r.HandleFunc("/old/{id}", handler).Name("old").BuildOnly()
+//	url, _ := r.Get("old").URL("id", "42")
+//
+// # Walking Routes
+//
+// Walk traverses the router and all its subrouters, calling a function for
+// each registered route:
+//
+//	r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+//	    tpl, _ := route.GetPathTemplate()
+//	    fmt.Println(tpl)
+//	    return nil
+//	})
+//
+// Return SkipRouter from the walk function to skip descending into a
+// subrouter.
 package mux
