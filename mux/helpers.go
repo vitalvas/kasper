@@ -6,10 +6,11 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"sort"
 )
 
-// cleanPath returns the canonical path for p, eliminating . and .. elements.
-// Borrowed from the standard net/http package.
+// cleanPath returns the canonical path for p, eliminating . and .. elements
+// per RFC 3986 Section 5.2.4 (remove dot segments).
 func cleanPath(p string) string {
 	if p == "" {
 		return "/"
@@ -88,7 +89,8 @@ func matchInArray(arr []string, value string) bool {
 }
 
 // matchMapWithString returns true if the given key/value pairs exist in a
-// given map.
+// given map. When canonicalKey is true, keys are normalized per
+// RFC 7230 Section 3.2 (header field names are case-insensitive).
 func matchMapWithString(toCheck map[string]string, toMatch map[string][]string, canonicalKey bool) bool {
 	for k, v := range toCheck {
 		// Check if key exists.
@@ -107,7 +109,8 @@ func matchMapWithString(toCheck map[string]string, toMatch map[string][]string, 
 }
 
 // matchMapWithRegex returns true if the given key/regexp pairs match a
-// given map.
+// given map. When canonicalKey is true, keys are normalized per
+// RFC 7230 Section 3.2 (header field names are case-insensitive).
 func matchMapWithRegex(toCheck map[string]*regexp.Regexp, toMatch map[string][]string, canonicalKey bool) bool {
 	for k, v := range toCheck {
 		if canonicalKey {
@@ -134,7 +137,34 @@ func matchAnyRegexp(re *regexp.Regexp, values []string) bool {
 	return false
 }
 
+// allowedMethods returns the HTTP methods that match the request path
+// but not the request method. Used to populate the Allow header field
+// required by RFC 7231 Section 6.5.5 on 405 responses.
+// The returned slice is sorted alphabetically per RFC 7231 Section 7.4.1.
+func allowedMethods(router *Router, req *http.Request) []string {
+	methods := []string{
+		http.MethodGet, http.MethodHead, http.MethodPost,
+		http.MethodPut, http.MethodPatch, http.MethodDelete,
+		http.MethodOptions,
+	}
+	var allowed []string
+	for _, method := range methods {
+		if method == req.Method {
+			continue
+		}
+		testReq := req.Clone(req.Context())
+		testReq.Method = method
+		if router.Match(testReq, &RouteMatch{}) {
+			allowed = append(allowed, method)
+		}
+	}
+	sort.Strings(allowed)
+	return allowed
+}
+
 // methodNotAllowed replies to the request with an HTTP 405 method not allowed.
+// RFC 7231 Section 6.5.5: the Allow header is set by the caller (Router.ServeHTTP)
+// before this handler is invoked.
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusMethodNotAllowed)
 }
@@ -155,7 +185,9 @@ func subtractSlice(a, b []string) []string {
 	return result
 }
 
-// requestURIPath returns the escaped path from the request URI.
+// requestURIPath returns the percent-encoded path from the request URI
+// per RFC 3986 Section 2.1. Falls back to the decoded Path if RawPath
+// is empty.
 func requestURIPath(u *url.URL) string {
 	if u.RawPath != "" {
 		return u.RawPath

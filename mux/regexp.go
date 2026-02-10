@@ -174,6 +174,9 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 }
 
 // Match checks whether the compiled regexp matches the request.
+// Matches against the query (RFC 3986 Section 3.4), host
+// (RFC 7230 Section 5.4), or path (RFC 3986 Section 3.3) component
+// depending on the regexp type.
 func (r *routeRegexp) Match(req *http.Request, _ *RouteMatch) bool {
 	if r.matchQuery {
 		return r.matchQueryString(req)
@@ -184,6 +187,7 @@ func (r *routeRegexp) Match(req *http.Request, _ *RouteMatch) bool {
 	}
 
 	p := req.URL.Path
+	// Use percent-encoded path per RFC 3986 Section 2.1 when configured.
 	if r.useEncodedPath {
 		p = requestURIPath(req.URL)
 	}
@@ -221,7 +225,8 @@ func (r *routeRegexp) getURLVars(input string) map[string]string {
 	return vars
 }
 
-// matchQueryString matches the route against query parameter values.
+// matchQueryString matches the route against query parameter values
+// per RFC 3986 Section 3.4.
 func (r *routeRegexp) matchQueryString(req *http.Request) bool {
 	values := req.URL.Query()
 	vals, ok := values[r.queryKey]
@@ -280,7 +285,8 @@ func checkDuplicateVars(vars []string) error {
 	return nil
 }
 
-// getHost returns the lowercased hostname without port.
+// getHost returns the lowercased hostname without port per
+// RFC 7230 Section 5.4 (Host header field, host:port format).
 func getHost(r *http.Request) string {
 	host := r.Host
 	if i := strings.Index(host, ":"); i != -1 {

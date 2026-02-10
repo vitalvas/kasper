@@ -785,6 +785,52 @@ func TestRouteSchemeMatcher(t *testing.T) {
 	})
 }
 
+func TestRouteDuplicateMethods(t *testing.T) {
+	t.Run("second Methods call replaces first", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodGet).Methods(http.MethodPost)
+
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		match := &RouteMatch{}
+		assert.True(t, route.Match(req, match), "POST should match after Methods(POST) replaces Methods(GET)")
+
+		req = httptest.NewRequest(http.MethodGet, "/users", nil)
+		match = &RouteMatch{}
+		assert.False(t, route.Match(req, match), "GET should not match after Methods(POST) replaces Methods(GET)")
+	})
+
+	t.Run("second Methods call with multiple methods", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodGet, http.MethodPost).Methods(http.MethodPut, http.MethodPatch)
+
+		req := httptest.NewRequest(http.MethodPut, "/users", nil)
+		match := &RouteMatch{}
+		assert.True(t, route.Match(req, match), "PUT should match")
+
+		req = httptest.NewRequest(http.MethodPatch, "/users", nil)
+		match = &RouteMatch{}
+		assert.True(t, route.Match(req, match), "PATCH should match")
+
+		req = httptest.NewRequest(http.MethodGet, "/users", nil)
+		match = &RouteMatch{}
+		assert.False(t, route.Match(req, match), "GET should not match after replacement")
+	})
+
+	t.Run("GetMethods returns methods from last call", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Methods(http.MethodGet).Methods(http.MethodPost, http.MethodPut)
+
+		methods, err := route.GetMethods()
+		require.NoError(t, err)
+		assert.Equal(t, []string{http.MethodPost, http.MethodPut}, methods)
+	})
+}
+
 // --- Benchmarks ---
 
 func BenchmarkRouteMatchSimple(b *testing.B) {
@@ -934,6 +980,6 @@ func TestRouteSubrouter(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
 		router.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 	})
 }

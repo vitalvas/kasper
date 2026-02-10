@@ -1,6 +1,8 @@
 package mux
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
@@ -198,6 +200,36 @@ func TestRequestURIPath(t *testing.T) {
 	t.Run("falls back to Path", func(t *testing.T) {
 		u := &url.URL{Path: "/foo/bar"}
 		assert.Equal(t, "/foo/bar", requestURIPath(u))
+	})
+}
+
+func TestAllowedMethods(t *testing.T) {
+	t.Run("returns sorted methods that match the path", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost)
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
+		allowed := allowedMethods(r, req)
+		assert.Equal(t, []string{http.MethodGet, http.MethodPost}, allowed)
+	})
+
+	t.Run("excludes the request method", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet, http.MethodPost)
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		allowed := allowedMethods(r, req)
+		assert.Equal(t, []string{http.MethodPost}, allowed)
+	})
+
+	t.Run("returns empty for path with no matching routes", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+		req := httptest.NewRequest(http.MethodGet, "/posts", nil)
+		allowed := allowedMethods(r, req)
+		assert.Empty(t, allowed)
 	})
 }
 

@@ -143,7 +143,7 @@ func TestRouterStrictSlash(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 	})
 
 	t.Run("redirects to no-slash when template has no slash", func(t *testing.T) {
@@ -156,7 +156,33 @@ func TestRouterStrictSlash(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users/", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
+	})
+
+	t.Run("uses 308 to preserve method on redirect", func(t *testing.T) {
+		r := NewRouter()
+		r.StrictSlash(true)
+		r.HandleFunc("/users/", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
+	})
+
+	t.Run("redirect from slash to no-slash uses 308", func(t *testing.T) {
+		r := NewRouter()
+		r.StrictSlash(true)
+		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/users/", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 	})
 
 	t.Run("serves normally when slash matches", func(t *testing.T) {
@@ -738,6 +764,102 @@ func FuzzRouterMatch(f *testing.F) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.URL.Path = path
 		r.Match(req, &RouteMatch{})
+	})
+}
+
+func TestSubrouterMethodNotAllowed(t *testing.T) {
+	t.Run("subrouter returns 405 with multiple routes", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		sub.HandleFunc("/posts", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("subrouter returns 405 with multiple methods on same path", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("method mismatch propagates from subrouter", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/users", nil)
+		match := &RouteMatch{}
+		r.Match(req, match)
+		assert.Equal(t, ErrMethodMismatch, match.MatchErr)
+		assert.True(t, match.methodNotAllowed)
+	})
+}
+
+func TestMethodNotAllowedAllowHeader(t *testing.T) {
+	t.Run("sets sorted Allow header on 405", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "GET, POST", w.Header().Get("Allow"))
+	})
+
+	t.Run("sets Allow header with custom handler", func(t *testing.T) {
+		r := NewRouter()
+		r.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			fmt.Fprint(w, "custom 405")
+		})
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "GET, POST", w.Header().Get("Allow"))
+	})
+
+	t.Run("sets Allow header for subrouter routes", func(t *testing.T) {
+		r := NewRouter()
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "GET, POST", w.Header().Get("Allow"))
+	})
+
+	t.Run("always sets Allow header even when empty per RFC 7231", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			MatcherFunc(func(_ *http.Request, match *RouteMatch) bool {
+				match.MatchErr = ErrMethodMismatch
+				return false
+			})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "", w.Header().Get("Allow"))
 	})
 }
 

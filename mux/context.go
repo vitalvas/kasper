@@ -60,11 +60,13 @@ type RouteMatch struct {
 	Vars    map[string]string
 
 	// MatchErr is set to ErrMethodMismatch when the request method
-	// does not match but the path does.
+	// does not match but the path does. This triggers a 405 response
+	// per RFC 7231 Section 6.5.5.
 	MatchErr error
 
-	// methodNotAllowed is set to true when the request method does not
-	// match but the path does.
+	// methodNotAllowed signals that the router should respond with
+	// 405 Method Not Allowed (RFC 7231 Section 6.5.5) instead of
+	// 404 Not Found (RFC 7231 Section 6.5.4).
 	methodNotAllowed bool
 }
 
@@ -95,10 +97,12 @@ type BuildVarsFunc func(map[string]string) map[string]string
 type WalkFunc func(route *Route, router *Router, ancestors []*Route) error
 
 // ErrMethodMismatch is returned when the method in the request does not match
-// the method defined against the route.
+// the method defined against the route. Triggers 405 Method Not Allowed
+// per RFC 7231 Section 6.5.5.
 var ErrMethodMismatch = errors.New("method is not allowed")
 
-// ErrNotFound is returned when no route match is found.
+// ErrNotFound is returned when no route match is found. Triggers 404 Not Found
+// per RFC 7231 Section 6.5.4.
 var ErrNotFound = errors.New("no matching route was found")
 
 // SkipRouter is used as a return value from WalkFunc to indicate that the

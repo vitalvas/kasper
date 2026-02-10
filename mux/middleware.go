@@ -6,8 +6,8 @@ import (
 )
 
 // CORSMethodMiddleware automatically sets the Access-Control-Allow-Methods
-// response header on requests to allow all methods that are registered for
-// the route that matches the request.
+// response header (Fetch Standard, CORS protocol) on requests to allow all
+// methods that are registered for the route that matches the request.
 func CORSMethodMiddleware(r *Router) MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

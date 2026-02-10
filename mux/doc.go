@@ -1,6 +1,12 @@
 // Package mux implements a request router and dispatcher for matching
 // incoming HTTP requests to their respective handler functions.
 //
+// The package implements routing semantics based on:
+//   - RFC 9110 (HTTP Semantics, successor to RFC 7231)
+//   - RFC 9112 (HTTP/1.1, successor to RFC 7230)
+//   - RFC 3986 (URIs)
+//   - RFC 7538 (308 Permanent Redirect)
+//
 // This package provides a drop-in replacement for gorilla/mux with full
 // API compatibility, including:
 //   - Path variables with optional regexp constraints

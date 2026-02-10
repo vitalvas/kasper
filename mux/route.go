@@ -216,33 +216,43 @@ func (r *Route) GetName() string {
 	return r.name
 }
 
-// Path adds a path matcher to the route.
+// Path adds a path matcher to the route per RFC 3986 Section 3.3.
 func (r *Route) Path(tpl string) *Route {
 	r.err = r.addRegexpMatcher(tpl, regexpTypePath)
 	return r
 }
 
-// PathPrefix adds a path prefix matcher to the route.
+// PathPrefix adds a path prefix matcher to the route per RFC 3986 Section 3.3.
 func (r *Route) PathPrefix(tpl string) *Route {
 	r.err = r.addRegexpMatcher(tpl, regexpTypePrefix)
 	return r
 }
 
-// Host adds a host matcher to the route.
+// Host adds a host matcher to the route per RFC 7230 Section 5.4.
 func (r *Route) Host(tpl string) *Route {
 	r.err = r.addRegexpMatcher(tpl, regexpTypeHost)
 	return r
 }
 
-// Methods adds a method matcher to the route.
+// Methods adds a method matcher to the route. Methods are matched against
+// the request method token defined in RFC 7231 Section 4.
+// Calling Methods multiple times replaces the previous method matcher.
 func (r *Route) Methods(methods ...string) *Route {
 	for i, m := range methods {
 		methods[i] = strings.ToUpper(m)
 	}
+	// Remove existing method matchers to allow replacing via chained calls.
+	filtered := r.matchers[:0]
+	for _, m := range r.matchers {
+		if _, ok := m.(methodMatcher); !ok {
+			filtered = append(filtered, m)
+		}
+	}
+	r.matchers = filtered
 	return r.addMatcher(methodMatcher(methods))
 }
 
-// Headers adds a matcher for request header values.
+// Headers adds a matcher for request header values per RFC 7230 Section 3.2.
 // It accepts pairs of header names and values. The value can be empty,
 // in which case the matcher will only check for the header presence.
 func (r *Route) Headers(pairs ...string) *Route {
@@ -258,6 +268,7 @@ func (r *Route) Headers(pairs ...string) *Route {
 }
 
 // HeadersRegexp adds a matcher for request header values using regexps.
+// Header names are case-insensitive per RFC 7230 Section 3.2.
 func (r *Route) HeadersRegexp(pairs ...string) *Route {
 	if r.err == nil {
 		m, err := mapFromPairsToRegex(pairs...)
@@ -270,7 +281,7 @@ func (r *Route) HeadersRegexp(pairs ...string) *Route {
 	return r
 }
 
-// Queries adds matchers for URL query values.
+// Queries adds matchers for URL query values per RFC 3986 Section 3.4.
 func (r *Route) Queries(pairs ...string) *Route {
 	length, err := checkPairs(pairs...)
 	if err != nil {
@@ -285,7 +296,7 @@ func (r *Route) Queries(pairs ...string) *Route {
 	return r
 }
 
-// Schemes adds a matcher for URL schemes (e.g. "http", "https").
+// Schemes adds a matcher for URL schemes per RFC 7230 Section 2.7.
 func (r *Route) Schemes(schemes ...string) *Route {
 	for i, s := range schemes {
 		schemes[i] = strings.ToLower(s)
@@ -341,9 +352,10 @@ func (r *Route) BuildVarsFunc(f BuildVarsFunc) *Route {
 
 // --- URL Building ---
 
-// URL builds a URL for the route. It accepts a sequence of key/value pairs
-// for the route variables. Returns an error if the route has no path
-// template or if a variable is missing/invalid.
+// URL builds a URL for the route per RFC 3986 Section 5.3 (component
+// recomposition). It accepts a sequence of key/value pairs for the route
+// variables. Returns an error if the route has no path template or if a
+// variable is missing/invalid.
 func (r *Route) URL(pairs ...string) (*url.URL, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -374,7 +386,7 @@ func (r *Route) URL(pairs ...string) (*url.URL, error) {
 	}, nil
 }
 
-// URLHost builds the host part of the URL for the route.
+// URLHost builds the host part of the URL per RFC 3986 Section 3.2.2.
 func (r *Route) URLHost(pairs ...string) (*url.URL, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -400,7 +412,7 @@ func (r *Route) URLHost(pairs ...string) (*url.URL, error) {
 	}, nil
 }
 
-// URLPath builds the path part of the URL for the route.
+// URLPath builds the path part of the URL per RFC 3986 Section 3.3.
 func (r *Route) URLPath(pairs ...string) (*url.URL, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -561,7 +573,8 @@ func (r *Route) buildVars(m map[string]string) map[string]string {
 
 // --- Internal matchers ---
 
-// methodMatcher matches the request method against a list of methods.
+// methodMatcher matches the request method token (RFC 7231 Section 4)
+// against a list of allowed methods.
 type methodMatcher []string
 
 func (m methodMatcher) Match(r *http.Request, _ *RouteMatch) bool {
@@ -569,6 +582,7 @@ func (m methodMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 }
 
 // headerMatcher matches request headers against expected values.
+// Header names are case-insensitive per RFC 7230 Section 3.2.
 type headerMatcher map[string]string
 
 func (m headerMatcher) Match(r *http.Request, _ *RouteMatch) bool {
@@ -576,17 +590,21 @@ func (m headerMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 }
 
 // headerRegexMatcher matches request headers against regexp patterns.
+// Header names are case-insensitive per RFC 7230 Section 3.2.
 type headerRegexMatcher map[string]*regexp.Regexp
 
 func (m headerRegexMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 	return matchMapWithRegex(map[string]*regexp.Regexp(m), map[string][]string(r.Header), true)
 }
 
-// schemeMatcher matches the request URL scheme.
+// schemeMatcher matches the request URL scheme per RFC 7230 Section 2.7.
+// Schemes are case-insensitive per RFC 3986 Section 3.1.
 type schemeMatcher []string
 
 func (m schemeMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 	scheme := r.URL.Scheme
+	// Infer scheme from TLS state when not explicitly set,
+	// per RFC 7230 Section 2.7.1 (http) and 2.7.2 (https).
 	if scheme == "" {
 		if r.TLS != nil {
 			scheme = "https"
