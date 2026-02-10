@@ -104,8 +104,9 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		parts := strings.SplitN(tpl[idxs[i]+1:end-1], ":", 2)
 		name := parts[0]
 		patt := defaultPattern
+		var compiledVarR *regexp.Regexp
 		if len(parts) == 2 {
-			patt = parts[1]
+			patt, compiledVarR = expandMacro(parts[1])
 		}
 
 		if name == "" {
@@ -118,11 +119,14 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		reverse.WriteString("%s")
 
 		varsN = append(varsN, name)
-		varR, err := regexp.Compile(fmt.Sprintf("^%s$", patt))
-		if err != nil {
-			return nil, fmt.Errorf("mux: invalid pattern %q in variable %q: %w", patt, name, err)
+		if compiledVarR == nil {
+			var err error
+			compiledVarR, err = compileRegexp(fmt.Sprintf("^%s$", patt))
+			if err != nil {
+				return nil, fmt.Errorf("mux: invalid pattern %q in variable %q: %w", patt, name, err)
+			}
 		}
-		varsR = append(varsR, varR)
+		varsR = append(varsR, compiledVarR)
 	}
 
 	// Write the remaining literal text after the last variable.
@@ -149,7 +153,7 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		pattern.WriteByte('$')
 	}
 
-	reg, err := regexp.Compile(pattern.String())
+	reg, err := compileRegexp(pattern.String())
 	if err != nil {
 		return nil, err
 	}

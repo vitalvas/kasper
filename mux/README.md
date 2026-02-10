@@ -4,7 +4,7 @@ HTTP request multiplexer with URL pattern matching.
 
 ## Features
 
-- URL path variables with optional regex constraints (`{name}`, `{id:[0-9]+}`)
+- URL path variables with optional regex constraints (`{name}`, `{id:[0-9]+}`) or named macros (`{id:uuid}`)
 - Host, method, header, query, and scheme matchers
 - Subrouters with path prefix grouping
 - Middleware support
@@ -47,6 +47,39 @@ r.HandleFunc("/articles/{category}/{id:[0-9]+}", handler)
 vars := mux.Vars(r)
 category := vars["category"]
 id := vars["id"]
+```
+
+## Pattern Macros
+
+Instead of writing full regex patterns, use named macros for common types:
+
+```go
+r.HandleFunc("/users/{id:uuid}", handler)
+r.HandleFunc("/articles/{page:int}", handler)
+r.HandleFunc("/posts/{slug:slug}", handler)
+r.HandleFunc("/values/{val:float}", handler)
+r.HandleFunc("/events/{d:date}", handler)
+r.HandleFunc("/colors/{h:hex}", handler)
+r.HandleFunc("/names/{name:alpha}", handler)
+r.HandleFunc("/tokens/{token:alphanum}", handler)
+```
+
+| Macro | Description | Example match |
+|-------|-------------|---------------|
+| `uuid` | RFC 4122 UUID | `550e8400-e29b-41d4-a716-446655440000` |
+| `int` | Unsigned integer | `42` |
+| `float` | Decimal number | `3.14`, `42`, `.5` |
+| `slug` | URL-safe slug | `my-post-title` |
+| `alpha` | Alphabetic characters | `hello` |
+| `alphanum` | Alphanumeric characters | `abc123` |
+| `date` | ISO 8601 date | `2024-01-15` |
+| `hex` | Hexadecimal string | `deadBEEF` |
+
+If the name after the colon does not match a known macro, it is treated as a raw regular expression:
+
+```go
+// Raw regex still works
+r.HandleFunc("/items/{id:[0-9]{4}}", handler)
 ```
 
 ## Matchers

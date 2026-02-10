@@ -38,6 +38,30 @@
 //	vars := mux.Vars(r)
 //	category := vars["category"]
 //
+// Pattern Macros:
+//
+// Instead of writing full regex patterns, you can use named macros
+// in variable definitions with the {name:macro} syntax:
+//
+//	r.HandleFunc("/users/{id:uuid}", handler)
+//	r.HandleFunc("/articles/{page:int}", handler)
+//	r.HandleFunc("/posts/{slug:slug}", handler)
+//	r.HandleFunc("/events/{d:date}", handler)
+//
+// Available macros:
+//
+//	uuid     - RFC 4122 UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)
+//	int      - unsigned integer (e.g. 42)
+//	float    - decimal number (e.g. 3.14, 42, .5)
+//	slug     - URL-safe slug (e.g. my-post-title)
+//	alpha    - alphabetic characters (e.g. hello)
+//	alphanum - alphanumeric characters (e.g. abc123)
+//	date     - ISO 8601 date (e.g. 2024-01-15)
+//	hex      - hexadecimal string (e.g. deadBEEF)
+//
+// If the name after the colon does not match a known macro, it is
+// treated as a raw regular expression for full backward compatibility.
+//
 // Subrouters:
 //
 // Subrouters can be used to group routes under a common path prefix,

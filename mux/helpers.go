@@ -57,7 +57,7 @@ func mapFromPairsToRegex(pairs ...string) (map[string]*regexp.Regexp, error) {
 	}
 	m := make(map[string]*regexp.Regexp, length)
 	for i := 0; i < len(pairs); i += 2 {
-		regex, err := regexp.Compile(pairs[i+1])
+		regex, err := compileRegexp(pairs[i+1])
 		if err != nil {
 			return nil, err
 		}
