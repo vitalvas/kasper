@@ -219,6 +219,25 @@
 //
 //	r.UseEncodedPath()
 //
+// # Request Binding
+//
+// BindJSON and BindXML decode a request body into a Go value. BindJSON
+// rejects unknown fields by default; pass true to allow them. Both
+// functions reject trailing data after the first value.
+//
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//	    var req CreateUserRequest
+//	    if err := mux.BindJSON(r, &req); err != nil {
+//	        http.Error(w, err.Error(), http.StatusBadRequest)
+//	        return
+//	    }
+//	    // use req
+//	}
+//
+// To allow unknown fields:
+//
+//	err := mux.BindJSON(r, &req, true)
+//
 // # Response Helpers
 //
 // ResponseJSON and ResponseXML encode a value and write it to the response

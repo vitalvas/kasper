@@ -380,6 +380,43 @@ To match the percent-encoded original path instead of the decoded path:
 r.UseEncodedPath()
 ```
 
+## Request Binding
+
+`BindJSON` and `BindXML` decode a request body into a Go value. `BindJSON` rejects unknown fields by default; pass `true` to allow them. Both functions reject trailing data after the first value.
+
+```go
+r.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+    var req CreateUserRequest
+    if err := mux.BindJSON(r, &req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    // use req
+}).Methods(http.MethodPost)
+```
+
+To allow unknown fields:
+
+```go
+err := mux.BindJSON(r, &req, true)
+```
+
+```go
+r.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+    var req CreateUserRequest
+    if err := mux.BindXML(r, &req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    // use req
+}).Methods(http.MethodPost)
+```
+
+| Function | Rejects unknown fields | Rejects trailing data |
+|----------|------------------------|-----------------------|
+| `BindJSON` | Yes (default), pass `true` to allow | Yes |
+| `BindXML` | No (not supported by `encoding/xml`) | Yes |
+
 ## Response Helpers
 
 `ResponseJSON` and `ResponseXML` encode a value and write it to the response with the appropriate `Content-Type` header. If encoding fails, an HTTP 500 Internal Server Error is written instead.
