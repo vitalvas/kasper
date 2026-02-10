@@ -12,7 +12,6 @@ HTTP request multiplexer with URL pattern matching.
 - Custom error handlers (404, 405)
 - Strict slash and path cleaning options
 - Walk function for route inspection
-- CORS method middleware
 
 ## Installation
 
@@ -308,14 +307,6 @@ sub := r.PathPrefix("/api").Subrouter()
 sub.Use(mux.MiddlewareFunc(subMiddleware))
 // Order: parentMiddleware -> subMiddleware -> handler
 ```
-
-## CORS
-
-```go
-r.Use(mux.CORSMethodMiddleware(r))
-```
-
-Sets `Access-Control-Allow-Methods` header based on registered route methods.
 
 ## Named Routes and URL Building
 

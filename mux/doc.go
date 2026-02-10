@@ -166,13 +166,6 @@
 //
 // Subrouter middleware is applied after parent router middleware.
 //
-// # CORS
-//
-// CORSMethodMiddleware automatically sets the Access-Control-Allow-Methods
-// response header based on registered route methods:
-//
-//	r.Use(mux.CORSMethodMiddleware(r))
-//
 // # URL Building
 //
 // Named routes support reverse URL building:

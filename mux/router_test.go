@@ -983,3 +983,149 @@ func TestRouterMatcherFunc(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
+
+func TestRouterUse(t *testing.T) {
+	t.Run("applies single middleware", func(t *testing.T) {
+		r := NewRouter()
+		var order []string
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "mw")
+				next.ServeHTTP(w, req)
+			})
+		})
+		r.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, []string{"mw", "handler"}, order)
+	})
+
+	t.Run("applies multiple middleware in order", func(t *testing.T) {
+		r := NewRouter()
+		var order []string
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "first")
+				next.ServeHTTP(w, req)
+			})
+		})
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "second")
+				next.ServeHTTP(w, req)
+			})
+		})
+		r.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, []string{"first", "second", "handler"}, order)
+	})
+
+	t.Run("middleware does not apply to not-found", func(t *testing.T) {
+		r := NewRouter()
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("X-MW", "yes")
+				next.ServeHTTP(w, req)
+			})
+		})
+		r.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/notfound", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Empty(t, w.Header().Get("X-MW"))
+	})
+
+	t.Run("middleware can modify response", func(t *testing.T) {
+		r := NewRouter()
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("X-Middleware", "applied")
+				next.ServeHTTP(w, req)
+			})
+		})
+		r.HandleFunc("/test", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "applied", w.Header().Get("X-Middleware"))
+		assert.Equal(t, "ok", w.Body.String())
+	})
+
+	t.Run("middleware can short-circuit", func(t *testing.T) {
+		r := NewRouter()
+		r.Use(func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		})
+		r.HandleFunc("/test", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "should not reach")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Empty(t, w.Body.String())
+	})
+}
+
+func TestSubrouterMiddlewareOrder(t *testing.T) {
+	t.Run("applies parent then subrouter middleware", func(t *testing.T) {
+		r := NewRouter()
+		var order []string
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "parent")
+				next.ServeHTTP(w, req)
+			})
+		})
+
+		sub := r.PathPrefix("/api").Subrouter()
+		sub.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, "sub")
+				next.ServeHTTP(w, req)
+			})
+		})
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, []string{"parent", "sub", "handler"}, order)
+	})
+}
+
+func BenchmarkMiddlewareChain(b *testing.B) {
+	r := NewRouter()
+	for range 5 {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				next.ServeHTTP(w, req)
+			})
+		})
+	}
+	r.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	b.ResetTimer()
+	for b.Loop() {
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}
