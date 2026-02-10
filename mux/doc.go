@@ -219,6 +219,22 @@
 //
 //	r.UseEncodedPath()
 //
+// # Response Helpers
+//
+// ResponseJSON and ResponseXML encode a value and write it to the response
+// with the appropriate Content-Type header. If encoding fails, an HTTP 500
+// Internal Server Error is written instead.
+//
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//	    data := map[string]string{"message": "hello"}
+//	    mux.ResponseJSON(w, http.StatusOK, data)
+//	}
+//
+//	func xmlHandler(w http.ResponseWriter, r *http.Request) {
+//	    data := MyStruct{Name: "example"}
+//	    mux.ResponseXML(w, http.StatusOK, data)
+//	}
+//
 // # Build-Only Routes
 //
 // Routes can be marked as build-only, meaning they are used only for URL

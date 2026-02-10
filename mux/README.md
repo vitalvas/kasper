@@ -380,6 +380,29 @@ To match the percent-encoded original path instead of the decoded path:
 r.UseEncodedPath()
 ```
 
+## Response Helpers
+
+`ResponseJSON` and `ResponseXML` encode a value and write it to the response with the appropriate `Content-Type` header. If encoding fails, an HTTP 500 Internal Server Error is written instead.
+
+```go
+r.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+    user := User{Name: "Alice", Age: 30}
+    mux.ResponseJSON(w, http.StatusOK, user)
+})
+```
+
+```go
+r.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+    user := User{XMLName: xml.Name{Local: "user"}, Name: "Alice", Age: 30}
+    mux.ResponseXML(w, http.StatusOK, user)
+})
+```
+
+| Function | Content-Type |
+|----------|--------------|
+| `ResponseJSON` | `application/json` |
+| `ResponseXML` | `application/xml` |
+
 ## Build-Only Routes
 
 Routes can be marked as build-only, used only for URL building and not for request matching:
