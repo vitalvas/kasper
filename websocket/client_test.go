@@ -13,7 +13,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/http2"
 )
+
+// roundTripperFunc adapts a function to http.RoundTripper for testing.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestDialerDialURLParsing(t *testing.T) {
 	tests := []struct {
@@ -453,6 +461,12 @@ func TestDialerIsHTTP2(t *testing.T) {
 		client := &http.Client{Transport: &http.Transport{}}
 		assert.False(t, d.isHTTP2(client))
 	})
+
+	t.Run("http2.Transport is HTTP/2", func(t *testing.T) {
+		d := &Dialer{}
+		client := &http.Client{Transport: &http2.Transport{}}
+		assert.True(t, d.isHTTP2(client))
+	})
 }
 
 func TestDialerNilHTTPClient(t *testing.T) {
@@ -868,6 +882,152 @@ func TestDialerDoHandshakeWithTransport(t *testing.T) {
 		conn, _, err := d.Dial(wsURL, nil)
 		require.NoError(t, err)
 		defer conn.Close()
+
+		assert.True(t, conn.compressionEnabled)
+	})
+}
+
+func TestDialerDialHTTP2(t *testing.T) {
+	t.Run("Sends extended CONNECT request", func(t *testing.T) {
+		server, client := net.Pipe()
+
+		d := &Dialer{
+			Subprotocols:      []string{"chat"},
+			EnableCompression: true,
+		}
+
+		h := make(http.Header)
+		h.Set("Sec-WebSocket-Protocol", "chat")
+
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				assert.Equal(t, http.MethodConnect, req.Method)
+				assert.Equal(t, "websocket", req.Proto)
+				assert.Equal(t, "example.com", req.Host)
+				assert.Equal(t, "chat", req.Header.Get("Sec-WebSocket-Protocol"))
+				assert.Contains(t, req.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
+				assert.Equal(t, "custom-value", req.Header.Get("X-Custom"))
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     h,
+					Body:       server,
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		headers := make(http.Header)
+		headers.Set("X-Custom", "custom-value")
+
+		conn, resp, err := d.dialHTTP2(context.Background(), httpClient, u, headers)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		defer conn.Close()
+		defer client.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "chat", conn.Subprotocol())
+	})
+
+	t.Run("Transport error", func(t *testing.T) {
+		d := &Dialer{}
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return nil, net.ErrClosed
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		_, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("Non-200 response", func(t *testing.T) {
+		d := &Dialer{}
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusForbidden,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		_, resp, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+		require.NotNil(t, resp)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	})
+
+	t.Run("Wrong subprotocol", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+
+		h := make(http.Header)
+		h.Set("Sec-WebSocket-Protocol", "wrong-proto")
+
+		d := &Dialer{Subprotocols: []string{"expected-proto"}}
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     h,
+					Body:       server,
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		_, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("Body not ReadWriteCloser", func(t *testing.T) {
+		d := &Dialer{}
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		_, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not ReadWriteCloser")
+	})
+
+	t.Run("With compression", func(t *testing.T) {
+		server, client := net.Pipe()
+
+		h := make(http.Header)
+		h.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+
+		d := &Dialer{EnableCompression: true}
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     h,
+					Body:       server,
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		conn, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		defer conn.Close()
+		defer client.Close()
 
 		assert.True(t, conn.compressionEnabled)
 	})

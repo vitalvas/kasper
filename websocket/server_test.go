@@ -482,6 +482,131 @@ func TestUpgraderUpgrade(t *testing.T) {
 	})
 }
 
+func TestUpgraderUpgradeHTTP2(t *testing.T) {
+	t.Run("Invalid protocol pseudo-header", func(t *testing.T) {
+		u := &Upgrader{}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
+		r.ProtoMajor = 2
+		r.Proto = "not-websocket"
+
+		conn, err := u.Upgrade(w, r, nil)
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Origin check fails", func(t *testing.T) {
+		u := &Upgrader{
+			CheckOrigin: func(_ *http.Request) bool { return false },
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
+		r.ProtoMajor = 2
+		r.Proto = "websocket"
+
+		conn, err := u.Upgrade(w, r, nil)
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("Successful upgrade", func(t *testing.T) {
+		u := &Upgrader{
+			CheckOrigin:  func(_ *http.Request) bool { return true },
+			Subprotocols: []string{"chat"},
+		}
+
+		server, client := net.Pipe()
+
+		hijacker := &mockHijacker{
+			ResponseWriter: httptest.NewRecorder(),
+			conn:           server,
+			reader:         bufio.NewReader(strings.NewReader("")),
+			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		}
+
+		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
+		r.ProtoMajor = 2
+		r.Proto = "websocket"
+		r.Header.Set("Sec-WebSocket-Protocol", "chat")
+
+		responseHeader := make(http.Header)
+		responseHeader.Set("X-Custom", "value")
+
+		conn, err := u.Upgrade(hijacker, r, responseHeader)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		defer conn.Close()
+		defer client.Close()
+
+		assert.Equal(t, "chat", conn.Subprotocol())
+		assert.True(t, conn.isServer)
+
+		recorder := hijacker.ResponseWriter.(*httptest.ResponseRecorder)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+	})
+
+	t.Run("With compression", func(t *testing.T) {
+		u := &Upgrader{
+			CheckOrigin:       func(_ *http.Request) bool { return true },
+			EnableCompression: true,
+		}
+
+		server, client := net.Pipe()
+
+		hijacker := &mockHijacker{
+			ResponseWriter: httptest.NewRecorder(),
+			conn:           server,
+			reader:         bufio.NewReader(strings.NewReader("")),
+			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		}
+
+		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
+		r.ProtoMajor = 2
+		r.Proto = "websocket"
+		r.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+
+		conn, err := u.Upgrade(hijacker, r, nil)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		defer conn.Close()
+		defer client.Close()
+
+		assert.True(t, conn.compressionEnabled)
+	})
+
+	t.Run("With response headers", func(t *testing.T) {
+		u := &Upgrader{
+			CheckOrigin: func(_ *http.Request) bool { return true },
+		}
+
+		server, client := net.Pipe()
+
+		hijacker := &mockHijacker{
+			ResponseWriter: httptest.NewRecorder(),
+			conn:           server,
+			reader:         bufio.NewReader(strings.NewReader("")),
+			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		}
+
+		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
+		r.ProtoMajor = 2
+		r.Proto = "websocket"
+
+		responseHeader := make(http.Header)
+		responseHeader.Set("X-Custom", "custom-value")
+
+		conn, err := u.Upgrade(hijacker, r, responseHeader)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		defer conn.Close()
+		defer client.Close()
+
+		assert.Equal(t, "custom-value", hijacker.Header().Get("X-Custom"))
+	})
+}
+
 func TestUpgraderReturnError(t *testing.T) {
 	t.Run("Custom error handler", func(t *testing.T) {
 		var calledStatus int
