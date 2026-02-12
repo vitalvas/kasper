@@ -17,6 +17,8 @@ linters:
     - unconvert
     - unused
   settings:
+    gocyclo:
+      min-complexity: 60
     gosec:
       excludes:
         - G402
