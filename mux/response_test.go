@@ -15,41 +15,70 @@ func TestResponseJSON(t *testing.T) {
 		Value int    `json:"value"`
 	}
 
-	t.Run("writes JSON with status code", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		ResponseJSON(w, http.StatusCreated, item{Name: "test", Value: 42})
+	tests := []struct {
+		name       string
+		status     int
+		data       any
+		wantStatus int
+		wantCT     string
+		wantNotCT  string
+		wantBody   string
+		jsonEq     bool
+	}{
+		{
+			name:       "writes JSON with status code",
+			status:     http.StatusCreated,
+			data:       item{Name: "test", Value: 42},
+			wantStatus: http.StatusCreated,
+			wantCT:     "application/json",
+			wantBody:   `{"name":"test","value":42}`,
+			jsonEq:     true,
+		},
+		{
+			name:       "writes JSON array",
+			status:     http.StatusOK,
+			data:       []item{{Name: "a", Value: 1}, {Name: "b", Value: 2}},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/json",
+			wantBody:   `[{"name":"a","value":1},{"name":"b","value":2}]`,
+			jsonEq:     true,
+		},
+		{
+			name:       "writes null for nil",
+			status:     http.StatusOK,
+			data:       nil,
+			wantStatus: http.StatusOK,
+			wantCT:     "application/json",
+			wantBody:   "null\n",
+		},
+		{
+			name:       "writes 500 on encode error",
+			status:     http.StatusOK,
+			data:       make(chan int),
+			wantStatus: http.StatusInternalServerError,
+			wantNotCT:  "application/json",
+		},
+	}
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
-		assert.JSONEq(t, `{"name":"test","value":42}`, w.Body.String())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ResponseJSON(w, tt.status, tt.data)
 
-	t.Run("writes JSON array", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		items := []item{{Name: "a", Value: 1}, {Name: "b", Value: 2}}
-		ResponseJSON(w, http.StatusOK, items)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
-		assert.JSONEq(t, `[{"name":"a","value":1},{"name":"b","value":2}]`, w.Body.String())
-	})
-
-	t.Run("writes null for nil", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		ResponseJSON(w, http.StatusOK, nil)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
-		assert.Equal(t, "null\n", w.Body.String())
-	})
-
-	t.Run("writes 500 on encode error", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		ResponseJSON(w, http.StatusOK, make(chan int))
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.NotEqual(t, "application/json", w.Header().Get("Content-Type"))
-	})
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantCT != "" {
+				assert.Equal(t, tt.wantCT, w.Header().Get("Content-Type"))
+			}
+			if tt.wantNotCT != "" {
+				assert.NotEqual(t, tt.wantNotCT, w.Header().Get("Content-Type"))
+			}
+			if tt.jsonEq {
+				assert.JSONEq(t, tt.wantBody, w.Body.String())
+			} else if tt.wantBody != "" {
+				assert.Equal(t, tt.wantBody, w.Body.String())
+			}
+		})
+	}
 }
 
 func TestResponseXML(t *testing.T) {
@@ -59,38 +88,68 @@ func TestResponseXML(t *testing.T) {
 		Value   int      `xml:"value"`
 	}
 
-	t.Run("writes XML with status code", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		ResponseXML(w, http.StatusCreated, item{Name: "test", Value: 42})
+	type items struct {
+		XMLName xml.Name `xml:"items"`
+		Items   []item   `xml:"item"`
+	}
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
-		assert.Contains(t, w.Body.String(), "<item>")
-		assert.Contains(t, w.Body.String(), "<name>test</name>")
-		assert.Contains(t, w.Body.String(), "<value>42</value>")
-	})
+	tests := []struct {
+		name         string
+		status       int
+		data         any
+		wantStatus   int
+		wantCT       string
+		wantNotCT    string
+		wantContains []string
+	}{
+		{
+			name:       "writes XML with status code",
+			status:     http.StatusCreated,
+			data:       item{Name: "test", Value: 42},
+			wantStatus: http.StatusCreated,
+			wantCT:     "application/xml",
+			wantContains: []string{
+				"<item>",
+				"<name>test</name>",
+				"<value>42</value>",
+			},
+		},
+		{
+			name:       "writes XML array",
+			status:     http.StatusOK,
+			data:       items{Items: []item{{Name: "a", Value: 1}, {Name: "b", Value: 2}}},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/xml",
+			wantContains: []string{
+				"<items>",
+				"<name>a</name>",
+				"<name>b</name>",
+			},
+		},
+		{
+			name:       "writes 500 on encode error",
+			status:     http.StatusOK,
+			data:       make(chan int),
+			wantStatus: http.StatusInternalServerError,
+			wantNotCT:  "application/xml",
+		},
+	}
 
-	t.Run("writes XML array", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		type items struct {
-			XMLName xml.Name `xml:"items"`
-			Items   []item   `xml:"item"`
-		}
-		data := items{Items: []item{{Name: "a", Value: 1}, {Name: "b", Value: 2}}}
-		ResponseXML(w, http.StatusOK, data)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ResponseXML(w, tt.status, tt.data)
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
-		assert.Contains(t, w.Body.String(), "<items>")
-		assert.Contains(t, w.Body.String(), "<name>a</name>")
-		assert.Contains(t, w.Body.String(), "<name>b</name>")
-	})
-
-	t.Run("writes 500 on encode error", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		ResponseXML(w, http.StatusOK, make(chan int))
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.NotEqual(t, "application/xml", w.Header().Get("Content-Type"))
-	})
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantCT != "" {
+				assert.Equal(t, tt.wantCT, w.Header().Get("Content-Type"))
+			}
+			if tt.wantNotCT != "" {
+				assert.NotEqual(t, tt.wantNotCT, w.Header().Get("Content-Type"))
+			}
+			for _, s := range tt.wantContains {
+				assert.Contains(t, w.Body.String(), s)
+			}
+		})
+	}
 }

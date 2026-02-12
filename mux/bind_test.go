@@ -17,67 +17,71 @@ func TestBindJSON(t *testing.T) {
 		Value int    `json:"value"`
 	}
 
-	t.Run("decodes valid JSON", func(t *testing.T) {
-		body := `{"name":"test","value":42}`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	tests := []struct {
+		name         string
+		body         string
+		allowUnknown bool
+		expectErr    bool
+		errContains  string
+		expected     *item
+	}{
+		{
+			name:     "decodes valid JSON",
+			body:     `{"name":"test","value":42}`,
+			expected: &item{Name: "test", Value: 42},
+		},
+		{
+			name:      "returns error for invalid JSON",
+			body:      `{invalid`,
+			expectErr: true,
+		},
+		{
+			name:      "returns error for unknown fields",
+			body:      `{"name":"test","value":42,"extra":"field"}`,
+			expectErr: true,
+		},
+		{
+			name:         "allows unknown fields when opted in",
+			body:         `{"name":"test","value":42,"extra":"field"}`,
+			allowUnknown: true,
+			expected:     &item{Name: "test", Value: 42},
+		},
+		{
+			name:        "returns error for trailing data",
+			body:        `{"name":"a","value":1}{"name":"b","value":2}`,
+			expectErr:   true,
+			errContains: "trailing data",
+		},
+		{
+			name:      "returns error for empty body",
+			body:      "",
+			expectErr: true,
+		},
+	}
 
-		var got item
-		err := BindJSON(r, &got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
-		require.NoError(t, err)
-		assert.Equal(t, item{Name: "test", Value: 42}, got)
-	})
+			var got item
+			var err error
+			if tt.allowUnknown {
+				err = BindJSON(r, &got, true)
+			} else {
+				err = BindJSON(r, &got)
+			}
 
-	t.Run("returns error for invalid JSON", func(t *testing.T) {
-		body := `{invalid`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-
-		var got item
-		err := BindJSON(r, &got)
-
-		assert.Error(t, err)
-	})
-
-	t.Run("returns error for unknown fields", func(t *testing.T) {
-		body := `{"name":"test","value":42,"extra":"field"}`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-
-		var got item
-		err := BindJSON(r, &got)
-
-		assert.Error(t, err)
-	})
-
-	t.Run("allows unknown fields when opted in", func(t *testing.T) {
-		body := `{"name":"test","value":42,"extra":"field"}`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-
-		var got item
-		err := BindJSON(r, &got, true)
-
-		require.NoError(t, err)
-		assert.Equal(t, item{Name: "test", Value: 42}, got)
-	})
-
-	t.Run("returns error for trailing data", func(t *testing.T) {
-		body := `{"name":"a","value":1}{"name":"b","value":2}`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-
-		var got item
-		err := BindJSON(r, &got)
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "trailing data")
-	})
-
-	t.Run("returns error for empty body", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-
-		var got item
-		err := BindJSON(r, &got)
-
-		assert.Error(t, err)
-	})
+			if tt.expectErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, *tt.expected, got)
+			}
+		})
+	}
 }
 
 func TestBindXML(t *testing.T) {
@@ -87,45 +91,55 @@ func TestBindXML(t *testing.T) {
 		Value   int      `xml:"value"`
 	}
 
-	t.Run("decodes valid XML", func(t *testing.T) {
-		body := `<item><name>test</name><value>42</value></item>`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	tests := []struct {
+		name        string
+		body        string
+		expectErr   bool
+		errContains string
+		wantName    string
+		wantValue   int
+	}{
+		{
+			name:      "decodes valid XML",
+			body:      `<item><name>test</name><value>42</value></item>`,
+			wantName:  "test",
+			wantValue: 42,
+		},
+		{
+			name:      "returns error for invalid XML",
+			body:      `<item><name>test</`,
+			expectErr: true,
+		},
+		{
+			name:        "returns error for trailing data",
+			body:        `<item><name>a</name><value>1</value></item><item><name>b</name><value>2</value></item>`,
+			expectErr:   true,
+			errContains: "trailing data",
+		},
+		{
+			name:      "returns error for empty body",
+			body:      "",
+			expectErr: true,
+		},
+	}
 
-		var got item
-		err := BindXML(r, &got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
-		require.NoError(t, err)
-		assert.Equal(t, "test", got.Name)
-		assert.Equal(t, 42, got.Value)
-	})
+			var got item
+			err := BindXML(r, &got)
 
-	t.Run("returns error for invalid XML", func(t *testing.T) {
-		body := `<item><name>test</`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-
-		var got item
-		err := BindXML(r, &got)
-
-		assert.Error(t, err)
-	})
-
-	t.Run("returns error for trailing data", func(t *testing.T) {
-		body := `<item><name>a</name><value>1</value></item><item><name>b</name><value>2</value></item>`
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-
-		var got item
-		err := BindXML(r, &got)
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "trailing data")
-	})
-
-	t.Run("returns error for empty body", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-
-		var got item
-		err := BindXML(r, &got)
-
-		assert.Error(t, err)
-	})
+			if tt.expectErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantName, got.Name)
+				assert.Equal(t, tt.wantValue, got.Value)
+			}
+		})
+	}
 }

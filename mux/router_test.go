@@ -133,70 +133,34 @@ func TestRouterServeHTTP(t *testing.T) {
 }
 
 func TestRouterStrictSlash(t *testing.T) {
-	t.Run("redirects to slash when template has slash", func(t *testing.T) {
-		r := NewRouter()
-		r.StrictSlash(true)
-		r.HandleFunc("/users/", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(w, "ok")
+	tests := []struct {
+		name       string
+		tplPath    string
+		reqMethod  string
+		reqPath    string
+		wantStatus int
+	}{
+		{name: "redirects to slash when template has slash", tplPath: "/users/", reqMethod: http.MethodGet, reqPath: "/users", wantStatus: http.StatusPermanentRedirect},
+		{name: "redirects to no-slash when template has no slash", tplPath: "/users", reqMethod: http.MethodGet, reqPath: "/users/", wantStatus: http.StatusPermanentRedirect},
+		{name: "uses 308 to preserve method on redirect", tplPath: "/users/", reqMethod: http.MethodPost, reqPath: "/users", wantStatus: http.StatusPermanentRedirect},
+		{name: "redirect from slash to no-slash uses 308", tplPath: "/users", reqMethod: http.MethodGet, reqPath: "/users/", wantStatus: http.StatusPermanentRedirect},
+		{name: "serves normally when slash matches", tplPath: "/users/", reqMethod: http.MethodGet, reqPath: "/users/", wantStatus: http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRouter()
+			r.StrictSlash(true)
+			r.HandleFunc(tt.tplPath, func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "ok")
+			})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.reqMethod, tt.reqPath, nil)
+			r.ServeHTTP(w, req)
+			assert.Equal(t, tt.wantStatus, w.Code)
 		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/users", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
-	})
-
-	t.Run("redirects to no-slash when template has no slash", func(t *testing.T) {
-		r := NewRouter()
-		r.StrictSlash(true)
-		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(w, "ok")
-		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/users/", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
-	})
-
-	t.Run("uses 308 to preserve method on redirect", func(t *testing.T) {
-		r := NewRouter()
-		r.StrictSlash(true)
-		r.HandleFunc("/users/", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(w, "ok")
-		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/users", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
-	})
-
-	t.Run("redirect from slash to no-slash uses 308", func(t *testing.T) {
-		r := NewRouter()
-		r.StrictSlash(true)
-		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(w, "ok")
-		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/users/", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
-	})
-
-	t.Run("serves normally when slash matches", func(t *testing.T) {
-		r := NewRouter()
-		r.StrictSlash(true)
-		r.HandleFunc("/users/", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(w, "ok")
-		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/users/", nil)
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
+	}
 }
 
 func TestRouterSkipClean(t *testing.T) {

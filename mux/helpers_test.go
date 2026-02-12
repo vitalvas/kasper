@@ -35,36 +35,62 @@ func TestCleanPath(t *testing.T) {
 }
 
 func TestCheckPairs(t *testing.T) {
-	t.Run("valid pairs", func(t *testing.T) {
-		n, err := checkPairs("a", "b", "c", "d")
-		require.NoError(t, err)
-		assert.Equal(t, 2, n)
-	})
+	tests := []struct {
+		name      string
+		input     []string
+		expectedN int
+		expectErr bool
+	}{
+		{name: "valid pairs", input: []string{"a", "b", "c", "d"}, expectedN: 2, expectErr: false},
+		{name: "empty pairs", input: []string{}, expectedN: 0, expectErr: false},
+		{name: "odd number of pairs", input: []string{"a", "b", "c"}, expectedN: 0, expectErr: true},
+	}
 
-	t.Run("empty pairs", func(t *testing.T) {
-		n, err := checkPairs()
-		require.NoError(t, err)
-		assert.Equal(t, 0, n)
-	})
-
-	t.Run("odd number of pairs", func(t *testing.T) {
-		_, err := checkPairs("a", "b", "c")
-		assert.Error(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, err := checkPairs(tt.input...)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedN, n)
+			}
+		})
+	}
 }
 
 func TestMapFromPairsToString(t *testing.T) {
-	t.Run("valid pairs", func(t *testing.T) {
-		m, err := mapFromPairsToString("key1", "val1", "key2", "val2")
-		require.NoError(t, err)
-		assert.Equal(t, "val1", m["key1"])
-		assert.Equal(t, "val2", m["key2"])
-	})
+	tests := []struct {
+		name      string
+		input     []string
+		expected  map[string]string
+		expectErr bool
+	}{
+		{
+			name:      "valid pairs",
+			input:     []string{"key1", "val1", "key2", "val2"},
+			expected:  map[string]string{"key1": "val1", "key2": "val2"},
+			expectErr: false,
+		},
+		{
+			name:      "odd number of pairs returns error",
+			input:     []string{"key1"},
+			expected:  nil,
+			expectErr: true,
+		},
+	}
 
-	t.Run("odd number of pairs returns error", func(t *testing.T) {
-		_, err := mapFromPairsToString("key1")
-		assert.Error(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := mapFromPairsToString(tt.input...)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, m)
+			}
+		})
+	}
 }
 
 func TestMapFromPairsToRegex(t *testing.T) {
@@ -88,119 +114,188 @@ func TestMapFromPairsToRegex(t *testing.T) {
 }
 
 func TestUniqueVars(t *testing.T) {
-	t.Run("no duplicates", func(t *testing.T) {
-		err := uniqueVars([]string{"a", "b"}, []string{"c", "d"})
-		assert.NoError(t, err)
-	})
+	tests := []struct {
+		name      string
+		a         []string
+		b         []string
+		expectErr bool
+	}{
+		{name: "no duplicates", a: []string{"a", "b"}, b: []string{"c", "d"}, expectErr: false},
+		{name: "with duplicates", a: []string{"a", "b"}, b: []string{"b", "c"}, expectErr: true},
+		{name: "empty slices", a: nil, b: nil, expectErr: false},
+	}
 
-	t.Run("with duplicates", func(t *testing.T) {
-		err := uniqueVars([]string{"a", "b"}, []string{"b", "c"})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "duplicated route variable")
-	})
-
-	t.Run("empty slices", func(t *testing.T) {
-		err := uniqueVars(nil, nil)
-		assert.NoError(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := uniqueVars(tt.a, tt.b)
+			if tt.expectErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "duplicated route variable")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestMatchInArray(t *testing.T) {
-	t.Run("found", func(t *testing.T) {
-		assert.True(t, matchInArray([]string{"a", "b", "c"}, "b"))
-	})
+	tests := []struct {
+		name     string
+		arr      []string
+		val      string
+		expected bool
+	}{
+		{name: "found", arr: []string{"a", "b", "c"}, val: "b", expected: true},
+		{name: "not found", arr: []string{"a", "b", "c"}, val: "d", expected: false},
+		{name: "empty array", arr: nil, val: "a", expected: false},
+	}
 
-	t.Run("not found", func(t *testing.T) {
-		assert.False(t, matchInArray([]string{"a", "b", "c"}, "d"))
-	})
-
-	t.Run("empty array", func(t *testing.T) {
-		assert.False(t, matchInArray(nil, "a"))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, matchInArray(tt.arr, tt.val))
+		})
+	}
 }
 
 func TestMatchMapWithString(t *testing.T) {
-	t.Run("all keys match", func(t *testing.T) {
-		toCheck := map[string]string{"Content-Type": "application/json"}
-		toMatch := map[string][]string{"Content-Type": {"application/json"}}
-		assert.True(t, matchMapWithString(toCheck, toMatch, false))
-	})
+	tests := []struct {
+		name      string
+		toCheck   map[string]string
+		toMatch   map[string][]string
+		canonical bool
+		expected  bool
+	}{
+		{
+			name:      "all keys match",
+			toCheck:   map[string]string{"Content-Type": "application/json"},
+			toMatch:   map[string][]string{"Content-Type": {"application/json"}},
+			canonical: false,
+			expected:  true,
+		},
+		{
+			name:      "key missing",
+			toCheck:   map[string]string{"X-Custom": "value"},
+			toMatch:   map[string][]string{"Content-Type": {"text/plain"}},
+			canonical: false,
+			expected:  false,
+		},
+		{
+			name:      "value mismatch",
+			toCheck:   map[string]string{"Content-Type": "text/html"},
+			toMatch:   map[string][]string{"Content-Type": {"application/json"}},
+			canonical: false,
+			expected:  false,
+		},
+		{
+			name:      "empty value matches any",
+			toCheck:   map[string]string{"Content-Type": ""},
+			toMatch:   map[string][]string{"Content-Type": {"anything"}},
+			canonical: false,
+			expected:  true,
+		},
+		{
+			name:      "canonical key matching",
+			toCheck:   map[string]string{"content-type": "text/plain"},
+			toMatch:   map[string][]string{"Content-Type": {"text/plain"}},
+			canonical: true,
+			expected:  true,
+		},
+	}
 
-	t.Run("key missing", func(t *testing.T) {
-		toCheck := map[string]string{"X-Custom": "value"}
-		toMatch := map[string][]string{"Content-Type": {"text/plain"}}
-		assert.False(t, matchMapWithString(toCheck, toMatch, false))
-	})
-
-	t.Run("value mismatch", func(t *testing.T) {
-		toCheck := map[string]string{"Content-Type": "text/html"}
-		toMatch := map[string][]string{"Content-Type": {"application/json"}}
-		assert.False(t, matchMapWithString(toCheck, toMatch, false))
-	})
-
-	t.Run("empty value matches any", func(t *testing.T) {
-		toCheck := map[string]string{"Content-Type": ""}
-		toMatch := map[string][]string{"Content-Type": {"anything"}}
-		assert.True(t, matchMapWithString(toCheck, toMatch, false))
-	})
-
-	t.Run("canonical key matching", func(t *testing.T) {
-		toCheck := map[string]string{"content-type": "text/plain"}
-		toMatch := map[string][]string{"Content-Type": {"text/plain"}}
-		assert.True(t, matchMapWithString(toCheck, toMatch, true))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, matchMapWithString(tt.toCheck, tt.toMatch, tt.canonical))
+		})
+	}
 }
 
 func TestMatchMapWithRegex(t *testing.T) {
-	t.Run("regex matches", func(t *testing.T) {
-		m, err := mapFromPairsToRegex("Content-Type", "^application/.*$")
-		require.NoError(t, err)
-		toMatch := map[string][]string{"Content-Type": {"application/json"}}
-		assert.True(t, matchMapWithRegex(m, toMatch, false))
-	})
+	tests := []struct {
+		name     string
+		key      string
+		pattern  string
+		toMatch  map[string][]string
+		expected bool
+	}{
+		{
+			name:     "regex matches",
+			key:      "Content-Type",
+			pattern:  "^application/.*$",
+			toMatch:  map[string][]string{"Content-Type": {"application/json"}},
+			expected: true,
+		},
+		{
+			name:     "regex does not match",
+			key:      "Content-Type",
+			pattern:  "^text/.*$",
+			toMatch:  map[string][]string{"Content-Type": {"application/json"}},
+			expected: false,
+		},
+		{
+			name:     "key missing",
+			key:      "X-Custom",
+			pattern:  ".*",
+			toMatch:  map[string][]string{"Content-Type": {"text/plain"}},
+			expected: false,
+		},
+	}
 
-	t.Run("regex does not match", func(t *testing.T) {
-		m, err := mapFromPairsToRegex("Content-Type", "^text/.*$")
-		require.NoError(t, err)
-		toMatch := map[string][]string{"Content-Type": {"application/json"}}
-		assert.False(t, matchMapWithRegex(m, toMatch, false))
-	})
-
-	t.Run("key missing", func(t *testing.T) {
-		m, err := mapFromPairsToRegex("X-Custom", ".*")
-		require.NoError(t, err)
-		toMatch := map[string][]string{"Content-Type": {"text/plain"}}
-		assert.False(t, matchMapWithRegex(m, toMatch, false))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := mapFromPairsToRegex(tt.key, tt.pattern)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, matchMapWithRegex(m, tt.toMatch, false))
+		})
+	}
 }
 
 func TestSubtractSlice(t *testing.T) {
-	t.Run("subtracts elements", func(t *testing.T) {
-		result := subtractSlice([]string{"a", "b", "c", "d"}, []string{"b", "d"})
-		assert.Equal(t, []string{"a", "c"}, result)
-	})
+	tests := []struct {
+		name     string
+		a        []string
+		b        []string
+		expected []string
+	}{
+		{name: "subtracts elements", a: []string{"a", "b", "c", "d"}, b: []string{"b", "d"}, expected: []string{"a", "c"}},
+		{name: "nothing to subtract", a: []string{"a", "b"}, b: []string{"c", "d"}, expected: []string{"a", "b"}},
+		{name: "empty input", a: nil, b: []string{"a"}, expected: nil},
+	}
 
-	t.Run("nothing to subtract", func(t *testing.T) {
-		result := subtractSlice([]string{"a", "b"}, []string{"c", "d"})
-		assert.Equal(t, []string{"a", "b"}, result)
-	})
-
-	t.Run("empty input", func(t *testing.T) {
-		result := subtractSlice(nil, []string{"a"})
-		assert.Empty(t, result)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := subtractSlice(tt.a, tt.b)
+			if tt.expected == nil {
+				assert.Empty(t, result)
+			} else {
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
 }
 
 func TestRequestURIPath(t *testing.T) {
-	t.Run("uses RawPath when available", func(t *testing.T) {
-		u := &url.URL{Path: "/foo/bar", RawPath: "/foo%2Fbar"}
-		assert.Equal(t, "/foo%2Fbar", requestURIPath(u))
-	})
+	tests := []struct {
+		name     string
+		url      *url.URL
+		expected string
+	}{
+		{
+			name:     "uses RawPath when available",
+			url:      &url.URL{Path: "/foo/bar", RawPath: "/foo%2Fbar"},
+			expected: "/foo%2Fbar",
+		},
+		{
+			name:     "falls back to Path",
+			url:      &url.URL{Path: "/foo/bar"},
+			expected: "/foo/bar",
+		},
+	}
 
-	t.Run("falls back to Path", func(t *testing.T) {
-		u := &url.URL{Path: "/foo/bar"}
-		assert.Equal(t, "/foo/bar", requestURIPath(u))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, requestURIPath(tt.url))
+		})
+	}
 }
 
 func TestAllowedMethods(t *testing.T) {

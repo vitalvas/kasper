@@ -49,25 +49,23 @@ func TestLengthMatcher(t *testing.T) {
 	re := regexp.MustCompile(`^[a-z]+$`)
 	m := &lengthMatcher{re: re, maxLen: 5}
 
-	t.Run("matches within limit", func(t *testing.T) {
-		assert.True(t, m.MatchString("abc"))
-	})
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{name: "matches within limit", input: "abc", expected: true},
+		{name: "matches at exact limit", input: "abcde", expected: true},
+		{name: "rejects over limit", input: "abcdef", expected: false},
+		{name: "rejects regex mismatch within limit", input: "123", expected: false},
+		{name: "matches empty string", input: "", expected: false},
+	}
 
-	t.Run("matches at exact limit", func(t *testing.T) {
-		assert.True(t, m.MatchString("abcde"))
-	})
-
-	t.Run("rejects over limit", func(t *testing.T) {
-		assert.False(t, m.MatchString("abcdef"))
-	})
-
-	t.Run("rejects regex mismatch within limit", func(t *testing.T) {
-		assert.False(t, m.MatchString("123"))
-	})
-
-	t.Run("matches empty string", func(t *testing.T) {
-		assert.False(t, m.MatchString(""))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, m.MatchString(tt.input))
+		})
+	}
 
 	t.Run("String returns regex pattern", func(t *testing.T) {
 		assert.Equal(t, `^[a-z]+$`, m.String())

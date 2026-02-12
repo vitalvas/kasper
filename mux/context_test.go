@@ -27,36 +27,59 @@ func TestVars(t *testing.T) {
 }
 
 func TestVarGet(t *testing.T) {
-	t.Run("returns false for request without vars", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		val, ok := VarGet(r, "id")
-		assert.False(t, ok)
-		assert.Empty(t, val)
-	})
+	tests := []struct {
+		name      string
+		setupVars map[string]string
+		hasSetup  bool
+		key       string
+		wantVal   string
+		wantOK    bool
+	}{
+		{
+			name:   "returns false for request without vars",
+			key:    "id",
+			wantOK: false,
+		},
+		{
+			name:      "returns false for missing key",
+			hasSetup:  true,
+			setupVars: map[string]string{"name": "test"},
+			key:       "id",
+			wantOK:    false,
+		},
+		{
+			name:      "returns value and true for existing key",
+			hasSetup:  true,
+			setupVars: map[string]string{"id": "42", "name": "test"},
+			key:       "id",
+			wantVal:   "42",
+			wantOK:    true,
+		},
+		{
+			name:      "returns false for nil vars map",
+			hasSetup:  true,
+			setupVars: nil,
+			key:       "id",
+			wantOK:    false,
+		},
+	}
 
-	t.Run("returns false for missing key", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = setRouteContext(r, nil, map[string]string{"name": "test"})
-		val, ok := VarGet(r, "id")
-		assert.False(t, ok)
-		assert.Empty(t, val)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.hasSetup {
+				r = setRouteContext(r, nil, tt.setupVars)
+			}
 
-	t.Run("returns value and true for existing key", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = setRouteContext(r, nil, map[string]string{"id": "42", "name": "test"})
-		val, ok := VarGet(r, "id")
-		assert.True(t, ok)
-		assert.Equal(t, "42", val)
-	})
-
-	t.Run("returns false for nil vars map", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = setRouteContext(r, nil, nil)
-		val, ok := VarGet(r, "id")
-		assert.False(t, ok)
-		assert.Empty(t, val)
-	})
+			val, ok := VarGet(r, tt.key)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.Equal(t, tt.wantVal, val)
+			} else {
+				assert.Empty(t, val)
+			}
+		})
+	}
 }
 
 func TestCurrentRoute(t *testing.T) {
@@ -177,15 +200,31 @@ func BenchmarkCurrentRoute(b *testing.B) {
 }
 
 func TestErrors(t *testing.T) {
-	t.Run("ErrMethodMismatch has correct message", func(t *testing.T) {
-		assert.Equal(t, "method is not allowed", ErrMethodMismatch.Error())
-	})
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "ErrMethodMismatch has correct message",
+			err:      ErrMethodMismatch,
+			expected: "method is not allowed",
+		},
+		{
+			name:     "ErrNotFound has correct message",
+			err:      ErrNotFound,
+			expected: "no matching route was found",
+		},
+		{
+			name:     "SkipRouter has correct message",
+			err:      SkipRouter,
+			expected: "skip this router",
+		},
+	}
 
-	t.Run("ErrNotFound has correct message", func(t *testing.T) {
-		assert.Equal(t, "no matching route was found", ErrNotFound.Error())
-	})
-
-	t.Run("SkipRouter has correct message", func(t *testing.T) {
-		assert.Equal(t, "skip this router", SkipRouter.Error())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.err.Error())
+		})
+	}
 }

@@ -40,19 +40,27 @@ func TestBraceIndices(t *testing.T) {
 }
 
 func TestCheckDuplicateVars(t *testing.T) {
-	t.Run("no duplicates", func(t *testing.T) {
-		assert.NoError(t, checkDuplicateVars([]string{"a", "b", "c"}))
-	})
+	tests := []struct {
+		name      string
+		input     []string
+		expectErr bool
+	}{
+		{name: "no duplicates", input: []string{"a", "b", "c"}, expectErr: false},
+		{name: "with duplicates", input: []string{"a", "b", "a"}, expectErr: true},
+		{name: "empty", input: nil, expectErr: false},
+	}
 
-	t.Run("with duplicates", func(t *testing.T) {
-		err := checkDuplicateVars([]string{"a", "b", "a"})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "duplicated route variable")
-	})
-
-	t.Run("empty", func(t *testing.T) {
-		assert.NoError(t, checkDuplicateVars(nil))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkDuplicateVars(tt.input)
+			if tt.expectErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "duplicated route variable")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestGetHost(t *testing.T) {
@@ -167,99 +175,89 @@ func TestNewRouteRegexp(t *testing.T) {
 }
 
 func TestRouteRegexpMatch(t *testing.T) {
-	t.Run("path match", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/users/42", nil)
-		assert.True(t, rr.Match(req, &RouteMatch{}))
-	})
+	tests := []struct {
+		name       string
+		template   string
+		regexpType regexpType
+		requestURL string
+		host       string
+		expected   bool
+	}{
+		{name: "path match", template: "/users/{id}", regexpType: regexpTypePath, requestURL: "/users/42", expected: true},
+		{name: "path no match", template: "/users/{id:[0-9]+}", regexpType: regexpTypePath, requestURL: "/users/abc", expected: false},
+		{name: "host match", template: "{sub}.example.com", regexpType: regexpTypeHost, requestURL: "http://api.example.com/", host: "api.example.com", expected: true},
+		{name: "query match", template: "page={page:[0-9]+}", regexpType: regexpTypeQuery, requestURL: "/search?page=42", expected: true},
+		{name: "query no match", template: "page={page:[0-9]+}", regexpType: regexpTypeQuery, requestURL: "/search?page=abc", expected: false},
+		{name: "query missing key", template: "page={page:[0-9]+}", regexpType: regexpTypeQuery, requestURL: "/search", expected: false},
+	}
 
-	t.Run("path no match", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id:[0-9]+}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/users/abc", nil)
-		assert.False(t, rr.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("host match", func(t *testing.T) {
-		rr, err := newRouteRegexp("{sub}.example.com", regexpTypeHost, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "http://api.example.com/", nil)
-		req.Host = "api.example.com"
-		assert.True(t, rr.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("query match", func(t *testing.T) {
-		rr, err := newRouteRegexp("page={page:[0-9]+}", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/search?page=42", nil)
-		assert.True(t, rr.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("query no match", func(t *testing.T) {
-		rr, err := newRouteRegexp("page={page:[0-9]+}", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/search?page=abc", nil)
-		assert.False(t, rr.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("query missing key", func(t *testing.T) {
-		rr, err := newRouteRegexp("page={page:[0-9]+}", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/search", nil)
-		assert.False(t, rr.Match(req, &RouteMatch{}))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr, err := newRouteRegexp(tt.template, tt.regexpType, routeRegexpOptions{})
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodGet, tt.requestURL, nil)
+			if tt.host != "" {
+				req.Host = tt.host
+			}
+			assert.Equal(t, tt.expected, rr.Match(req, &RouteMatch{}))
+		})
+	}
 }
 
 func TestRouteRegexpURL(t *testing.T) {
-	t.Run("builds URL from variables", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id}/posts/{pid}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		result, err := rr.url(map[string]string{"id": "42", "pid": "123"})
-		require.NoError(t, err)
-		assert.Equal(t, "/users/42/posts/123", result)
-	})
+	tests := []struct {
+		name      string
+		template  string
+		vars      map[string]string
+		expected  string
+		expectErr bool
+		errMsg    string
+	}{
+		{name: "builds URL from variables", template: "/users/{id}/posts/{pid}", vars: map[string]string{"id": "42", "pid": "123"}, expected: "/users/42/posts/123"},
+		{name: "missing variable", template: "/users/{id}", vars: map[string]string{}, expectErr: true, errMsg: "missing route variable"},
+		{name: "variable does not match pattern", template: "/users/{id:[0-9]+}", vars: map[string]string{"id": "abc"}, expectErr: true, errMsg: "doesn't match"},
+		{name: "no variables", template: "/static/path", vars: map[string]string{}, expected: "/static/path"},
+	}
 
-	t.Run("missing variable", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		_, err = rr.url(map[string]string{})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "missing route variable")
-	})
-
-	t.Run("variable does not match pattern", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id:[0-9]+}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		_, err = rr.url(map[string]string{"id": "abc"})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "doesn't match")
-	})
-
-	t.Run("no variables", func(t *testing.T) {
-		rr, err := newRouteRegexp("/static/path", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		result, err := rr.url(map[string]string{})
-		require.NoError(t, err)
-		assert.Equal(t, "/static/path", result)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr, err := newRouteRegexp(tt.template, regexpTypePath, routeRegexpOptions{})
+			require.NoError(t, err)
+			result, err := rr.url(tt.vars)
+			if tt.expectErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
 }
 
 func TestRouteRegexpGetURLVars(t *testing.T) {
-	t.Run("extracts variables", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id}/posts/{pid}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		vars := rr.getURLVars("/users/42/posts/123")
-		require.NotNil(t, vars)
-		assert.Equal(t, "42", vars["id"])
-		assert.Equal(t, "123", vars["pid"])
-	})
+	tests := []struct {
+		name     string
+		template string
+		path     string
+		expected map[string]string
+	}{
+		{name: "extracts variables", template: "/users/{id}/posts/{pid}", path: "/users/42/posts/123", expected: map[string]string{"id": "42", "pid": "123"}},
+		{name: "no match returns nil", template: "/users/{id:[0-9]+}", path: "/posts/abc", expected: nil},
+	}
 
-	t.Run("no match returns nil", func(t *testing.T) {
-		rr, err := newRouteRegexp("/users/{id:[0-9]+}", regexpTypePath, routeRegexpOptions{})
-		require.NoError(t, err)
-		assert.Nil(t, rr.getURLVars("/posts/abc"))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr, err := newRouteRegexp(tt.template, regexpTypePath, routeRegexpOptions{})
+			require.NoError(t, err)
+			vars := rr.getURLVars(tt.path)
+			if tt.expected == nil {
+				assert.Nil(t, vars)
+			} else {
+				assert.Equal(t, tt.expected, vars)
+			}
+		})
+	}
 }
 
 func TestNewRouteRegexpQueryNoEquals(t *testing.T) {
@@ -272,35 +270,26 @@ func TestNewRouteRegexpQueryNoEquals(t *testing.T) {
 }
 
 func TestMatchQueryStringPresenceCheck(t *testing.T) {
-	t.Run("empty template with missing key returns false", func(t *testing.T) {
-		// Template "key" with no = sign: queryKey="key", tpl="", no vars, empty template
-		rr, err := newRouteRegexp("key", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		assert.False(t, rr.matchQueryString(req))
-	})
+	tests := []struct {
+		name       string
+		template   string
+		requestURL string
+		expected   bool
+	}{
+		{name: "empty template with missing key returns false", template: "key", requestURL: "/test", expected: false},
+		{name: "empty template with key and empty value matches", template: "key", requestURL: "/test?key=", expected: true},
+		{name: "query with vars missing key returns false", template: "page={page:[0-9]+}", requestURL: "/test", expected: false},
+		{name: "query value not matching regexp returns false", template: "page={page:[0-9]+}", requestURL: "/test?page=abc", expected: false},
+	}
 
-	t.Run("empty template with key and empty value matches", func(t *testing.T) {
-		// Template "key" with no = sign: regexp is ^$ which matches ""
-		rr, err := newRouteRegexp("key", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/test?key=", nil)
-		assert.True(t, rr.matchQueryString(req))
-	})
-
-	t.Run("query with vars missing key returns false", func(t *testing.T) {
-		rr, err := newRouteRegexp("page={page:[0-9]+}", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		assert.False(t, rr.matchQueryString(req))
-	})
-
-	t.Run("query value not matching regexp returns false", func(t *testing.T) {
-		rr, err := newRouteRegexp("page={page:[0-9]+}", regexpTypeQuery, routeRegexpOptions{})
-		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodGet, "/test?page=abc", nil)
-		assert.False(t, rr.matchQueryString(req))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr, err := newRouteRegexp(tt.template, regexpTypeQuery, routeRegexpOptions{})
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodGet, tt.requestURL, nil)
+			assert.Equal(t, tt.expected, rr.matchQueryString(req))
+		})
+	}
 }
 
 func TestRouteRegexpMatchEncodedPath(t *testing.T) {

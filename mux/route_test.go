@@ -291,27 +291,41 @@ func TestRouteInspection(t *testing.T) {
 }
 
 func TestRouteErrors(t *testing.T) {
-	t.Run("duplicate name error", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
-			Name("users").
-			Name("users2")
-		assert.Error(t, route.GetError())
-	})
+	tests := []struct {
+		name  string
+		setup func(*Router) *Route
+	}{
+		{
+			name: "duplicate name error",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+					Name("users").
+					Name("users2")
+			},
+		},
+		{
+			name: "odd query pairs error",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/search", func(_ http.ResponseWriter, _ *http.Request) {}).
+					Queries("q")
+			},
+		},
+		{
+			name: "odd header pairs error",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/api", func(_ http.ResponseWriter, _ *http.Request) {}).
+					Headers("Content-Type")
+			},
+		},
+	}
 
-	t.Run("odd query pairs error", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/search", func(_ http.ResponseWriter, _ *http.Request) {}).
-			Queries("q")
-		assert.Error(t, route.GetError())
-	})
-
-	t.Run("odd header pairs error", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/api", func(_ http.ResponseWriter, _ *http.Request) {}).
-			Headers("Content-Type")
-		assert.Error(t, route.GetError())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			route := tt.setup(router)
+			assert.Error(t, route.GetError())
+		})
+	}
 }
 
 func TestRouteBuildOnly(t *testing.T) {
@@ -339,48 +353,96 @@ func TestRouteBuildOnly(t *testing.T) {
 }
 
 func TestRouteMethodMatcher(t *testing.T) {
-	t.Run("matches correct method", func(t *testing.T) {
-		m := methodMatcher{http.MethodGet, http.MethodPost}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
+	tests := []struct {
+		name      string
+		methods   []string
+		reqMethod string
+		expected  bool
+	}{
+		{
+			name:      "matches correct method",
+			methods:   []string{http.MethodGet, http.MethodPost},
+			reqMethod: http.MethodGet,
+			expected:  true,
+		},
+		{
+			name:      "does not match wrong method",
+			methods:   []string{http.MethodGet},
+			reqMethod: http.MethodPost,
+			expected:  false,
+		},
+	}
 
-	t.Run("does not match wrong method", func(t *testing.T) {
-		m := methodMatcher{http.MethodGet}
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		assert.False(t, m.Match(req, &RouteMatch{}))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := methodMatcher(tt.methods)
+			req := httptest.NewRequest(tt.reqMethod, "/", nil)
+			assert.Equal(t, tt.expected, m.Match(req, &RouteMatch{}))
+		})
+	}
 }
 
 func TestRouteHeaderMatcher(t *testing.T) {
-	t.Run("matches header", func(t *testing.T) {
-		m := headerMatcher{"Content-Type": "application/json"}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Content-Type", "application/json")
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
+	tests := []struct {
+		name     string
+		matcher  headerMatcher
+		header   string
+		value    string
+		expected bool
+	}{
+		{
+			name:     "matches header",
+			matcher:  headerMatcher{"Content-Type": "application/json"},
+			header:   "Content-Type",
+			value:    "application/json",
+			expected: true,
+		},
+		{
+			name:     "matches header presence only",
+			matcher:  headerMatcher{"X-Custom": ""},
+			header:   "X-Custom",
+			value:    "anything",
+			expected: true,
+		},
+	}
 
-	t.Run("matches header presence only", func(t *testing.T) {
-		m := headerMatcher{"X-Custom": ""}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("X-Custom", "anything")
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set(tt.header, tt.value)
+			assert.Equal(t, tt.expected, tt.matcher.Match(req, &RouteMatch{}))
+		})
+	}
 }
 
 func TestRouteSkipClean(t *testing.T) {
-	t.Run("returns false by default", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
-		assert.False(t, route.SkipClean())
-	})
+	tests := []struct {
+		name      string
+		skipClean bool
+		expected  bool
+	}{
+		{
+			name:      "returns false by default",
+			skipClean: false,
+			expected:  false,
+		},
+		{
+			name:      "returns true when router has SkipClean enabled",
+			skipClean: true,
+			expected:  true,
+		},
+	}
 
-	t.Run("returns true when router has SkipClean enabled", func(t *testing.T) {
-		router := NewRouter()
-		router.SkipClean(true)
-		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
-		assert.True(t, route.SkipClean())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			if tt.skipClean {
+				router.SkipClean(true)
+			}
+			route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {})
+			assert.Equal(t, tt.expected, route.SkipClean())
+		})
+	}
 }
 
 func TestRouteBuildVarsFunc(t *testing.T) {
@@ -467,46 +529,49 @@ func TestRouteErrorPropagation(t *testing.T) {
 }
 
 func TestRouteInspectionWithErrors(t *testing.T) {
-	errRoute := func() *Route {
-		router := NewRouter()
-		return router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {}).
-			Queries("odd") // odd pairs -> error
+	tests := []struct {
+		name string
+		fn   func(*Route) (any, error)
+	}{
+		{
+			name: "GetPathTemplate with route error",
+			fn:   func(r *Route) (any, error) { return r.GetPathTemplate() },
+		},
+		{
+			name: "GetPathRegexp with route error",
+			fn:   func(r *Route) (any, error) { return r.GetPathRegexp() },
+		},
+		{
+			name: "GetHostTemplate with route error",
+			fn:   func(r *Route) (any, error) { return r.GetHostTemplate() },
+		},
+		{
+			name: "GetMethods with route error",
+			fn:   func(r *Route) (any, error) { return r.GetMethods() },
+		},
+		{
+			name: "GetQueriesTemplates with route error",
+			fn:   func(r *Route) (any, error) { return r.GetQueriesTemplates() },
+		},
+		{
+			name: "GetQueriesRegexp with route error",
+			fn:   func(r *Route) (any, error) { return r.GetQueriesRegexp() },
+		},
+		{
+			name: "GetVarNames with route error",
+			fn:   func(r *Route) (any, error) { return r.GetVarNames() },
+		},
 	}
 
-	t.Run("GetPathTemplate with route error", func(t *testing.T) {
-		_, err := errRoute().GetPathTemplate()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetPathRegexp with route error", func(t *testing.T) {
-		_, err := errRoute().GetPathRegexp()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetHostTemplate with route error", func(t *testing.T) {
-		_, err := errRoute().GetHostTemplate()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetMethods with route error", func(t *testing.T) {
-		_, err := errRoute().GetMethods()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetQueriesTemplates with route error", func(t *testing.T) {
-		_, err := errRoute().GetQueriesTemplates()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetQueriesRegexp with route error", func(t *testing.T) {
-		_, err := errRoute().GetQueriesRegexp()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetVarNames with route error", func(t *testing.T) {
-		_, err := errRoute().GetVarNames()
-		assert.Error(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			errRoute := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {}).
+				Queries("odd") // odd pairs -> error
+			_, err := tt.fn(errRoute)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestRouteURLWithErrors(t *testing.T) {
@@ -670,40 +735,52 @@ func TestRouteAddRegexpMatcherHostParent(t *testing.T) {
 }
 
 func TestRouteInspectionMissingTemplate(t *testing.T) {
-	t.Run("GetPathTemplate without path", func(t *testing.T) {
-		router := NewRouter()
-		route := router.Host("example.com")
-		_, err := route.GetPathTemplate()
-		assert.Error(t, err)
-	})
+	tests := []struct {
+		name  string
+		setup func(*Router) *Route
+		fn    func(*Route) (any, error)
+	}{
+		{
+			name:  "GetPathTemplate without path",
+			setup: func(r *Router) *Route { return r.Host("example.com") },
+			fn:    func(r *Route) (any, error) { return r.GetPathTemplate() },
+		},
+		{
+			name:  "GetPathRegexp without path",
+			setup: func(r *Router) *Route { return r.Host("example.com") },
+			fn:    func(r *Route) (any, error) { return r.GetPathRegexp() },
+		},
+		{
+			name: "GetHostTemplate without host",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+			},
+			fn: func(r *Route) (any, error) { return r.GetHostTemplate() },
+		},
+		{
+			name: "GetQueriesTemplates without queries",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+			},
+			fn: func(r *Route) (any, error) { return r.GetQueriesTemplates() },
+		},
+		{
+			name: "GetQueriesRegexp without queries",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+			},
+			fn: func(r *Route) (any, error) { return r.GetQueriesRegexp() },
+		},
+	}
 
-	t.Run("GetPathRegexp without path", func(t *testing.T) {
-		router := NewRouter()
-		route := router.Host("example.com")
-		_, err := route.GetPathRegexp()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetHostTemplate without host", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
-		_, err := route.GetHostTemplate()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetQueriesTemplates without queries", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
-		_, err := route.GetQueriesTemplates()
-		assert.Error(t, err)
-	})
-
-	t.Run("GetQueriesRegexp without queries", func(t *testing.T) {
-		router := NewRouter()
-		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
-		_, err := route.GetQueriesRegexp()
-		assert.Error(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			route := tt.setup(router)
+			_, err := tt.fn(route)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestRouteURLBuildErrors(t *testing.T) {
@@ -736,53 +813,91 @@ func TestRouteURLBuildErrors(t *testing.T) {
 }
 
 func TestRouteAddRegexpMatcherUniqueness(t *testing.T) {
-	t.Run("duplicate vars between host and path", func(t *testing.T) {
-		router := NewRouter()
-		route := router.Host("{id}.example.com").Path("/users/{id}")
-		assert.Error(t, route.GetError())
-	})
+	tests := []struct {
+		name  string
+		setup func(*Router) *Route
+	}{
+		{
+			name: "duplicate vars between host and path",
+			setup: func(r *Router) *Route {
+				return r.Host("{id}.example.com").Path("/users/{id}")
+			},
+		},
+		{
+			name: "duplicate vars between path and host",
+			setup: func(r *Router) *Route {
+				return r.NewRoute().Path("/users/{id}").Host("{id}.example.com")
+			},
+		},
+	}
 
-	t.Run("duplicate vars between path and host", func(t *testing.T) {
-		router := NewRouter()
-		route := router.NewRoute().Path("/users/{id}").Host("{id}.example.com")
-		assert.Error(t, route.GetError())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			route := tt.setup(router)
+			assert.Error(t, route.GetError())
+		})
+	}
 }
 
 func TestRouteSchemeMatcher(t *testing.T) {
-	t.Run("matches https via URL scheme", func(t *testing.T) {
-		m := schemeMatcher{"https"}
-		req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
+	tests := []struct {
+		name        string
+		scheme      string
+		url         string
+		clearScheme bool
+		tls         bool
+		expected    bool
+	}{
+		{
+			name:     "matches https via URL scheme",
+			scheme:   "https",
+			url:      "https://example.com/",
+			expected: true,
+		},
+		{
+			name:     "matches http scheme",
+			scheme:   "http",
+			url:      "http://example.com/",
+			expected: true,
+		},
+		{
+			name:     "does not match wrong scheme",
+			scheme:   "https",
+			url:      "http://example.com/",
+			expected: false,
+		},
+		{
+			name:        "falls back to https when TLS is set",
+			scheme:      "https",
+			url:         "/",
+			clearScheme: true,
+			tls:         true,
+			expected:    true,
+		},
+		{
+			name:        "falls back to http when no TLS",
+			scheme:      "http",
+			url:         "/",
+			clearScheme: true,
+			tls:         false,
+			expected:    true,
+		},
+	}
 
-	t.Run("matches http scheme", func(t *testing.T) {
-		m := schemeMatcher{"http"}
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("does not match wrong scheme", func(t *testing.T) {
-		m := schemeMatcher{"https"}
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-		assert.False(t, m.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("falls back to https when TLS is set", func(t *testing.T) {
-		m := schemeMatcher{"https"}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.URL.Scheme = ""
-		req.TLS = &tls.ConnectionState{}
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
-
-	t.Run("falls back to http when no TLS", func(t *testing.T) {
-		m := schemeMatcher{"http"}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.URL.Scheme = ""
-		req.TLS = nil
-		assert.True(t, m.Match(req, &RouteMatch{}))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := schemeMatcher{tt.scheme}
+			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
+			if tt.clearScheme {
+				req.URL.Scheme = ""
+			}
+			if tt.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			assert.Equal(t, tt.expected, m.Match(req, &RouteMatch{}))
+		})
+	}
 }
 
 func TestRouteDuplicateMethods(t *testing.T) {
