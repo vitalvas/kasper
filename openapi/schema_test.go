@@ -2,6 +2,8 @@ package openapi
 
 import (
 	"encoding/json"
+	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -580,6 +582,124 @@ func TestSanitizeSchemaName(t *testing.T) {
 	})
 }
 
+func TestSchemaNameCollision(t *testing.T) {
+	t.Run("different packages same type name get unique schema names", func(t *testing.T) {
+		type Client struct {
+			ID string `json:"id"`
+		}
+
+		gen := NewSchemaGenerator()
+
+		// Generate local Client first.
+		s1 := gen.Generate(Client{})
+		assert.Equal(t, "#/components/schemas/Client", s1.Ref)
+		assert.Contains(t, gen.Schemas(), "Client")
+
+		// Generate http.Client which has the same simple name.
+		s2 := gen.Generate(http.Client{})
+		assert.Equal(t, "#/components/schemas/HttpClient", s2.Ref)
+		assert.Contains(t, gen.Schemas(), "HttpClient")
+
+		// Both schemas should be present and distinct.
+		assert.Len(t, gen.Schemas(), 2)
+	})
+
+	t.Run("same type used twice returns same name", func(t *testing.T) {
+		type Item struct {
+			ID string `json:"id"`
+		}
+
+		gen := NewSchemaGenerator()
+
+		s1 := gen.Generate(Item{})
+		s2 := gen.Generate(Item{})
+		assert.Equal(t, s1.Ref, s2.Ref)
+		assert.Len(t, gen.Schemas(), 1)
+	})
+
+	t.Run("triple collision with same package suffix appends numeric suffix", func(t *testing.T) {
+		type Client struct {
+			ID string `json:"id"`
+		}
+
+		gen := NewSchemaGenerator()
+
+		// First: local Client → "Client".
+		s1 := gen.Generate(Client{})
+		assert.Equal(t, "#/components/schemas/Client", s1.Ref)
+
+		// Pre-seed "HttpClient" to simulate a prior type from a package
+		// ending in "http" that already claimed the prefixed name.
+		fakeType := reflect.TypeOf(http.Response{})
+		gen.nameTypes["HttpClient"] = fakeType
+		gen.typeNames[fakeType] = "HttpClient"
+
+		// http.Client: simple "Client" collides, prefixed "HttpClient"
+		// also collides → must get numeric suffix "HttpClient2".
+		s2 := gen.Generate(http.Client{})
+		assert.Equal(t, "#/components/schemas/HttpClient2", s2.Ref)
+		assert.Contains(t, gen.Schemas(), "HttpClient2")
+
+		// Same type again returns cached name.
+		s3 := gen.Generate(http.Client{})
+		assert.Equal(t, s2.Ref, s3.Ref)
+	})
+
+	t.Run("generic instantiations with same sanitized name get unique names", func(t *testing.T) {
+		gen := NewSchemaGenerator()
+
+		// Simulate two generic types whose sanitized names are identical
+		// by pre-seeding the first name, then generating a real type
+		// that would produce the same sanitized name.
+		//
+		// Generate http.Response first → "Response".
+		gen.Generate(http.Response{})
+		assert.Contains(t, gen.Schemas(), "Response")
+
+		// Pre-seed "HttpResponse" to simulate a generic type instantiation
+		// that already claimed the prefixed name.
+		type Response struct {
+			Code int `json:"code"`
+		}
+		fakeType := reflect.TypeOf(SimpleStruct{})
+		gen.nameTypes["HttpResponse"] = fakeType
+		gen.typeNames[fakeType] = "HttpResponse"
+
+		// Local Response: simple "Response" collides, prefixed
+		// "OpenapiResponse" (from test package), so it gets that.
+		s := gen.Generate(Response{})
+		assert.NotEmpty(t, s.Ref)
+		// Verify no schema was overwritten — all names are distinct.
+		assert.NotEqual(t, gen.nameTypes["Response"], gen.nameTypes[s.Ref[len("#/components/schemas/"):]])
+	})
+}
+
+func TestPkgPrefix(t *testing.T) {
+	t.Run("standard library", func(t *testing.T) {
+		assert.Equal(t, "Http", pkgPrefix("net/http"))
+	})
+
+	t.Run("full package path", func(t *testing.T) {
+		assert.Equal(t, "Models", pkgPrefix("github.com/foo/models"))
+	})
+
+	t.Run("hyphenated package", func(t *testing.T) {
+		assert.Equal(t, "Go_utils", pkgPrefix("github.com/foo/go-utils"))
+	})
+
+	t.Run("dotted package", func(t *testing.T) {
+		assert.Equal(t, "V2_api", pkgPrefix("github.com/foo/v2.api"))
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		assert.Equal(t, "", pkgPrefix(""))
+	})
+
+	t.Run("no slash", func(t *testing.T) {
+		assert.Equal(t, "Models", pkgPrefix("models"))
+	})
+}
+
 type ResponseWrapper[T any] struct {
 	Success  bool     `json:"success"`
 	Errors   []string `json:"errors,omitempty"`
@@ -821,5 +941,86 @@ func TestGenerateNewTagKeys(t *testing.T) {
 		schema := g.Schemas()["WithIntConst"]
 		require.NotNil(t, schema)
 		assert.Equal(t, int64(2), schema.Properties["version"].Const)
+	})
+}
+
+func TestJSONStringTagOverride(t *testing.T) {
+	t.Run("int with string tag becomes string type", func(t *testing.T) {
+		type WithStringInt struct {
+			Count int `json:"count,string"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringInt{})
+		schema := g.Schemas()["WithStringInt"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
+	})
+
+	t.Run("bool with string tag becomes string type", func(t *testing.T) {
+		type WithStringBool struct {
+			Active bool `json:"active,string"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringBool{})
+		schema := g.Schemas()["WithStringBool"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeString("string"), schema.Properties["active"].Type)
+	})
+
+	t.Run("float with string tag becomes string type", func(t *testing.T) {
+		type WithStringFloat struct {
+			Price float64 `json:"price,string"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringFloat{})
+		schema := g.Schemas()["WithStringFloat"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeString("string"), schema.Properties["price"].Type)
+	})
+
+	t.Run("nullable int with string tag becomes nullable string", func(t *testing.T) {
+		type WithStringPtr struct {
+			Count *int `json:"count,string"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringPtr{})
+		schema := g.Schemas()["WithStringPtr"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeArray("string", "null"), schema.Properties["count"].Type)
+	})
+
+	t.Run("string with string tag stays string", func(t *testing.T) {
+		type WithStringString struct {
+			Name string `json:"name,string"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringString{})
+		schema := g.Schemas()["WithStringString"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeString("string"), schema.Properties["name"].Type)
+	})
+
+	t.Run("string tag combined with omitempty", func(t *testing.T) {
+		type WithStringOmit struct {
+			Count int `json:"count,omitempty,string"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringOmit{})
+		schema := g.Schemas()["WithStringOmit"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
+		assert.NotContains(t, schema.Required, "count")
+	})
+
+	t.Run("openapi tags preserved with string override", func(t *testing.T) {
+		type WithStringAndOpenAPI struct {
+			Count int `json:"count,string" openapi:"description=Item count"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithStringAndOpenAPI{})
+		schema := g.Schemas()["WithStringAndOpenAPI"]
+		require.NotNil(t, schema)
+		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
+		assert.Equal(t, "Item count", schema.Properties["count"].Description)
 	})
 }

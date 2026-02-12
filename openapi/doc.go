@@ -5,6 +5,10 @@
 // Draft 2020-12 for schema generation. It produces a complete OpenAPI document
 // from registered routes with zero external schema files.
 //
+// See: https://spec.openapis.org/oas/v3.1.0
+// See: https://json-schema.org/draft/2020-12/json-schema-core
+// See: https://json-schema.org/draft/2020-12/json-schema-validation
+//
 // # Spec Builder
 //
 // Create a spec, attach metadata to routes, and build the document:

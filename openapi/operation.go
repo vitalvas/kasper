@@ -6,7 +6,9 @@ import (
 )
 
 // operationMeta stores metadata collected via the fluent builder
-// before the final spec is built.
+// before the final spec is built. Fields correspond to the Operation Object.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 type operationMeta struct {
 	operationID  string
 	summary      string
@@ -29,7 +31,9 @@ type operationMeta struct {
 }
 
 // OperationBuilder provides a fluent API for attaching OpenAPI metadata
-// to a named route.
+// to a named route. It assembles an Operation Object.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 type OperationBuilder struct {
 	meta *operationMeta
 }
@@ -45,30 +49,40 @@ func newOperationBuilder() *OperationBuilder {
 
 // OperationID sets a custom operation ID, overriding the auto-detected route
 // name. This is useful with Route() where the mux route may not have a name.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (operationId)
 func (b *OperationBuilder) OperationID(id string) *OperationBuilder {
 	b.meta.operationID = id
 	return b
 }
 
 // Summary sets the operation summary.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (summary)
 func (b *OperationBuilder) Summary(s string) *OperationBuilder {
 	b.meta.summary = s
 	return b
 }
 
 // Description sets the operation description.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (description)
 func (b *OperationBuilder) Description(d string) *OperationBuilder {
 	b.meta.description = d
 	return b
 }
 
 // Tags adds one or more tags to the operation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (tags)
 func (b *OperationBuilder) Tags(tags ...string) *OperationBuilder {
 	b.meta.tags = append(b.meta.tags, tags...)
 	return b
 }
 
 // Deprecated marks the operation as deprecated.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (deprecated)
 func (b *OperationBuilder) Deprecated() *OperationBuilder {
 	b.meta.deprecated = true
 	return b
@@ -76,6 +90,8 @@ func (b *OperationBuilder) Deprecated() *OperationBuilder {
 
 // Request registers an application/json request body type for the operation.
 // This is a shortcut for RequestContent("application/json", body).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#request-body-object
 func (b *OperationBuilder) Request(body any) *OperationBuilder {
 	b.meta.requestContents["application/json"] = body
 	return b
@@ -84,12 +100,16 @@ func (b *OperationBuilder) Request(body any) *OperationBuilder {
 // RequestContent registers a request body with the given content type.
 // The body can be a Go type (schema generated via reflection), a *Schema
 // for explicit schema control, or nil for a content type with no schema.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#request-body-object
 func (b *OperationBuilder) RequestContent(contentType string, body any) *OperationBuilder {
 	b.meta.requestContents[contentType] = body
 	return b
 }
 
 // RequestDescription sets the description for the request body.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#request-body-object (description)
 func (b *OperationBuilder) RequestDescription(desc string) *OperationBuilder {
 	b.meta.requestDescription = desc
 	return b
@@ -97,6 +117,8 @@ func (b *OperationBuilder) RequestDescription(desc string) *OperationBuilder {
 
 // RequestRequired sets whether the request body is required.
 // By default, request bodies are required (true).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#request-body-object (required)
 func (b *OperationBuilder) RequestRequired(required bool) *OperationBuilder {
 	b.meta.requestRequired = &required
 	return b
@@ -106,6 +128,9 @@ func (b *OperationBuilder) RequestRequired(required bool) *OperationBuilder {
 // status code. Pass nil body for responses with no content (e.g., 204).
 // This is a shortcut for ResponseContent(statusCode, "application/json", body)
 // when body is non-nil.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#responses-object
+// See: https://spec.openapis.org/oas/v3.1.0#response-object
 func (b *OperationBuilder) Response(statusCode int, body any) *OperationBuilder {
 	key := strconv.Itoa(statusCode)
 	if body != nil {
@@ -113,7 +138,7 @@ func (b *OperationBuilder) Response(statusCode int, body any) *OperationBuilder 
 			b.meta.responseContents[key] = make(map[string]any)
 		}
 		b.meta.responseContents[key]["application/json"] = body
-	} else if b.meta.responseContents[key] == nil {
+	} else {
 		b.meta.responseContents[key] = nil
 	}
 	return b
@@ -122,6 +147,8 @@ func (b *OperationBuilder) Response(statusCode int, body any) *OperationBuilder 
 // ResponseContent registers a response with the given status code and content
 // type. The body can be a Go type (schema generated via reflection), a *Schema
 // for explicit schema control, or nil for a content type with no schema.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object
 func (b *OperationBuilder) ResponseContent(statusCode int, contentType string, body any) *OperationBuilder {
 	key := strconv.Itoa(statusCode)
 	if b.meta.responseContents[key] == nil {
@@ -134,13 +161,15 @@ func (b *OperationBuilder) ResponseContent(statusCode int, contentType string, b
 // DefaultResponse registers an application/json response for the "default"
 // status key. The default response catches any status code not covered by
 // specific responses. Pass nil body for a default response with no content.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#responses-object (default)
 func (b *OperationBuilder) DefaultResponse(body any) *OperationBuilder {
 	if body != nil {
 		if b.meta.responseContents["default"] == nil {
 			b.meta.responseContents["default"] = make(map[string]any)
 		}
 		b.meta.responseContents["default"]["application/json"] = body
-	} else if b.meta.responseContents["default"] == nil {
+	} else {
 		b.meta.responseContents["default"] = nil
 	}
 	return b
@@ -148,6 +177,9 @@ func (b *OperationBuilder) DefaultResponse(body any) *OperationBuilder {
 
 // DefaultResponseContent registers a response with the given content type
 // for the "default" status key.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#responses-object (default)
+// See: https://spec.openapis.org/oas/v3.1.0#media-type-object
 func (b *OperationBuilder) DefaultResponseContent(contentType string, body any) *OperationBuilder {
 	if b.meta.responseContents["default"] == nil {
 		b.meta.responseContents["default"] = make(map[string]any)
@@ -157,6 +189,8 @@ func (b *OperationBuilder) DefaultResponseContent(contentType string, body any) 
 }
 
 // ResponseHeader adds a header to the response for the given HTTP status code.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (headers)
 func (b *OperationBuilder) ResponseHeader(statusCode int, name string, h *Header) *OperationBuilder {
 	key := strconv.Itoa(statusCode)
 	if b.meta.responseHeaders == nil {
@@ -170,6 +204,9 @@ func (b *OperationBuilder) ResponseHeader(statusCode int, name string, h *Header
 }
 
 // ResponseLink adds a link to the response for the given HTTP status code.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (links)
+// See: https://spec.openapis.org/oas/v3.1.0#link-object
 func (b *OperationBuilder) ResponseLink(statusCode int, name string, l *Link) *OperationBuilder {
 	key := strconv.Itoa(statusCode)
 	if b.meta.responseLinks == nil {
@@ -183,6 +220,9 @@ func (b *OperationBuilder) ResponseLink(statusCode int, name string, l *Link) *O
 }
 
 // DefaultResponseHeader adds a header to the default response.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (headers)
+// See: https://spec.openapis.org/oas/v3.1.0#header-object
 func (b *OperationBuilder) DefaultResponseHeader(name string, h *Header) *OperationBuilder {
 	if b.meta.responseHeaders == nil {
 		b.meta.responseHeaders = make(map[string]map[string]*Header)
@@ -195,6 +235,9 @@ func (b *OperationBuilder) DefaultResponseHeader(name string, h *Header) *Operat
 }
 
 // DefaultResponseLink adds a link to the default response.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (links)
+// See: https://spec.openapis.org/oas/v3.1.0#link-object
 func (b *OperationBuilder) DefaultResponseLink(name string, l *Link) *OperationBuilder {
 	if b.meta.responseLinks == nil {
 		b.meta.responseLinks = make(map[string]map[string]*Link)
@@ -208,6 +251,8 @@ func (b *OperationBuilder) DefaultResponseLink(name string, l *Link) *OperationB
 
 // ResponseDescription overrides the auto-generated description for a response.
 // By default, descriptions are derived from HTTP status text (e.g., "OK", "Not Found").
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (description)
 func (b *OperationBuilder) ResponseDescription(statusCode int, desc string) *OperationBuilder {
 	key := strconv.Itoa(statusCode)
 	if b.meta.responseDescriptions == nil {
@@ -219,6 +264,8 @@ func (b *OperationBuilder) ResponseDescription(statusCode int, desc string) *Ope
 
 // DefaultResponseDescription overrides the auto-generated description for the
 // default response.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (description)
 func (b *OperationBuilder) DefaultResponseDescription(desc string) *OperationBuilder {
 	if b.meta.responseDescriptions == nil {
 		b.meta.responseDescriptions = make(map[string]string)
@@ -228,6 +275,8 @@ func (b *OperationBuilder) DefaultResponseDescription(desc string) *OperationBui
 }
 
 // Parameter adds a custom parameter to the operation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
 func (b *OperationBuilder) Parameter(param *Parameter) *OperationBuilder {
 	b.meta.parameters = append(b.meta.parameters, param)
 	return b
@@ -236,6 +285,9 @@ func (b *OperationBuilder) Parameter(param *Parameter) *OperationBuilder {
 // Security sets operation-level security requirements.
 // Call with no arguments to explicitly mark the operation as unauthenticated
 // (overrides document-level security).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (security)
+// See: https://spec.openapis.org/oas/v3.1.0#security-requirement-object
 func (b *OperationBuilder) Security(reqs ...SecurityRequirement) *OperationBuilder {
 	if reqs == nil {
 		reqs = []SecurityRequirement{}
@@ -245,12 +297,16 @@ func (b *OperationBuilder) Security(reqs ...SecurityRequirement) *OperationBuild
 }
 
 // ExternalDocs sets external documentation for the operation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
 func (b *OperationBuilder) ExternalDocs(url, description string) *OperationBuilder {
 	b.meta.externalDocs = &ExternalDocs{URL: url, Description: description}
 	return b
 }
 
 // Callback adds a callback to the operation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#callback-object
 func (b *OperationBuilder) Callback(name string, cb *Callback) *OperationBuilder {
 	if b.meta.callbacks == nil {
 		b.meta.callbacks = make(map[string]*Callback)
@@ -260,6 +316,8 @@ func (b *OperationBuilder) Callback(name string, cb *Callback) *OperationBuilder
 }
 
 // Server adds a server override for the operation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (servers)
 func (b *OperationBuilder) Server(server Server) *OperationBuilder {
 	b.meta.servers = append(b.meta.servers, server)
 	return b
@@ -268,6 +326,9 @@ func (b *OperationBuilder) Server(server Server) *OperationBuilder {
 // mergeParameters combines auto-generated path parameters with custom
 // parameters. Custom parameters with the same name+in override the
 // auto-generated ones. Parameters not present in custom are kept from auto.
+// Per the spec, parameter uniqueness is determined by name and location (in).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (parameters)
 func mergeParameters(auto, custom []*Parameter) []*Parameter {
 	if len(auto) == 0 && len(custom) == 0 {
 		return nil
@@ -294,6 +355,8 @@ func mergeParameters(auto, custom []*Parameter) []*Parameter {
 // resolveSchema returns a Schema for the given body value. If body is a
 // *Schema it is used directly; otherwise the schema generator produces one
 // via reflection.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
 func resolveSchema(gen *SchemaGenerator, body any) *Schema {
 	if body == nil {
 		return nil
@@ -305,6 +368,8 @@ func resolveSchema(gen *SchemaGenerator, body any) *Schema {
 }
 
 // responseDescription returns a human-readable description for a response key.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (description)
 func responseDescription(key string) string {
 	if key == "default" {
 		return "Default response"
@@ -318,8 +383,10 @@ func responseDescription(key string) string {
 	return key
 }
 
-// buildOperation converts the collected metadata into an Operation object
+// buildOperation converts the collected metadata into an Operation Object
 // using the given schema generator.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 func (b *OperationBuilder) buildOperation(gen *SchemaGenerator, operationID string, pathParams []*Parameter) *Operation {
 	if b.meta.operationID != "" {
 		operationID = b.meta.operationID

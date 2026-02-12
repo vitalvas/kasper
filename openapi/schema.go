@@ -14,26 +14,40 @@ import (
 //	func (u User) OpenAPIExample() any {
 //	    return User{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "Alice"}
 //	}
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-9.5
 type Exampler interface {
 	OpenAPIExample() any
 }
 
 // SchemaGenerator converts Go types to JSON Schema objects and collects
 // named types into a component schemas map for $ref deduplication.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
 type SchemaGenerator struct {
-	schemas map[string]*Schema
-	visited map[reflect.Type]bool
+	schemas   map[string]*Schema
+	visited   map[reflect.Type]bool
+	typeNames map[reflect.Type]string // type -> chosen schema name
+	nameTypes map[string]reflect.Type // schema name -> type that claimed it
 }
 
 // NewSchemaGenerator creates a new schema generator.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
 func NewSchemaGenerator() *SchemaGenerator {
 	return &SchemaGenerator{
-		schemas: make(map[string]*Schema),
-		visited: make(map[reflect.Type]bool),
+		schemas:   make(map[string]*Schema),
+		visited:   make(map[reflect.Type]bool),
+		typeNames: make(map[reflect.Type]string),
+		nameTypes: make(map[string]reflect.Type),
 	}
 }
 
 // Schemas returns the collected component schemas.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
 func (g *SchemaGenerator) Schemas() map[string]*Schema {
 	return g.schemas
 }
@@ -41,6 +55,9 @@ func (g *SchemaGenerator) Schemas() map[string]*Schema {
 // Generate produces a JSON Schema for the given Go value.
 // Named struct types are stored in the generator's component schemas
 // and referenced via $ref.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
+// See: https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3 ($ref)
 func (g *SchemaGenerator) Generate(v any) *Schema {
 	if v == nil {
 		return nil
@@ -48,6 +65,11 @@ func (g *SchemaGenerator) Generate(v any) *Schema {
 	return g.generateType(reflect.TypeOf(v))
 }
 
+// generateType produces a Schema for the given Go type, using $ref for named struct
+// types and inline schemas for primitives, slices, maps, and anonymous structs.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
+// See: https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3 ($ref)
 func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 	// Unwrap pointer and mark nullable.
 	nullable := false
@@ -58,8 +80,8 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 
 	// Named struct types → $ref (except time.Time which is a special case).
 	if t.Kind() == reflect.Struct && t != reflect.TypeOf(time.Time{}) {
-		name := sanitizeSchemaName(t.Name())
-		if name != "" && t.PkgPath() != "" {
+		name := g.schemaName(t)
+		if name != "" {
 			// Generate the schema if not already visited.
 			if !g.visited[t] {
 				g.visited[t] = true
@@ -93,6 +115,10 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 	return schema
 }
 
+// generateInlineType maps Go primitive and composite types to JSON Schema types.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#data-types
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.1.1
 func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 	// Special cases first.
 	if t == reflect.TypeOf(time.Time{}) {
@@ -149,6 +175,10 @@ func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 	return nil
 }
 
+// generateStructSchema builds an object schema from struct fields.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-core#section-10.3.2 (properties)
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.5.3 (required)
 func (g *SchemaGenerator) generateStructSchema(t reflect.Type) *Schema {
 	schema := &Schema{
 		Type:       TypeString("object"),
@@ -168,6 +198,9 @@ func (g *SchemaGenerator) generateStructSchema(t reflect.Type) *Schema {
 // When allOptional is true, all fields are treated as optional regardless
 // of their json tags. This is used for pointer-embedded structs where the
 // entire embedded struct can be nil and thus all its fields may be absent.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-core#section-10.3.2.1 (properties)
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.5.3 (required)
 func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptional bool) {
 	for i := range t.NumField() {
 		field := t.Field(i)
@@ -215,6 +248,12 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 
 		applyOpenAPITag(fieldSchema, field.Tag.Get("openapi"))
 
+		// The encoding/json ",string" option encodes numeric and boolean
+		// values as JSON strings. Override the schema type accordingly.
+		if opts.stringEncode && fieldSchema.Ref == "" && len(fieldSchema.AnyOf) == 0 {
+			applyStringEncoding(fieldSchema)
+		}
+
 		schema.Properties[name] = fieldSchema
 
 		if !opts.omitempty && !allOptional {
@@ -224,7 +263,8 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 }
 
 type jsonTagOpts struct {
-	omitempty bool
+	omitempty    bool
+	stringEncode bool // encoding/json ",string" option
 }
 
 func parseJSONTag(tag string) (string, jsonTagOpts) {
@@ -233,11 +273,16 @@ func parseJSONTag(tag string) (string, jsonTagOpts) {
 	}
 	name, rest, _ := strings.Cut(tag, ",")
 	return name, jsonTagOpts{
-		omitempty: strings.Contains(rest, "omitempty") || strings.Contains(rest, "omitzero"),
+		omitempty:    strings.Contains(rest, "omitempty") || strings.Contains(rest, "omitzero"),
+		stringEncode: strings.Contains(rest, "string"),
 	}
 }
 
 // applyOpenAPITag parses the `openapi` struct tag and applies constraints to the schema.
+// Tag keys map to JSON Schema and OpenAPI Schema Object keywords.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
+// See: https://json-schema.org/draft/2020-12/json-schema-validation
 func applyOpenAPITag(schema *Schema, tag string) {
 	if tag == "" {
 		return
@@ -325,6 +370,10 @@ func applyOpenAPITag(schema *Schema, tag string) {
 	}
 }
 
+// parseExampleValue converts a string tag value to the appropriate Go type
+// based on the schema's type field.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-9.5
 func parseExampleValue(schema *Schema, value string) any {
 	types := schema.Type.Values()
 	if len(types) == 0 {
@@ -348,10 +397,70 @@ func parseExampleValue(schema *Schema, value string) any {
 	return value
 }
 
+// schemaName returns a unique schema name for the given type. If two types
+// from different packages share the same simple name (e.g., models.User and
+// api.User), the second type gets a qualified name using its package's last
+// path segment as a prefix (e.g., "ApiUser"). When the prefixed name still
+// collides (e.g., three packages with the same suffix, or generic
+// instantiations from the same package with different type arguments that
+// sanitize to the same name), a numeric suffix is appended (e.g., "ApiUser2").
+// Names are used as keys in the Components Object schemas map and in $ref URIs.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
+// See: https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3 ($ref)
+func (g *SchemaGenerator) schemaName(t reflect.Type) string {
+	simple := sanitizeSchemaName(t.Name())
+	if simple == "" || t.PkgPath() == "" {
+		return ""
+	}
+
+	if name, ok := g.typeNames[t]; ok {
+		return name
+	}
+
+	name := simple
+	if existing, ok := g.nameTypes[name]; ok && existing != t {
+		name = pkgPrefix(t.PkgPath()) + simple
+		// If the prefixed name still collides, append a numeric suffix.
+		if existing, ok := g.nameTypes[name]; ok && existing != t {
+			base := name
+			for i := 2; ; i++ {
+				candidate := base + strconv.Itoa(i)
+				if _, ok := g.nameTypes[candidate]; !ok {
+					name = candidate
+					break
+				}
+			}
+		}
+	}
+
+	g.typeNames[t] = name
+	g.nameTypes[name] = t
+	return name
+}
+
+// pkgPrefix extracts the last segment of a Go package path and capitalizes
+// it for use as a schema name prefix (e.g., "net/http" -> "Http").
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
+func pkgPrefix(pkgPath string) string {
+	if idx := strings.LastIndexByte(pkgPath, '/'); idx >= 0 {
+		pkgPath = pkgPath[idx+1:]
+	}
+	if len(pkgPath) == 0 {
+		return ""
+	}
+	pkgPath = strings.ReplaceAll(pkgPath, "-", "_")
+	pkgPath = strings.ReplaceAll(pkgPath, ".", "_")
+	return strings.ToUpper(pkgPath[:1]) + pkgPath[1:]
+}
+
 // sanitizeSchemaName cleans up Go type names for use as OpenAPI component
 // schema keys. Generic type names like "ResponseData[User]" are converted
 // to "ResponseDataUser", and "ResponseData[[]User]" becomes
 // "ResponseDataUserList". Package paths in type parameters are stripped.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
 func sanitizeSchemaName(name string) string {
 	idx := strings.IndexByte(name, '[')
 	if idx < 0 {
@@ -379,6 +488,10 @@ func sanitizeSchemaName(name string) string {
 
 // applyNullable modifies a schema to allow null values by converting
 // the type to an array (e.g., "string" becomes ["string", "null"]).
+// In JSON Schema Draft 2020-12, nullable is expressed via type arrays
+// rather than the OpenAPI 3.0 "nullable" keyword.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.1.1
 func applyNullable(schema *Schema) {
 	if schema.Ref != "" {
 		return
@@ -386,5 +499,29 @@ func applyNullable(schema *Schema) {
 	types := schema.Type.Values()
 	if len(types) > 0 {
 		schema.Type = TypeArray(append(types, "null")...)
+	}
+}
+
+// applyStringEncoding overrides the schema type to "string" to match the
+// encoding/json ",string" tag option, which encodes numeric and boolean
+// values as JSON strings. Nullable types preserve the "null" variant.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#data-types
+func applyStringEncoding(schema *Schema) {
+	types := schema.Type.Values()
+	if len(types) == 0 {
+		return
+	}
+	var hasNull bool
+	for _, t := range types {
+		if t == "null" {
+			hasNull = true
+			break
+		}
+	}
+	if hasNull {
+		schema.Type = TypeArray("string", "null")
+	} else {
+		schema.Type = TypeString("string")
 	}
 }

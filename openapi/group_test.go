@@ -598,6 +598,53 @@ func TestRouteGroup(t *testing.T) {
 		assert.Contains(t, op.Responses["default"].Headers, "X-Request-ID")
 	})
 
+	t.Run("operation response nil overrides group response", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		type SomeBody struct {
+			Code string `json:"code"`
+		}
+
+		g := spec.Group().
+			Response(http.StatusOK, SomeBody{})
+
+		g.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).
+			Summary("List items").
+			Response(http.StatusOK, nil)
+
+		doc := spec.Build(r)
+
+		op := doc.Paths["/items"].Get
+		require.NotNil(t, op)
+		require.Contains(t, op.Responses, "200")
+		assert.Nil(t, op.Responses["200"].Content)
+	})
+
+	t.Run("operation default response nil overrides group default response", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		type ErrResp struct {
+			Code string `json:"code"`
+		}
+
+		g := spec.Group().
+			DefaultResponse(ErrResp{})
+
+		g.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).
+			Summary("List items").
+			Response(http.StatusOK, nil).
+			DefaultResponse(nil)
+
+		doc := spec.Build(r)
+
+		op := doc.Paths["/items"].Get
+		require.NotNil(t, op)
+		require.Contains(t, op.Responses, "default")
+		assert.Nil(t, op.Responses["default"].Content)
+	})
+
 	t.Run("shared responses do not leak between groups", func(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})

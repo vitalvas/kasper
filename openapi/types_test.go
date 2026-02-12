@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestSchemaType(t *testing.T) {
@@ -1232,5 +1233,113 @@ func TestSchemaNewFields(t *testing.T) {
 		assert.NotContains(t, parsed, "maxProperties")
 		assert.NotContains(t, parsed, "dependentRequired")
 		assert.NotContains(t, parsed, "dependentSchemas")
+	})
+}
+
+func TestSchemaTypeYAML(t *testing.T) {
+	t.Run("single type marshals as scalar", func(t *testing.T) {
+		st := TypeString("string")
+		data, err := yaml.Marshal(st)
+		require.NoError(t, err)
+		assert.Equal(t, "string\n", string(data))
+	})
+
+	t.Run("multiple types marshal as sequence", func(t *testing.T) {
+		st := TypeArray("string", "null")
+		data, err := yaml.Marshal(st)
+		require.NoError(t, err)
+		assert.Equal(t, "- string\n- \"null\"\n", string(data))
+	})
+
+	t.Run("empty type marshals as null", func(t *testing.T) {
+		var st SchemaType
+		data, err := yaml.Marshal(st)
+		require.NoError(t, err)
+		assert.Equal(t, "null\n", string(data))
+	})
+
+	t.Run("unmarshal scalar", func(t *testing.T) {
+		var st SchemaType
+		err := yaml.Unmarshal([]byte("integer"), &st)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"integer"}, st.Values())
+	})
+
+	t.Run("unmarshal sequence", func(t *testing.T) {
+		var st SchemaType
+		err := yaml.Unmarshal([]byte("- string\n- \"null\"\n"), &st)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"string", "null"}, st.Values())
+	})
+
+	t.Run("schema roundtrip through YAML", func(t *testing.T) {
+		s := Schema{
+			Type:   TypeString("object"),
+			Format: "test",
+		}
+		data, err := yaml.Marshal(s)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "type: object")
+
+		var roundtrip Schema
+		require.NoError(t, yaml.Unmarshal(data, &roundtrip))
+		assert.Equal(t, TypeString("object"), roundtrip.Type)
+		assert.Equal(t, "test", roundtrip.Format)
+	})
+
+	t.Run("nullable type roundtrip through YAML", func(t *testing.T) {
+		s := Schema{
+			Type: TypeArray("string", "null"),
+		}
+		data, err := yaml.Marshal(s)
+		require.NoError(t, err)
+
+		var roundtrip Schema
+		require.NoError(t, yaml.Unmarshal(data, &roundtrip))
+		assert.Equal(t, []string{"string", "null"}, roundtrip.Type.Values())
+	})
+
+	t.Run("empty type omitted from YAML schema", func(t *testing.T) {
+		s := Schema{
+			Format: "uuid",
+		}
+		data, err := yaml.Marshal(s)
+		require.NoError(t, err)
+
+		yamlStr := string(data)
+		assert.NotRegexp(t, `(?m)^type:`, yamlStr)
+		assert.Contains(t, yamlStr, "format: uuid")
+	})
+
+	t.Run("full document YAML serialization preserves schema types", func(t *testing.T) {
+		doc := Document{
+			OpenAPI: "3.1.0",
+			Info:    Info{Title: "Test", Version: "1.0.0"},
+			Components: &Components{
+				Schemas: map[string]*Schema{
+					"Pet": {
+						Type: TypeString("object"),
+						Properties: map[string]*Schema{
+							"name": {Type: TypeString("string")},
+							"age":  {Type: TypeArray("integer", "null")},
+						},
+					},
+				},
+			},
+		}
+		data, err := yaml.Marshal(doc)
+		require.NoError(t, err)
+
+		yamlStr := string(data)
+		assert.Contains(t, yamlStr, "type: object")
+		assert.Contains(t, yamlStr, "type: string")
+
+		var roundtrip Document
+		require.NoError(t, yaml.Unmarshal(data, &roundtrip))
+		petSchema := roundtrip.Components.Schemas["Pet"]
+		require.NotNil(t, petSchema)
+		assert.Equal(t, TypeString("object"), petSchema.Type)
+		assert.Equal(t, TypeString("string"), petSchema.Properties["name"].Type)
+		assert.Equal(t, []string{"integer", "null"}, petSchema.Properties["age"].Type.Values())
 	})
 }

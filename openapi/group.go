@@ -7,7 +7,10 @@ import (
 )
 
 // groupDefaults holds the default metadata that a RouteGroup applies
-// to every OperationBuilder it creates.
+// to every OperationBuilder it creates. Fields correspond to Operation Object
+// fields that can be shared across a group of operations.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 type groupDefaults struct {
 	tags         []string
 	security     []SecurityRequirement
@@ -27,6 +30,8 @@ type groupDefaults struct {
 // of operations. It creates OperationBuilder instances pre-populated with
 // the group defaults. Groups register builders into the parent Spec's
 // existing maps so Build requires no changes.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 type RouteGroup struct {
 	spec     *Spec
 	defaults groupDefaults
@@ -34,6 +39,8 @@ type RouteGroup struct {
 
 // Tags appends tags to the group defaults. Operations created through
 // this group will inherit these tags and may add more via their own Tags call.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (tags)
 func (g *RouteGroup) Tags(tags ...string) *RouteGroup {
 	g.defaults.tags = append(g.defaults.tags, tags...)
 	return g
@@ -43,6 +50,9 @@ func (g *RouteGroup) Tags(tags ...string) *RouteGroup {
 // through this group inherit these requirements unless they call Security
 // themselves, which replaces the group value. Call with no arguments to
 // mark the group as public (overrides document-level security).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (security)
+// See: https://spec.openapis.org/oas/v3.1.0#security-requirement-object
 func (g *RouteGroup) Security(reqs ...SecurityRequirement) *RouteGroup {
 	if reqs == nil {
 		reqs = []SecurityRequirement{}
@@ -54,12 +64,16 @@ func (g *RouteGroup) Security(reqs ...SecurityRequirement) *RouteGroup {
 
 // Deprecated marks all operations in this group as deprecated. This is a
 // one-way latch: individual operations cannot undo group deprecation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (deprecated)
 func (g *RouteGroup) Deprecated() *RouteGroup {
 	g.defaults.deprecated = true
 	return g
 }
 
 // Server adds a server override to the group defaults.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (servers)
 func (g *RouteGroup) Server(server Server) *RouteGroup {
 	g.defaults.servers = append(g.defaults.servers, server)
 	return g
@@ -67,6 +81,8 @@ func (g *RouteGroup) Server(server Server) *RouteGroup {
 
 // Parameter adds a common parameter to the group defaults. Operations
 // created through this group inherit these parameters and may add more.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
 func (g *RouteGroup) Parameter(param *Parameter) *RouteGroup {
 	g.defaults.parameters = append(g.defaults.parameters, param)
 	return g
@@ -75,6 +91,8 @@ func (g *RouteGroup) Parameter(param *Parameter) *RouteGroup {
 // ExternalDocs sets external documentation for the group. Operations
 // created through this group inherit this value unless they call
 // ExternalDocs themselves, which replaces it.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
 func (g *RouteGroup) ExternalDocs(url, description string) *RouteGroup {
 	g.defaults.externalDocs = &ExternalDocs{URL: url, Description: description}
 	return g
@@ -84,6 +102,9 @@ func (g *RouteGroup) ExternalDocs(url, description string) *RouteGroup {
 // code. All operations created through this group inherit this response.
 // An operation-level Response call for the same status code overrides the
 // group default.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#responses-object
+// See: https://spec.openapis.org/oas/v3.1.0#response-object
 func (g *RouteGroup) Response(statusCode int, body any) *RouteGroup {
 	key := strconv.Itoa(statusCode)
 	if g.defaults.responseContents == nil {
@@ -102,6 +123,9 @@ func (g *RouteGroup) Response(statusCode int, body any) *RouteGroup {
 
 // ResponseContent adds a shared response with the given status code and content
 // type. Use this for non-JSON responses (e.g., "application/xml").
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object
+// See: https://spec.openapis.org/oas/v3.1.0#media-type-object
 func (g *RouteGroup) ResponseContent(statusCode int, contentType string, body any) *RouteGroup {
 	key := strconv.Itoa(statusCode)
 	if g.defaults.responseContents == nil {
@@ -115,6 +139,8 @@ func (g *RouteGroup) ResponseContent(statusCode int, contentType string, body an
 }
 
 // ResponseDescription sets a custom description for a shared group response.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (description)
 func (g *RouteGroup) ResponseDescription(statusCode int, desc string) *RouteGroup {
 	key := strconv.Itoa(statusCode)
 	if g.defaults.responseDescriptions == nil {
@@ -126,6 +152,9 @@ func (g *RouteGroup) ResponseDescription(statusCode int, desc string) *RouteGrou
 
 // ResponseHeader adds a shared header to the response for the given HTTP
 // status code. All operations in this group inherit this header.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (headers)
+// See: https://spec.openapis.org/oas/v3.1.0#header-object
 func (g *RouteGroup) ResponseHeader(statusCode int, name string, h *Header) *RouteGroup {
 	key := strconv.Itoa(statusCode)
 	if g.defaults.responseHeaders == nil {
@@ -140,6 +169,9 @@ func (g *RouteGroup) ResponseHeader(statusCode int, name string, h *Header) *Rou
 
 // ResponseLink adds a shared link to the response for the given HTTP status
 // code. All operations in this group inherit this link.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (links)
+// See: https://spec.openapis.org/oas/v3.1.0#link-object
 func (g *RouteGroup) ResponseLink(statusCode int, name string, l *Link) *RouteGroup {
 	key := strconv.Itoa(statusCode)
 	if g.defaults.responseLinks == nil {
@@ -154,6 +186,8 @@ func (g *RouteGroup) ResponseLink(statusCode int, name string, l *Link) *RouteGr
 
 // DefaultResponse adds a shared application/json default response (catch-all
 // for status codes not covered by specific responses).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#responses-object (default)
 func (g *RouteGroup) DefaultResponse(body any) *RouteGroup {
 	if g.defaults.responseContents == nil {
 		g.defaults.responseContents = make(map[string]map[string]any)
@@ -171,6 +205,8 @@ func (g *RouteGroup) DefaultResponse(body any) *RouteGroup {
 
 // DefaultResponseDescription sets a custom description for the shared default
 // response.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (description)
 func (g *RouteGroup) DefaultResponseDescription(desc string) *RouteGroup {
 	if g.defaults.responseDescriptions == nil {
 		g.defaults.responseDescriptions = make(map[string]string)
@@ -180,6 +216,9 @@ func (g *RouteGroup) DefaultResponseDescription(desc string) *RouteGroup {
 }
 
 // DefaultResponseHeader adds a shared header to the default response.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (headers)
+// See: https://spec.openapis.org/oas/v3.1.0#header-object
 func (g *RouteGroup) DefaultResponseHeader(name string, h *Header) *RouteGroup {
 	if g.defaults.responseHeaders == nil {
 		g.defaults.responseHeaders = make(map[string]map[string]*Header)
@@ -193,6 +232,8 @@ func (g *RouteGroup) DefaultResponseHeader(name string, h *Header) *RouteGroup {
 
 // Route attaches an OperationBuilder to an existing mux route, pre-populated
 // with this group's defaults.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object
 func (g *RouteGroup) Route(route *mux.Route) *OperationBuilder {
 	b := g.newBuilderWithDefaults()
 	g.spec.routeOps[route] = b
@@ -201,6 +242,8 @@ func (g *RouteGroup) Route(route *mux.Route) *OperationBuilder {
 
 // Webhook registers an OpenAPI webhook with the given name and HTTP method,
 // pre-populated with this group's defaults.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object (webhooks)
 func (g *RouteGroup) Webhook(name, method string) *OperationBuilder {
 	if g.spec.webhooks == nil {
 		g.spec.webhooks = make(map[string]map[string]*OperationBuilder)
@@ -216,6 +259,8 @@ func (g *RouteGroup) Webhook(name, method string) *OperationBuilder {
 // Op returns an OperationBuilder for the named route, pre-populated with
 // this group's defaults. If the route name was previously registered,
 // the existing builder is returned (without applying group defaults again).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (operationId)
 func (g *RouteGroup) Op(routeName string) *OperationBuilder {
 	if b, ok := g.spec.operations[routeName]; ok {
 		return b
@@ -227,6 +272,8 @@ func (g *RouteGroup) Op(routeName string) *OperationBuilder {
 
 // newBuilderWithDefaults creates a new OperationBuilder pre-populated with
 // the group's default values.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 func (g *RouteGroup) newBuilderWithDefaults() *OperationBuilder {
 	b := newOperationBuilder()
 

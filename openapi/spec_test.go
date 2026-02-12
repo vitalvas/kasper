@@ -1228,3 +1228,59 @@ func TestAssignOperation(t *testing.T) {
 		assert.Nil(t, pi.Post)
 	})
 }
+
+func TestMultiMethodOperationID(t *testing.T) {
+	t.Run("multi-method route gets unique operation IDs", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/items", dummyHandler).
+			Methods(http.MethodGet, http.MethodPost)).
+			Summary("Items endpoint")
+
+		doc := spec.Build(r)
+		pathItem := doc.Paths["/items"]
+		require.NotNil(t, pathItem)
+		require.NotNil(t, pathItem.Get)
+		require.NotNil(t, pathItem.Post)
+
+		// Each method should have its own operation object.
+		assert.NotSame(t, pathItem.Get, pathItem.Post)
+	})
+
+	t.Run("named multi-method route gets suffixed operation IDs", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/items", dummyHandler).
+			Methods(http.MethodGet, http.MethodPost).
+			Name("items")).
+			Summary("Items endpoint")
+
+		doc := spec.Build(r)
+		pathItem := doc.Paths["/items"]
+		require.NotNil(t, pathItem)
+		require.NotNil(t, pathItem.Get)
+		require.NotNil(t, pathItem.Post)
+
+		assert.Equal(t, "itemsGet", pathItem.Get.OperationID)
+		assert.Equal(t, "itemsPost", pathItem.Post.OperationID)
+	})
+
+	t.Run("single method route keeps original operation ID", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/items", dummyHandler).
+			Methods(http.MethodGet).
+			Name("listItems")).
+			Summary("List items")
+
+		doc := spec.Build(r)
+		pathItem := doc.Paths["/items"]
+		require.NotNil(t, pathItem)
+		require.NotNil(t, pathItem.Get)
+
+		assert.Equal(t, "listItems", pathItem.Get.OperationID)
+	})
+}

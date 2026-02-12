@@ -10,6 +10,8 @@ import (
 )
 
 // macroTypeMap maps mux route macros to OpenAPI type and format.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#data-types
 var macroTypeMap = map[string][2]string{
 	"uuid":     {"string", "uuid"},
 	"int":      {"integer", ""},
@@ -26,6 +28,8 @@ var macroTypeMap = map[string][2]string{
 var pathVarRegexp = regexp.MustCompile(`\{([^}]+)\}`)
 
 // Spec collects OpenAPI metadata for routes and builds a complete Document.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object
 type Spec struct {
 	info       Info
 	servers    []Server
@@ -53,6 +57,8 @@ type Spec struct {
 }
 
 // NewSpec creates a new spec builder with the given API info.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object
 func NewSpec(info Info) *Spec {
 	return &Spec{
 		info:       info,
@@ -62,6 +68,8 @@ func NewSpec(info Info) *Spec {
 }
 
 // AddServer adds a server to the spec.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object (servers)
 func (s *Spec) AddServer(server Server) *Spec {
 	s.servers = append(s.servers, server)
 	return s
@@ -70,6 +78,8 @@ func (s *Spec) AddServer(server Server) *Spec {
 // AddPathServer adds a server override for a specific path. The path must use
 // OpenAPI format (e.g., "/files", "/users/{id}"). All operations under this
 // path inherit these servers, overriding the document-level servers.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object (servers)
 func (s *Spec) AddPathServer(path string, server Server) *Spec {
 	if s.pathServers == nil {
 		s.pathServers = make(map[string][]Server)
@@ -81,6 +91,8 @@ func (s *Spec) AddPathServer(path string, server Server) *Spec {
 // SetPathSummary sets a brief summary for a specific path. The path must use
 // OpenAPI format (e.g., "/users/{id}"). The summary applies to all operations
 // under this path.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object (summary)
 func (s *Spec) SetPathSummary(path, summary string) *Spec {
 	if s.pathSummaries == nil {
 		s.pathSummaries = make(map[string]string)
@@ -92,6 +104,8 @@ func (s *Spec) SetPathSummary(path, summary string) *Spec {
 // SetPathDescription sets a detailed description for a specific path. The path
 // must use OpenAPI format (e.g., "/users/{id}"). The description applies to all
 // operations under this path and supports Markdown.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object (description)
 func (s *Spec) SetPathDescription(path, description string) *Spec {
 	if s.pathDescriptions == nil {
 		s.pathDescriptions = make(map[string]string)
@@ -103,6 +117,8 @@ func (s *Spec) SetPathDescription(path, description string) *Spec {
 // AddPathParameter adds a shared parameter for a specific path. The path must
 // use OpenAPI format (e.g., "/users/{id}"). Path-level parameters apply to all
 // operations under this path and can be overridden at the operation level.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object (parameters)
 func (s *Spec) AddPathParameter(path string, param *Parameter) *Spec {
 	if s.pathParameters == nil {
 		s.pathParameters = make(map[string][]*Parameter)
@@ -112,24 +128,34 @@ func (s *Spec) AddPathParameter(path string, param *Parameter) *Spec {
 }
 
 // SetExternalDocs sets the document-level external documentation link.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object (externalDocs)
+// See: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
 func (s *Spec) SetExternalDocs(url, description string) *Spec {
 	s.externalDocs = &ExternalDocs{URL: url, Description: description}
 	return s
 }
 
 // SetSecurity sets the document-level security requirements.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object (security)
+// See: https://spec.openapis.org/oas/v3.1.0#security-requirement-object
 func (s *Spec) SetSecurity(reqs ...SecurityRequirement) *Spec {
 	s.security = reqs
 	return s
 }
 
 // AddTag adds a user-defined tag with optional description and external docs.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#tag-object
 func (s *Spec) AddTag(tag Tag) *Spec {
 	s.tags = append(s.tags, tag)
 	return s
 }
 
 // AddSecurityScheme registers a reusable security scheme in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#security-scheme-object
 func (s *Spec) AddSecurityScheme(name string, scheme *SecurityScheme) *Spec {
 	if s.securitySchemes == nil {
 		s.securitySchemes = make(map[string]*SecurityScheme)
@@ -139,6 +165,8 @@ func (s *Spec) AddSecurityScheme(name string, scheme *SecurityScheme) *Spec {
 }
 
 // AddComponentResponse registers a reusable response in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (responses)
 func (s *Spec) AddComponentResponse(name string, resp *Response) *Spec {
 	if s.compResponses == nil {
 		s.compResponses = make(map[string]*Response)
@@ -148,6 +176,8 @@ func (s *Spec) AddComponentResponse(name string, resp *Response) *Spec {
 }
 
 // AddComponentParameter registers a reusable parameter in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (parameters)
 func (s *Spec) AddComponentParameter(name string, param *Parameter) *Spec {
 	if s.compParameters == nil {
 		s.compParameters = make(map[string]*Parameter)
@@ -157,6 +187,8 @@ func (s *Spec) AddComponentParameter(name string, param *Parameter) *Spec {
 }
 
 // AddComponentExample registers a reusable example in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (examples)
 func (s *Spec) AddComponentExample(name string, ex *Example) *Spec {
 	if s.compExamples == nil {
 		s.compExamples = make(map[string]*Example)
@@ -166,6 +198,8 @@ func (s *Spec) AddComponentExample(name string, ex *Example) *Spec {
 }
 
 // AddComponentRequestBody registers a reusable request body in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (requestBodies)
 func (s *Spec) AddComponentRequestBody(name string, rb *RequestBody) *Spec {
 	if s.compReqBodies == nil {
 		s.compReqBodies = make(map[string]*RequestBody)
@@ -175,6 +209,8 @@ func (s *Spec) AddComponentRequestBody(name string, rb *RequestBody) *Spec {
 }
 
 // AddComponentHeader registers a reusable header in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (headers)
 func (s *Spec) AddComponentHeader(name string, h *Header) *Spec {
 	if s.compHeaders == nil {
 		s.compHeaders = make(map[string]*Header)
@@ -184,6 +220,8 @@ func (s *Spec) AddComponentHeader(name string, h *Header) *Spec {
 }
 
 // AddComponentLink registers a reusable link in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (links)
 func (s *Spec) AddComponentLink(name string, l *Link) *Spec {
 	if s.compLinks == nil {
 		s.compLinks = make(map[string]*Link)
@@ -193,6 +231,8 @@ func (s *Spec) AddComponentLink(name string, l *Link) *Spec {
 }
 
 // AddComponentCallback registers a reusable callback in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (callbacks)
 func (s *Spec) AddComponentCallback(name string, cb *Callback) *Spec {
 	if s.compCallbacks == nil {
 		s.compCallbacks = make(map[string]*Callback)
@@ -202,6 +242,8 @@ func (s *Spec) AddComponentCallback(name string, cb *Callback) *Spec {
 }
 
 // AddComponentPathItem registers a reusable path item in components.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (pathItems)
 func (s *Spec) AddComponentPathItem(name string, pi *PathItem) *Spec {
 	if s.compPathItems == nil {
 		s.compPathItems = make(map[string]*PathItem)
@@ -214,6 +256,8 @@ func (s *Spec) AddComponentPathItem(name string, pi *PathItem) *Spec {
 // Webhooks describe API-initiated callbacks that are not tied to a specific
 // path on the mux router. The returned OperationBuilder has the same fluent
 // API as Route and Op.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object (webhooks)
 func (s *Spec) Webhook(name, method string) *OperationBuilder {
 	if s.webhooks == nil {
 		s.webhooks = make(map[string]map[string]*OperationBuilder)
@@ -230,12 +274,16 @@ func (s *Spec) Webhook(name, method string) *OperationBuilder {
 // to a logical group of operations. The returned group provides the same Route
 // and Op methods as Spec, but pre-populates each OperationBuilder with the
 // group's default tags, security, servers, parameters, and external docs.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
 func (s *Spec) Group() *RouteGroup {
 	return &RouteGroup{spec: s}
 }
 
 // Op returns an OperationBuilder for the named route.
 // If the route name was not previously registered, a new builder is created.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (operationId)
 func (s *Spec) Op(routeName string) *OperationBuilder {
 	if b, ok := s.operations[routeName]; ok {
 		return b
@@ -247,6 +295,8 @@ func (s *Spec) Op(routeName string) *OperationBuilder {
 
 // Route attaches an OperationBuilder to an existing mux route.
 // The route can be configured with any mux features (Methods, Headers, Queries, etc.).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object
 func (s *Spec) Route(route *mux.Route) *OperationBuilder {
 	b := newOperationBuilder()
 	s.routeOps[route] = b
@@ -254,6 +304,8 @@ func (s *Spec) Route(route *mux.Route) *OperationBuilder {
 }
 
 // Build walks the router and assembles a complete OpenAPI Document.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object
 func (s *Spec) Build(r *mux.Router) *Document {
 	gen := NewSchemaGenerator()
 	doc := &Document{
@@ -296,12 +348,18 @@ func (s *Spec) Build(r *mux.Router) *Document {
 			doc.Paths[openAPIPath] = pathItem
 		}
 
-		// Build the operation with route name as operation ID.
-		operationID := route.GetName()
-		op := builder.buildOperation(gen, operationID, pathParams)
-
-		// Assign to correct HTTP method.
+		// Build one operation per method. When a route registers multiple
+		// methods, each gets a distinct operationId to satisfy the OpenAPI
+		// uniqueness requirement.
+		//
+		// See: https://spec.openapis.org/oas/v3.1.0#operation-object (operationId)
+		baseID := route.GetName()
 		for _, method := range methods {
+			opID := baseID
+			if len(methods) > 1 && opID != "" {
+				opID = opID + strings.ToUpper(method[:1]) + strings.ToLower(method[1:])
+			}
+			op := builder.buildOperation(gen, opID, pathParams)
 			assignOperation(pathItem, method, op)
 		}
 
@@ -352,8 +410,10 @@ func (s *Spec) Build(r *mux.Router) *Document {
 	return doc
 }
 
-// buildComponents assembles the Components object from generated schemas
+// buildComponents assembles the Components Object from generated schemas
 // and all user-registered component maps.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object
 func (s *Spec) buildComponents(gen *SchemaGenerator) *Components {
 	schemas := gen.Schemas()
 
@@ -411,6 +471,9 @@ func (s *Spec) buildComponents(gen *SchemaGenerator) *Components {
 // User-defined tags take precedence (their description and externalDocs are kept).
 // Tags not seen in operations but defined by the user are still included.
 // The result is sorted alphabetically.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object (tags)
+// See: https://spec.openapis.org/oas/v3.1.0#tag-object
 func (s *Spec) mergeTags(pathMaps ...map[string]*PathItem) []Tag {
 	// Build a map of user-defined tags for quick lookup.
 	userTags := make(map[string]Tag, len(s.tags))
@@ -464,6 +527,8 @@ func (s *Spec) mergeTags(pathMaps ...map[string]*PathItem) []Tag {
 
 // assignOperation assigns an operation to the correct HTTP method field
 // on the path item.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#path-item-object
 func assignOperation(pathItem *PathItem, method string, op *Operation) {
 	switch method {
 	case http.MethodGet:
@@ -487,6 +552,9 @@ func assignOperation(pathItem *PathItem, method string, op *Operation) {
 
 // parsePath extracts variables from a mux path template, converts it to
 // OpenAPI format, and generates parameter objects.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#paths-object
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
 func parsePath(tpl string) (string, []*Parameter) {
 	var params []*Parameter
 

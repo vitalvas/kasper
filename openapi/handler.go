@@ -13,6 +13,9 @@ import (
 )
 
 // DocsUI selects which interactive documentation UI to serve.
+// The UI renders the OpenAPI Document as interactive HTML documentation.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-document
 type DocsUI int
 
 const (
@@ -22,6 +25,9 @@ const (
 )
 
 // HandleConfig configures the endpoints registered by Handle.
+// JSON and YAML endpoints serve the serialized OpenAPI Document.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-document
 type HandleConfig struct {
 	// UI selects the interactive docs UI (default: DocsSwaggerUI).
 	UI DocsUI
@@ -51,6 +57,7 @@ type HandleConfig struct {
 	DisableDocs bool
 }
 
+// jsonFilename returns the configured JSON spec filename, defaulting to "schema.json".
 func (cfg HandleConfig) jsonFilename() string {
 	if cfg.JSONFilename == "" {
 		return "schema.json"
@@ -58,6 +65,7 @@ func (cfg HandleConfig) jsonFilename() string {
 	return cfg.JSONFilename
 }
 
+// yamlFilename returns the configured YAML spec filename, defaulting to "schema.yaml".
 func (cfg HandleConfig) yamlFilename() string {
 	if cfg.YAMLFilename == "" {
 		return "schema.yaml"
@@ -98,6 +106,8 @@ func resolvePath(basePath, filename string) string {
 //
 // Both <basePath> and <basePath>/ serve the docs UI. The spec is built once
 // on first request and cached.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-document
 func (s *Spec) Handle(r *mux.Router, basePath string, cfg HandleConfig) {
 	basePath = strings.TrimRight(basePath, "/")
 
@@ -130,6 +140,9 @@ func (s *Spec) Handle(r *mux.Router, basePath string, cfg HandleConfig) {
 	}
 }
 
+// registerJSON registers a handler that serves the OpenAPI Document as JSON.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-document
 func (s *Spec) registerJSON(r *mux.Router, path string) {
 	var (
 		once     sync.Once
@@ -156,6 +169,9 @@ func (s *Spec) registerJSON(r *mux.Router, path string) {
 	})
 }
 
+// registerYAML registers a handler that serves the OpenAPI Document as YAML.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-document
 func (s *Spec) registerYAML(r *mux.Router, path string) {
 	var (
 		once     sync.Once
@@ -182,6 +198,7 @@ func (s *Spec) registerYAML(r *mux.Router, path string) {
 	})
 }
 
+// registerDocs registers a handler that serves the interactive HTML documentation UI.
 func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg HandleConfig, specURL string) {
 	var (
 		once sync.Once
