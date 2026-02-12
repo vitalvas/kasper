@@ -62,17 +62,34 @@ func TestCloseCodeConstants(t *testing.T) {
 }
 
 func TestCloseError(t *testing.T) {
-	t.Run("Error message format", func(t *testing.T) {
-		err := &CloseError{Code: CloseNormalClosure, Text: "goodbye"}
-		assert.Contains(t, err.Error(), "websocket: close")
-		assert.Contains(t, err.Error(), "1000")
-		assert.Contains(t, err.Error(), "goodbye")
-	})
+	tests := []struct {
+		name         string
+		code         int
+		text         string
+		wantContains []string
+	}{
+		{
+			name:         "Error message format",
+			code:         CloseNormalClosure,
+			text:         "goodbye",
+			wantContains: []string{"websocket: close", "1000", "goodbye"},
+		},
+		{
+			name:         "Unknown close code",
+			code:         4000,
+			text:         "custom",
+			wantContains: []string{"4000"},
+		},
+	}
 
-	t.Run("Unknown close code", func(t *testing.T) {
-		err := &CloseError{Code: 4000, Text: "custom"}
-		assert.Contains(t, err.Error(), "4000")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &CloseError{Code: tt.code, Text: tt.text}
+			for _, s := range tt.wantContains {
+				assert.Contains(t, err.Error(), s)
+			}
+		})
+	}
 }
 
 func TestCloseCodeString(t *testing.T) {
@@ -290,15 +307,20 @@ func TestConnDeadlines(t *testing.T) {
 	conn := newConn(server, true, 0, 0)
 	deadline := time.Now().Add(time.Second)
 
-	t.Run("SetReadDeadline", func(t *testing.T) {
-		err := conn.SetReadDeadline(deadline)
-		assert.NoError(t, err)
-	})
+	tests := []struct {
+		name string
+		fn   func(time.Time) error
+	}{
+		{"SetReadDeadline", conn.SetReadDeadline},
+		{"SetWriteDeadline", conn.SetWriteDeadline},
+	}
 
-	t.Run("SetWriteDeadline", func(t *testing.T) {
-		err := conn.SetWriteDeadline(deadline)
-		assert.NoError(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn(deadline)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestWriteControlValidation(t *testing.T) {
@@ -308,16 +330,32 @@ func TestWriteControlValidation(t *testing.T) {
 
 	conn := newConn(server, true, 0, 0)
 
-	t.Run("Invalid message type", func(t *testing.T) {
-		err := conn.WriteControl(TextMessage, []byte("test"), time.Now().Add(time.Second))
-		assert.ErrorIs(t, err, ErrInvalidControlFrame)
-	})
+	tests := []struct {
+		name    string
+		msgType int
+		payload []byte
+		wantErr error
+	}{
+		{
+			name:    "Invalid message type",
+			msgType: TextMessage,
+			payload: []byte("test"),
+			wantErr: ErrInvalidControlFrame,
+		},
+		{
+			name:    "Payload too big",
+			msgType: PingMessage,
+			payload: make([]byte, 126),
+			wantErr: ErrControlFramePayloadTooBig,
+		},
+	}
 
-	t.Run("Payload too big", func(t *testing.T) {
-		bigPayload := make([]byte, 126)
-		err := conn.WriteControl(PingMessage, bigPayload, time.Now().Add(time.Second))
-		assert.ErrorIs(t, err, ErrControlFramePayloadTooBig)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := conn.WriteControl(tt.msgType, tt.payload, time.Now().Add(time.Second))
+			assert.ErrorIs(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestWriteMessageValidation(t *testing.T) {
@@ -395,27 +433,35 @@ func TestWriteControlFrame(t *testing.T) {
 }
 
 func TestWriteDataFrame(t *testing.T) {
-	t.Run("Server writes text message", func(t *testing.T) {
-		mock := newMockConn()
-		conn := newConn(mock, true, 0, 0)
+	tests := []struct {
+		name    string
+		msgType int
+		data    []byte
+	}{
+		{
+			name:    "Server writes text message",
+			msgType: TextMessage,
+			data:    []byte("hello"),
+		},
+		{
+			name:    "Server writes binary message",
+			msgType: BinaryMessage,
+			data:    []byte{0x01, 0x02, 0x03},
+		},
+	}
 
-		err := conn.WriteMessage(TextMessage, []byte("hello"))
-		require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockConn()
+			conn := newConn(mock, true, 0, 0)
 
-		data := mock.writeBuf.Bytes()
-		assert.True(t, len(data) >= 2)
-	})
+			err := conn.WriteMessage(tt.msgType, tt.data)
+			require.NoError(t, err)
 
-	t.Run("Server writes binary message", func(t *testing.T) {
-		mock := newMockConn()
-		conn := newConn(mock, true, 0, 0)
-
-		err := conn.WriteMessage(BinaryMessage, []byte{0x01, 0x02, 0x03})
-		require.NoError(t, err)
-
-		data := mock.writeBuf.Bytes()
-		assert.True(t, len(data) >= 2)
-	})
+			data := mock.writeBuf.Bytes()
+			assert.True(t, len(data) >= 2)
+		})
+	}
 }
 
 func TestReadFrame(t *testing.T) {
@@ -1397,33 +1443,36 @@ func TestNextReaderControlFrames(t *testing.T) {
 }
 
 func TestNextReaderInvalidFrames(t *testing.T) {
-	t.Run("Invalid opcode", func(t *testing.T) {
-		var buf bytes.Buffer
+	tests := []struct {
+		name    string
+		frame   []byte
+		wantErr error
+	}{
+		{
+			name:    "Invalid opcode",
+			frame:   []byte{0x83, 0x05, 'h', 'e', 'l', 'l', 'o'},
+			wantErr: ErrInvalidOpcode,
+		},
+		{
+			name:    "Unexpected continuation frame",
+			frame:   []byte{0x80, 0x05, 'h', 'e', 'l', 'l', 'o'},
+			wantErr: ErrUnexpectedContinuation,
+		},
+	}
 
-		// Invalid opcode 3 (reserved).
-		buf.Write([]byte{0x83, 0x05, 'h', 'e', 'l', 'l', 'o'})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			buf.Write(tt.frame)
 
-		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
-		conn := newConn(mockConn, true, 1024, 1024)
+			mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+			conn := newConn(mc, true, 1024, 1024)
 
-		_, _, err := conn.NextReader()
-		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrInvalidOpcode)
-	})
-
-	t.Run("Unexpected continuation frame", func(t *testing.T) {
-		var buf bytes.Buffer
-
-		// Continuation frame without a data frame first.
-		buf.Write([]byte{0x80, 0x05, 'h', 'e', 'l', 'l', 'o'})
-
-		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
-		conn := newConn(mockConn, true, 1024, 1024)
-
-		_, _, err := conn.NextReader()
-		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrUnexpectedContinuation)
-	})
+			_, _, err := conn.NextReader()
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestMessageWriterContinuation(t *testing.T) {

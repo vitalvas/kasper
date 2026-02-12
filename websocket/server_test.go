@@ -259,38 +259,26 @@ func TestParseExtensions(t *testing.T) {
 }
 
 func TestUpgraderSelectSubprotocol(t *testing.T) {
-	t.Run("Match found", func(t *testing.T) {
-		u := &Upgrader{
-			Subprotocols: []string{"graphql-ws", "graphql-transport-ws"},
-		}
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("Sec-WebSocket-Protocol", "graphql-transport-ws, chat")
+	tests := []struct {
+		name         string
+		serverProtos []string
+		clientHeader string
+		expected     string
+	}{
+		{"Match found", []string{"graphql-ws", "graphql-transport-ws"}, "graphql-transport-ws, chat", "graphql-transport-ws"},
+		{"No match", []string{"graphql-ws"}, "chat", ""},
+		{"Server preference order", []string{"preferred", "fallback"}, "fallback, preferred", "preferred"},
+	}
 
-		result := u.selectSubprotocol(r)
-		assert.Equal(t, "graphql-transport-ws", result)
-	})
-
-	t.Run("No match", func(t *testing.T) {
-		u := &Upgrader{
-			Subprotocols: []string{"graphql-ws"},
-		}
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("Sec-WebSocket-Protocol", "chat")
-
-		result := u.selectSubprotocol(r)
-		assert.Equal(t, "", result)
-	})
-
-	t.Run("Server preference order", func(t *testing.T) {
-		u := &Upgrader{
-			Subprotocols: []string{"preferred", "fallback"},
-		}
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("Sec-WebSocket-Protocol", "fallback, preferred")
-
-		result := u.selectSubprotocol(r)
-		assert.Equal(t, "preferred", result)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u := &Upgrader{Subprotocols: tt.serverProtos}
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Sec-WebSocket-Protocol", tt.clientHeader)
+			result := u.selectSubprotocol(r)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 type mockHijacker struct {

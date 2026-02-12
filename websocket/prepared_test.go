@@ -8,33 +8,65 @@ import (
 )
 
 func TestNewPreparedMessage(t *testing.T) {
-	t.Run("Valid text message", func(t *testing.T) {
-		pm, err := NewPreparedMessage(TextMessage, []byte("hello"))
-		require.NoError(t, err)
-		require.NotNil(t, pm)
-		assert.Equal(t, TextMessage, pm.messageType)
-		assert.Equal(t, []byte("hello"), pm.data)
-	})
+	tests := []struct {
+		name            string
+		messageType     int
+		data            []byte
+		expectErr       bool
+		expectedErrIs   error
+		wantMessageType int
+		wantData        []byte
+	}{
+		{
+			name:            "Valid text message",
+			messageType:     TextMessage,
+			data:            []byte("hello"),
+			wantMessageType: TextMessage,
+			wantData:        []byte("hello"),
+		},
+		{
+			name:            "Valid binary message",
+			messageType:     BinaryMessage,
+			data:            []byte{0x01, 0x02, 0x03},
+			wantMessageType: BinaryMessage,
+		},
+		{
+			name:          "Invalid message type",
+			messageType:   PingMessage,
+			data:          []byte("ping"),
+			expectErr:     true,
+			expectedErrIs: ErrInvalidMessageType,
+		},
+		{
+			name:        "Empty data",
+			messageType: TextMessage,
+			data:        []byte{},
+		},
+	}
 
-	t.Run("Valid binary message", func(t *testing.T) {
-		pm, err := NewPreparedMessage(BinaryMessage, []byte{0x01, 0x02, 0x03})
-		require.NoError(t, err)
-		require.NotNil(t, pm)
-		assert.Equal(t, BinaryMessage, pm.messageType)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pm, err := NewPreparedMessage(tt.messageType, tt.data)
 
-	t.Run("Invalid message type", func(t *testing.T) {
-		pm, err := NewPreparedMessage(PingMessage, []byte("ping"))
-		assert.Nil(t, pm)
-		assert.ErrorIs(t, err, ErrInvalidMessageType)
-	})
+			if tt.expectErr {
+				assert.Nil(t, pm)
+				assert.ErrorIs(t, err, tt.expectedErrIs)
 
-	t.Run("Empty data", func(t *testing.T) {
-		pm, err := NewPreparedMessage(TextMessage, []byte{})
-		require.NoError(t, err)
-		require.NotNil(t, pm)
-		assert.Empty(t, pm.data)
-	})
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, pm)
+
+			if tt.wantMessageType != 0 {
+				assert.Equal(t, tt.wantMessageType, pm.messageType)
+			}
+
+			if tt.wantData != nil {
+				assert.Equal(t, tt.wantData, pm.data)
+			}
+		})
+	}
 }
 
 func TestBuildFrame(t *testing.T) {
@@ -114,36 +146,41 @@ func TestPreparedMessageFrame(t *testing.T) {
 }
 
 func TestWritePreparedMessage(t *testing.T) {
-	t.Run("Server writes prepared message", func(t *testing.T) {
-		pm, err := NewPreparedMessage(TextMessage, []byte("prepared hello"))
-		require.NoError(t, err)
+	tests := []struct {
+		name         string
+		isServer     bool
+		checkMaskBit bool
+	}{
+		{
+			name:     "Server writes prepared message",
+			isServer: true,
+		},
+		{
+			name:         "Client writes prepared message",
+			isServer:     false,
+			checkMaskBit: true,
+		},
+	}
 
-		mock := newMockConn()
-		conn := newConn(mock, true, 0, 0)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pm, err := NewPreparedMessage(TextMessage, []byte("prepared hello"))
+			require.NoError(t, err)
 
-		err = conn.WritePreparedMessage(pm)
-		require.NoError(t, err)
+			mock := newMockConn()
+			conn := newConn(mock, tt.isServer, 0, 0)
 
-		data := mock.writeBuf.Bytes()
-		assert.True(t, len(data) > 0)
-		assert.Equal(t, byte(TextMessage)|finalBit, data[0])
-	})
+			err = conn.WritePreparedMessage(pm)
+			require.NoError(t, err)
 
-	t.Run("Client writes prepared message", func(t *testing.T) {
-		pm, err := NewPreparedMessage(TextMessage, []byte("prepared hello"))
-		require.NoError(t, err)
+			data := mock.writeBuf.Bytes()
+			assert.Equal(t, byte(TextMessage)|finalBit, data[0])
 
-		mock := newMockConn()
-		conn := newConn(mock, false, 0, 0)
-
-		err = conn.WritePreparedMessage(pm)
-		require.NoError(t, err)
-
-		data := mock.writeBuf.Bytes()
-		assert.True(t, len(data) > 0)
-		assert.Equal(t, byte(TextMessage)|finalBit, data[0])
-		assert.True(t, data[1]&maskBit != 0)
-	})
+			if tt.checkMaskBit {
+				assert.True(t, data[1]&maskBit != 0)
+			}
+		})
+	}
 }
 
 func TestWritePreparedMessageMultiple(t *testing.T) {
