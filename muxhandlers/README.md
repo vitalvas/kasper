@@ -48,3 +48,51 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## Basic Auth Middleware
+
+`BasicAuthMiddleware` implements HTTP Basic Authentication per [RFC 7617](https://www.rfc-editor.org/rfc/rfc7617). Credentials can be validated via a dynamic callback (`ValidateFunc`) or a static map (`Credentials`). When both are set, `ValidateFunc` takes priority. Static credential comparison uses `crypto/subtle.ConstantTimeCompare` to prevent timing attacks.
+
+### BasicAuthConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Realm` | `string` | Authentication realm for `WWW-Authenticate` header; defaults to `"Restricted"` |
+| `ValidateFunc` | `func(string, string) bool` | Dynamic credential validation callback (username, password); takes priority over `Credentials` |
+| `Credentials` | `map[string]string` | Static username-to-password map; compared with constant-time comparison |
+
+### Usage with ValidateFunc
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.BasicAuthMiddleware(muxhandlers.BasicAuthConfig{
+    Realm: "My App",
+    ValidateFunc: func(username, password string) bool {
+        return username == "admin" && password == "secret"
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+### Usage with Credentials
+
+```go
+mw, err := muxhandlers.BasicAuthMiddleware(muxhandlers.BasicAuthConfig{
+    Credentials: map[string]string{
+        "admin": "secret",
+        "user":  "password",
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
