@@ -29,74 +29,147 @@ func TestNewSpec(t *testing.T) {
 }
 
 func TestParsePath(t *testing.T) {
-	t.Run("no variables", func(t *testing.T) {
-		path, params := parsePath("/users")
-		assert.Equal(t, "/users", path)
-		assert.Empty(t, params)
-	})
+	tests := []struct {
+		name         string
+		input        string
+		expectedPath string
+		paramCount   int
+		params       []struct {
+			name       string
+			schemaType SchemaType
+			format     string
+		}
+	}{
+		{
+			name:         "no variables",
+			input:        "/users",
+			expectedPath: "/users",
+			paramCount:   0,
+		},
+		{
+			name:         "simple variable",
+			input:        "/users/{id}",
+			expectedPath: "/users/{id}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"id", TypeString("string"), ""},
+			},
+		},
+		{
+			name:         "uuid macro",
+			input:        "/users/{id:uuid}",
+			expectedPath: "/users/{id}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"id", TypeString("string"), "uuid"},
+			},
+		},
+		{
+			name:         "int macro",
+			input:        "/articles/{page:int}",
+			expectedPath: "/articles/{page}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"page", TypeString("integer"), ""},
+			},
+		},
+		{
+			name:         "float macro",
+			input:        "/values/{v:float}",
+			expectedPath: "/values/{v}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"v", TypeString("number"), ""},
+			},
+		},
+		{
+			name:         "date macro",
+			input:        "/events/{d:date}",
+			expectedPath: "/events/{d}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"d", TypeString("string"), "date"},
+			},
+		},
+		{
+			name:         "domain macro",
+			input:        "/sites/{host:domain}",
+			expectedPath: "/sites/{host}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"host", TypeString("string"), "hostname"},
+			},
+		},
+		{
+			name:         "unknown macro treated as regex",
+			input:        "/items/{code:[A-Z]+}",
+			expectedPath: "/items/{code}",
+			paramCount:   1,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"code", TypeString("string"), ""},
+			},
+		},
+		{
+			name:         "multiple variables",
+			input:        "/users/{userId:uuid}/posts/{postId:int}",
+			expectedPath: "/users/{userId}/posts/{postId}",
+			paramCount:   2,
+			params: []struct {
+				name       string
+				schemaType SchemaType
+				format     string
+			}{
+				{"userId", TypeString("string"), "uuid"},
+				{"postId", TypeString("integer"), ""},
+			},
+		},
+	}
 
-	t.Run("simple variable", func(t *testing.T) {
-		path, params := parsePath("/users/{id}")
-		assert.Equal(t, "/users/{id}", path)
-		require.Len(t, params, 1)
-		assert.Equal(t, "id", params[0].Name)
-		assert.Equal(t, "path", params[0].In)
-		assert.True(t, params[0].Required)
-		assert.Equal(t, TypeString("string"), params[0].Schema.Type)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, params := parsePath(tt.input)
+			assert.Equal(t, tt.expectedPath, path)
+			require.Len(t, params, tt.paramCount)
 
-	t.Run("uuid macro", func(t *testing.T) {
-		path, params := parsePath("/users/{id:uuid}")
-		assert.Equal(t, "/users/{id}", path)
-		require.Len(t, params, 1)
-		assert.Equal(t, "id", params[0].Name)
-		assert.Equal(t, TypeString("string"), params[0].Schema.Type)
-		assert.Equal(t, "uuid", params[0].Schema.Format)
-	})
-
-	t.Run("int macro", func(t *testing.T) {
-		_, params := parsePath("/articles/{page:int}")
-		require.Len(t, params, 1)
-		assert.Equal(t, TypeString("integer"), params[0].Schema.Type)
-		assert.Empty(t, params[0].Schema.Format)
-	})
-
-	t.Run("float macro", func(t *testing.T) {
-		_, params := parsePath("/values/{v:float}")
-		require.Len(t, params, 1)
-		assert.Equal(t, TypeString("number"), params[0].Schema.Type)
-	})
-
-	t.Run("date macro", func(t *testing.T) {
-		_, params := parsePath("/events/{d:date}")
-		require.Len(t, params, 1)
-		assert.Equal(t, TypeString("string"), params[0].Schema.Type)
-		assert.Equal(t, "date", params[0].Schema.Format)
-	})
-
-	t.Run("domain macro", func(t *testing.T) {
-		_, params := parsePath("/sites/{host:domain}")
-		require.Len(t, params, 1)
-		assert.Equal(t, TypeString("string"), params[0].Schema.Type)
-		assert.Equal(t, "hostname", params[0].Schema.Format)
-	})
-
-	t.Run("unknown macro treated as regex", func(t *testing.T) {
-		path, params := parsePath("/items/{code:[A-Z]+}")
-		assert.Equal(t, "/items/{code}", path)
-		require.Len(t, params, 1)
-		assert.Equal(t, TypeString("string"), params[0].Schema.Type)
-	})
-
-	t.Run("multiple variables", func(t *testing.T) {
-		path, params := parsePath("/users/{userId:uuid}/posts/{postId:int}")
-		assert.Equal(t, "/users/{userId}/posts/{postId}", path)
-		require.Len(t, params, 2)
-		assert.Equal(t, "userId", params[0].Name)
-		assert.Equal(t, "uuid", params[0].Schema.Format)
-		assert.Equal(t, "postId", params[1].Name)
-		assert.Equal(t, TypeString("integer"), params[1].Schema.Type)
-	})
+			for i, expected := range tt.params {
+				assert.Equal(t, expected.name, params[i].Name)
+				assert.Equal(t, "path", params[i].In)
+				assert.True(t, params[i].Required)
+				assert.Equal(t, expected.schemaType, params[i].Schema.Type)
+				if expected.format != "" {
+					assert.Equal(t, expected.format, params[i].Schema.Format)
+				}
+			}
+		})
+	}
 }
 
 func TestBuildVariantB(t *testing.T) {
@@ -214,27 +287,34 @@ func TestBuildRoute(t *testing.T) {
 }
 
 func TestBuildRouteAllMethods(t *testing.T) {
-	t.Run("put patch head", func(t *testing.T) {
-		r := mux.NewRouter()
+	tests := []struct {
+		method  string
+		summary string
+		check   func(*PathItem) *Operation
+	}{
+		{http.MethodPut, "Update item", func(pi *PathItem) *Operation { return pi.Put }},
+		{http.MethodPatch, "Patch item", func(pi *PathItem) *Operation { return pi.Patch }},
+		{http.MethodHead, "Head item", func(pi *PathItem) *Operation { return pi.Head }},
+	}
 
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+	r := mux.NewRouter()
+	spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
 
-		spec.Route(r.HandleFunc("/items/{id}", dummyHandler).Methods(http.MethodPut)).
-			Summary("Update item")
+	for _, tt := range tests {
+		spec.Route(r.HandleFunc("/items/{id}", dummyHandler).Methods(tt.method)).
+			Summary(tt.summary)
+	}
 
-		spec.Route(r.HandleFunc("/items/{id}", dummyHandler).Methods(http.MethodPatch)).
-			Summary("Patch item")
+	doc := spec.Build(r)
+	require.Contains(t, doc.Paths, "/items/{id}")
 
-		spec.Route(r.HandleFunc("/items/{id}", dummyHandler).Methods(http.MethodHead)).
-			Summary("Head item")
-
-		doc := spec.Build(r)
-
-		require.Contains(t, doc.Paths, "/items/{id}")
-		assert.NotNil(t, doc.Paths["/items/{id}"].Put)
-		assert.NotNil(t, doc.Paths["/items/{id}"].Patch)
-		assert.NotNil(t, doc.Paths["/items/{id}"].Head)
-	})
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			op := tt.check(doc.Paths["/items/{id}"])
+			require.NotNil(t, op)
+			assert.Equal(t, tt.summary, op.Summary)
+		})
+	}
 }
 
 func TestBuildTagAutoAggregation(t *testing.T) {
@@ -451,39 +531,52 @@ func TestSpecBuilderMethods(t *testing.T) {
 }
 
 func TestMergeTags(t *testing.T) {
-	t.Run("empty paths", func(t *testing.T) {
-		s := &Spec{}
-		tags := s.mergeTags(nil)
-		assert.Empty(t, tags)
-	})
-
-	t.Run("deduplicates and sorts", func(t *testing.T) {
-		paths := map[string]*PathItem{
-			"/a": {
-				Get:  &Operation{Tags: []string{"zebra", "alpha"}},
-				Post: &Operation{Tags: []string{"alpha"}},
+	tests := []struct {
+		name         string
+		pathMaps     []map[string]*PathItem
+		expectedTags []string
+	}{
+		{
+			name:         "empty paths",
+			pathMaps:     nil,
+			expectedTags: nil,
+		},
+		{
+			name: "deduplicates and sorts",
+			pathMaps: []map[string]*PathItem{
+				{
+					"/a": {
+						Get:  &Operation{Tags: []string{"zebra", "alpha"}},
+						Post: &Operation{Tags: []string{"alpha"}},
+					},
+				},
 			},
-		}
-		s := &Spec{}
-		tags := s.mergeTags(paths)
-		require.Len(t, tags, 2)
-		assert.Equal(t, "alpha", tags[0].Name)
-		assert.Equal(t, "zebra", tags[1].Name)
-	})
+			expectedTags: []string{"alpha", "zebra"},
+		},
+		{
+			name: "merges tags from multiple path maps",
+			pathMaps: []map[string]*PathItem{
+				{"/a": {Get: &Operation{Tags: []string{"api"}}}},
+				{"onEvent": {Post: &Operation{Tags: []string{"webhooks", "api"}}}},
+			},
+			expectedTags: []string{"api", "webhooks"},
+		},
+	}
 
-	t.Run("merges tags from multiple path maps", func(t *testing.T) {
-		paths := map[string]*PathItem{
-			"/a": {Get: &Operation{Tags: []string{"api"}}},
-		}
-		webhooks := map[string]*PathItem{
-			"onEvent": {Post: &Operation{Tags: []string{"webhooks", "api"}}},
-		}
-		s := &Spec{}
-		tags := s.mergeTags(paths, webhooks)
-		require.Len(t, tags, 2)
-		assert.Equal(t, "api", tags[0].Name)
-		assert.Equal(t, "webhooks", tags[1].Name)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Spec{}
+			tags := s.mergeTags(tt.pathMaps...)
+			if tt.expectedTags == nil {
+				assert.Empty(t, tags)
+			} else {
+				require.Len(t, tags, len(tt.expectedTags))
+				for i, name := range tt.expectedTags {
+					assert.Equal(t, name, tags[i].Name)
+				}
+			}
+		})
+	}
 }
 
 func TestBuildExternalDocs(t *testing.T) {
@@ -596,118 +689,102 @@ func TestBuildUserDefinedTags(t *testing.T) {
 }
 
 func TestBuildComponents(t *testing.T) {
-	t.Run("responses in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentResponse("NotFound", &Response{Description: "Not found"})
+	cb := Callback{"{$url}": &PathItem{Post: &Operation{Summary: "cb"}}}
 
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
+	tests := []struct {
+		name      string
+		setup     func(*Spec)
+		checkFunc func(*testing.T, *Components)
+	}{
+		{
+			name: "responses in components",
+			setup: func(s *Spec) {
+				s.AddComponentResponse("NotFound", &Response{Description: "Not found"})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.Responses, "NotFound")
+			},
+		},
+		{
+			name: "parameters in components",
+			setup: func(s *Spec) {
+				s.AddComponentParameter("pageParam", &Parameter{Name: "page", In: "query", Schema: &Schema{Type: TypeString("integer")}})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.Parameters, "pageParam")
+			},
+		},
+		{
+			name: "examples in components",
+			setup: func(s *Spec) {
+				s.AddComponentExample("sample", &Example{Summary: "A sample", Value: "test"})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.Examples, "sample")
+			},
+		},
+		{
+			name: "request bodies in components",
+			setup: func(s *Spec) {
+				s.AddComponentRequestBody("CreatePet", &RequestBody{Description: "Pet to create"})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.RequestBodies, "CreatePet")
+			},
+		},
+		{
+			name: "headers in components",
+			setup: func(s *Spec) {
+				s.AddComponentHeader("X-Rate-Limit", &Header{Schema: &Schema{Type: TypeString("integer")}})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.Headers, "X-Rate-Limit")
+			},
+		},
+		{
+			name: "links in components",
+			setup: func(s *Spec) {
+				s.AddComponentLink("GetUser", &Link{OperationID: "getUser"})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.Links, "GetUser")
+			},
+		},
+		{
+			name: "callbacks in components",
+			setup: func(s *Spec) {
+				s.AddComponentCallback("onEvent", &cb)
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.Callbacks, "onEvent")
+			},
+		},
+		{
+			name: "path items in components",
+			setup: func(s *Spec) {
+				s.AddComponentPathItem("shared", &PathItem{Get: &Operation{Summary: "Shared"}})
+			},
+			checkFunc: func(t *testing.T, c *Components) {
+				assert.Contains(t, c.PathItems, "shared")
+			},
+		},
+	}
 
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.Responses, "NotFound")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := mux.NewRouter()
+			spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+			tt.setup(spec)
 
-	t.Run("parameters in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentParameter("pageParam", &Parameter{Name: "page", In: "query", Schema: &Schema{Type: TypeString("integer")}})
+			spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
+				Summary("Health").
+				Response(http.StatusOK, nil)
 
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.Parameters, "pageParam")
-	})
-
-	t.Run("examples in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentExample("sample", &Example{Summary: "A sample", Value: "test"})
-
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.Examples, "sample")
-	})
-
-	t.Run("request bodies in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentRequestBody("CreatePet", &RequestBody{Description: "Pet to create"})
-
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.RequestBodies, "CreatePet")
-	})
-
-	t.Run("headers in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentHeader("X-Rate-Limit", &Header{Schema: &Schema{Type: TypeString("integer")}})
-
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.Headers, "X-Rate-Limit")
-	})
-
-	t.Run("links in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentLink("GetUser", &Link{OperationID: "getUser"})
-
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.Links, "GetUser")
-	})
-
-	t.Run("callbacks in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		cb := Callback{"{$url}": &PathItem{Post: &Operation{Summary: "cb"}}}
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentCallback("onEvent", &cb)
-
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.Callbacks, "onEvent")
-	})
-
-	t.Run("path items in components", func(t *testing.T) {
-		r := mux.NewRouter()
-		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentPathItem("shared", &PathItem{Get: &Operation{Summary: "Shared"}})
-
-		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
-			Summary("Health").
-			Response(http.StatusOK, nil)
-
-		doc := spec.Build(r)
-		require.NotNil(t, doc.Components)
-		assert.Contains(t, doc.Components.PathItems, "shared")
-	})
+			doc := spec.Build(r)
+			require.NotNil(t, doc.Components)
+			tt.checkFunc(t, doc.Components)
+		})
+	}
 
 	t.Run("schemas and security schemes coexist", func(t *testing.T) {
 		r := mux.NewRouter()

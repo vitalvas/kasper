@@ -10,45 +10,50 @@ import (
 )
 
 func TestSchemaType(t *testing.T) {
-	t.Run("single type marshals as string", func(t *testing.T) {
-		st := TypeString("string")
-		data, err := json.Marshal(st)
-		require.NoError(t, err)
-		assert.JSONEq(t, `"string"`, string(data))
+	t.Run("marshal", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    SchemaType
+			expected string
+		}{
+			{"single type marshals as string", TypeString("string"), `"string"`},
+			{"multiple types marshal as array", TypeArray("string", "null"), `["string","null"]`},
+			{"empty type marshals as null", SchemaType{}, "null"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				data, err := json.Marshal(tt.input)
+				require.NoError(t, err)
+				assert.JSONEq(t, tt.expected, string(data))
+			})
+		}
 	})
 
-	t.Run("multiple types marshal as array", func(t *testing.T) {
-		st := TypeArray("string", "null")
-		data, err := json.Marshal(st)
-		require.NoError(t, err)
-		assert.JSONEq(t, `["string","null"]`, string(data))
-	})
+	t.Run("unmarshal", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    string
+			expected []string
+			wantErr  bool
+		}{
+			{"single string", `"integer"`, []string{"integer"}, false},
+			{"array", `["string","null"]`, []string{"string", "null"}, false},
+			{"invalid", `123`, nil, true},
+		}
 
-	t.Run("empty type marshals as null", func(t *testing.T) {
-		var st SchemaType
-		data, err := json.Marshal(st)
-		require.NoError(t, err)
-		assert.Equal(t, "null", string(data))
-	})
-
-	t.Run("unmarshal single string", func(t *testing.T) {
-		var st SchemaType
-		err := json.Unmarshal([]byte(`"integer"`), &st)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"integer"}, st.Values())
-	})
-
-	t.Run("unmarshal array", func(t *testing.T) {
-		var st SchemaType
-		err := json.Unmarshal([]byte(`["string","null"]`), &st)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"string", "null"}, st.Values())
-	})
-
-	t.Run("unmarshal invalid", func(t *testing.T) {
-		var st SchemaType
-		err := json.Unmarshal([]byte(`123`), &st)
-		assert.Error(t, err)
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var st SchemaType
+				err := json.Unmarshal([]byte(tt.input), &st)
+				if tt.wantErr {
+					assert.Error(t, err)
+				} else {
+					require.NoError(t, err)
+					assert.Equal(t, tt.expected, st.Values())
+				}
+			})
+		}
 	})
 
 	t.Run("IsEmpty", func(t *testing.T) {
@@ -150,101 +155,86 @@ func TestDocumentJSON(t *testing.T) {
 }
 
 func TestSchemaJSON(t *testing.T) {
-	t.Run("ref serializes as $ref", func(t *testing.T) {
-		s := Schema{Ref: "#/components/schemas/User"}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-		assert.Contains(t, string(data), `"$ref"`)
-		assert.Contains(t, string(data), "#/components/schemas/User")
-	})
+	tests := []struct {
+		name      string
+		schema    Schema
+		checkFunc func(*testing.T, []byte, map[string]any)
+	}{
+		{
+			name:   "ref serializes as $ref",
+			schema: Schema{Ref: "#/components/schemas/User"},
+			checkFunc: func(t *testing.T, raw []byte, _ map[string]any) {
+				assert.Contains(t, string(raw), `"$ref"`)
+				assert.Contains(t, string(raw), "#/components/schemas/User")
+			},
+		},
+		{
+			name:   "nullable type uses array",
+			schema: Schema{Type: TypeArray("string", "null")},
+			checkFunc: func(t *testing.T, raw []byte, _ map[string]any) {
+				assert.Contains(t, string(raw), `["string","null"]`)
+			},
+		},
+		{
+			name: "numeric constraints",
+			schema: func() Schema {
+				lo, hi := 0.0, 150.0
+				return Schema{Type: TypeString("integer"), Minimum: &lo, Maximum: &hi}
+			}(),
+			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
+				assert.Equal(t, "integer", parsed["type"])
+				assert.Equal(t, 0.0, parsed["minimum"])
+				assert.Equal(t, 150.0, parsed["maximum"])
+			},
+		},
+		{
+			name: "string constraints",
+			schema: func() Schema {
+				minLen, maxLen := 1, 100
+				return Schema{Type: TypeString("string"), MinLength: &minLen, MaxLength: &maxLen, Pattern: `^[a-z]+$`}
+			}(),
+			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
+				assert.Equal(t, 1.0, parsed["minLength"])
+				assert.Equal(t, 100.0, parsed["maxLength"])
+				assert.Equal(t, `^[a-z]+$`, parsed["pattern"])
+			},
+		},
+		{
+			name:   "enum values",
+			schema: Schema{Type: TypeString("string"), Enum: []any{"admin", "user", "guest"}},
+			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
+				assert.Len(t, parsed["enum"].([]any), 3)
+			},
+		},
+		{
+			name:   "deprecated and readOnly",
+			schema: Schema{Type: TypeString("string"), Deprecated: true, ReadOnly: true},
+			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
+				assert.Equal(t, true, parsed["deprecated"])
+				assert.Equal(t, true, parsed["readOnly"])
+			},
+		},
+		{
+			name:   "omits empty fields",
+			schema: Schema{Type: TypeString("string")},
+			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
+				for _, key := range []string{"properties", "items", "format", "deprecated", "readOnly", "writeOnly"} {
+					assert.NotContains(t, parsed, key)
+				}
+			},
+		},
+	}
 
-	t.Run("nullable type uses array", func(t *testing.T) {
-		s := Schema{Type: TypeArray("string", "null")}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-		assert.Contains(t, string(data), `["string","null"]`)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.schema)
+			require.NoError(t, err)
 
-	t.Run("numeric constraints", func(t *testing.T) {
-		lo := 0.0
-		hi := 150.0
-		s := Schema{
-			Type:    TypeString("integer"),
-			Minimum: &lo,
-			Maximum: &hi,
-		}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "integer", parsed["type"])
-		assert.Equal(t, 0.0, parsed["minimum"])
-		assert.Equal(t, 150.0, parsed["maximum"])
-	})
-
-	t.Run("string constraints", func(t *testing.T) {
-		minLen := 1
-		maxLen := 100
-		s := Schema{
-			Type:      TypeString("string"),
-			MinLength: &minLen,
-			MaxLength: &maxLen,
-			Pattern:   `^[a-z]+$`,
-		}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, 1.0, parsed["minLength"])
-		assert.Equal(t, 100.0, parsed["maxLength"])
-		assert.Equal(t, `^[a-z]+$`, parsed["pattern"])
-	})
-
-	t.Run("enum values", func(t *testing.T) {
-		s := Schema{
-			Type: TypeString("string"),
-			Enum: []any{"admin", "user", "guest"},
-		}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		enums := parsed["enum"].([]any)
-		assert.Len(t, enums, 3)
-	})
-
-	t.Run("deprecated and readOnly", func(t *testing.T) {
-		s := Schema{
-			Type:       TypeString("string"),
-			Deprecated: true,
-			ReadOnly:   true,
-		}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, true, parsed["deprecated"])
-		assert.Equal(t, true, parsed["readOnly"])
-	})
-
-	t.Run("omits empty fields", func(t *testing.T) {
-		s := Schema{Type: TypeString("string")}
-		data, err := json.Marshal(s)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.NotContains(t, parsed, "properties")
-		assert.NotContains(t, parsed, "items")
-		assert.NotContains(t, parsed, "format")
-		assert.NotContains(t, parsed, "deprecated")
-		assert.NotContains(t, parsed, "readOnly")
-		assert.NotContains(t, parsed, "writeOnly")
-	})
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(data, &parsed))
+			tt.checkFunc(t, data, parsed)
+		})
+	}
 }
 
 func TestOperationJSON(t *testing.T) {
@@ -319,52 +309,61 @@ func TestSecurityRequirementJSON(t *testing.T) {
 }
 
 func TestDocumentNewFields(t *testing.T) {
-	t.Run("jsonSchemaDialect", func(t *testing.T) {
-		doc := Document{
-			OpenAPI:           "3.1.0",
-			Info:              Info{Title: "Test", Version: "1.0.0"},
-			JSONSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
-		}
-		data, err := json.Marshal(doc)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "https://json-schema.org/draft/2020-12/schema", parsed["jsonSchemaDialect"])
-	})
-
-	t.Run("webhooks", func(t *testing.T) {
-		doc := Document{
-			OpenAPI: "3.1.0",
-			Info:    Info{Title: "Test", Version: "1.0.0"},
-			Webhooks: map[string]*PathItem{
-				"newPet": {Post: &Operation{Summary: "New pet notification"}},
+	tests := []struct {
+		name      string
+		doc       Document
+		checkFunc func(*testing.T, map[string]any)
+	}{
+		{
+			name: "jsonSchemaDialect",
+			doc: Document{
+				OpenAPI:           "3.1.0",
+				Info:              Info{Title: "Test", Version: "1.0.0"},
+				JSONSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
 			},
-		}
-		data, err := json.Marshal(doc)
-		require.NoError(t, err)
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "https://json-schema.org/draft/2020-12/schema", parsed["jsonSchemaDialect"])
+			},
+		},
+		{
+			name: "webhooks",
+			doc: Document{
+				OpenAPI: "3.1.0",
+				Info:    Info{Title: "Test", Version: "1.0.0"},
+				Webhooks: map[string]*PathItem{
+					"newPet": {Post: &Operation{Summary: "New pet notification"}},
+				},
+			},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				webhooks := parsed["webhooks"].(map[string]any)
+				assert.Contains(t, webhooks, "newPet")
+			},
+		},
+		{
+			name: "externalDocs",
+			doc: Document{
+				OpenAPI:      "3.1.0",
+				Info:         Info{Title: "Test", Version: "1.0.0"},
+				ExternalDocs: &ExternalDocs{URL: "https://docs.example.com", Description: "Full docs"},
+			},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				extDocs := parsed["externalDocs"].(map[string]any)
+				assert.Equal(t, "https://docs.example.com", extDocs["url"])
+				assert.Equal(t, "Full docs", extDocs["description"])
+			},
+		},
+	}
 
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		webhooks := parsed["webhooks"].(map[string]any)
-		assert.Contains(t, webhooks, "newPet")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.doc)
+			require.NoError(t, err)
 
-	t.Run("externalDocs", func(t *testing.T) {
-		doc := Document{
-			OpenAPI:      "3.1.0",
-			Info:         Info{Title: "Test", Version: "1.0.0"},
-			ExternalDocs: &ExternalDocs{URL: "https://docs.example.com", Description: "Full docs"},
-		}
-		data, err := json.Marshal(doc)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		extDocs := parsed["externalDocs"].(map[string]any)
-		assert.Equal(t, "https://docs.example.com", extDocs["url"])
-		assert.Equal(t, "Full docs", extDocs["description"])
-	})
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(data, &parsed))
+			tt.checkFunc(t, parsed)
+		})
+	}
 }
 
 func TestInfoNewFields(t *testing.T) {
@@ -462,50 +461,55 @@ func TestPathItemNewFields(t *testing.T) {
 }
 
 func TestOperationNewFields(t *testing.T) {
-	t.Run("externalDocs on operation", func(t *testing.T) {
-		op := Operation{
-			Summary:      "Test",
-			ExternalDocs: &ExternalDocs{URL: "https://docs.example.com"},
-		}
-		data, err := json.Marshal(op)
-		require.NoError(t, err)
+	cb := Callback{
+		"https://callback.example.com": &PathItem{
+			Post: &Operation{Summary: "Callback received"},
+		},
+	}
 
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Contains(t, parsed, "externalDocs")
-	})
-
-	t.Run("callbacks on operation", func(t *testing.T) {
-		cb := Callback{
-			"https://callback.example.com": &PathItem{
-				Post: &Operation{Summary: "Callback received"},
+	tests := []struct {
+		name         string
+		op           Operation
+		expectedKeys []string
+	}{
+		{
+			name: "externalDocs on operation",
+			op: Operation{
+				Summary:      "Test",
+				ExternalDocs: &ExternalDocs{URL: "https://docs.example.com"},
 			},
-		}
-		op := Operation{
-			Summary:   "Test",
-			Callbacks: map[string]*Callback{"onEvent": &cb},
-		}
-		data, err := json.Marshal(op)
-		require.NoError(t, err)
+			expectedKeys: []string{"externalDocs"},
+		},
+		{
+			name: "callbacks on operation",
+			op: Operation{
+				Summary:   "Test",
+				Callbacks: map[string]*Callback{"onEvent": &cb},
+			},
+			expectedKeys: []string{"callbacks"},
+		},
+		{
+			name: "servers on operation",
+			op: Operation{
+				Summary: "Test",
+				Servers: []Server{{URL: "https://override.example.com"}},
+			},
+			expectedKeys: []string{"servers"},
+		},
+	}
 
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Contains(t, parsed, "callbacks")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.op)
+			require.NoError(t, err)
 
-	t.Run("servers on operation", func(t *testing.T) {
-		op := Operation{
-			Summary: "Test",
-			Servers: []Server{{URL: "https://override.example.com"}},
-		}
-		data, err := json.Marshal(op)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		servers := parsed["servers"].([]any)
-		assert.Len(t, servers, 1)
-	})
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(data, &parsed))
+			for _, key := range tt.expectedKeys {
+				assert.Contains(t, parsed, key)
+			}
+		})
+	}
 }
 
 func TestParameterNewFields(t *testing.T) {
@@ -729,54 +733,78 @@ func TestComponentsNewFields(t *testing.T) {
 }
 
 func TestExternalDocsJSON(t *testing.T) {
-	t.Run("full external docs", func(t *testing.T) {
-		ed := ExternalDocs{URL: "https://docs.example.com", Description: "Full docs"}
-		data, err := json.Marshal(ed)
-		require.NoError(t, err)
+	tests := []struct {
+		name      string
+		input     ExternalDocs
+		checkFunc func(*testing.T, map[string]any)
+	}{
+		{
+			name:  "full external docs",
+			input: ExternalDocs{URL: "https://docs.example.com", Description: "Full docs"},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "https://docs.example.com", parsed["url"])
+				assert.Equal(t, "Full docs", parsed["description"])
+			},
+		},
+		{
+			name:  "omits empty description",
+			input: ExternalDocs{URL: "https://docs.example.com"},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.NotContains(t, parsed, "description")
+			},
+		},
+	}
 
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "https://docs.example.com", parsed["url"])
-		assert.Equal(t, "Full docs", parsed["description"])
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.input)
+			require.NoError(t, err)
 
-	t.Run("omits empty description", func(t *testing.T) {
-		ed := ExternalDocs{URL: "https://docs.example.com"}
-		data, err := json.Marshal(ed)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.NotContains(t, parsed, "description")
-	})
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(data, &parsed))
+			tt.checkFunc(t, parsed)
+		})
+	}
 }
 
 func TestExampleJSON(t *testing.T) {
-	t.Run("full example", func(t *testing.T) {
-		ex := Example{
-			Summary:     "A sample",
-			Description: "A detailed description",
-			Value:       map[string]any{"name": "Fido"},
-		}
-		data, err := json.Marshal(ex)
-		require.NoError(t, err)
+	tests := []struct {
+		name      string
+		input     Example
+		checkFunc func(*testing.T, map[string]any)
+	}{
+		{
+			name: "full example",
+			input: Example{
+				Summary:     "A sample",
+				Description: "A detailed description",
+				Value:       map[string]any{"name": "Fido"},
+			},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "A sample", parsed["summary"])
+				assert.Equal(t, "A detailed description", parsed["description"])
+				assert.Contains(t, parsed, "value")
+			},
+		},
+		{
+			name:  "externalValue",
+			input: Example{ExternalValue: "https://example.com/sample.json"},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "https://example.com/sample.json", parsed["externalValue"])
+			},
+		},
+	}
 
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "A sample", parsed["summary"])
-		assert.Equal(t, "A detailed description", parsed["description"])
-		assert.Contains(t, parsed, "value")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.input)
+			require.NoError(t, err)
 
-	t.Run("externalValue", func(t *testing.T) {
-		ex := Example{ExternalValue: "https://example.com/sample.json"}
-		data, err := json.Marshal(ex)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "https://example.com/sample.json", parsed["externalValue"])
-	})
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(data, &parsed))
+			tt.checkFunc(t, parsed)
+		})
+	}
 }
 
 func TestEncodingJSON(t *testing.T) {
@@ -842,73 +870,79 @@ func TestXMLJSON(t *testing.T) {
 }
 
 func TestSecuritySchemeJSON(t *testing.T) {
-	t.Run("http bearer", func(t *testing.T) {
-		ss := SecurityScheme{
-			Type:         "http",
-			Scheme:       "bearer",
-			BearerFormat: "JWT",
-			Description:  "Bearer token auth",
-		}
-		data, err := json.Marshal(ss)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "http", parsed["type"])
-		assert.Equal(t, "bearer", parsed["scheme"])
-		assert.Equal(t, "JWT", parsed["bearerFormat"])
-	})
-
-	t.Run("apiKey", func(t *testing.T) {
-		ss := SecurityScheme{
-			Type: "apiKey",
-			Name: "X-API-Key",
-			In:   "header",
-		}
-		data, err := json.Marshal(ss)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "apiKey", parsed["type"])
-		assert.Equal(t, "X-API-Key", parsed["name"])
-		assert.Equal(t, "header", parsed["in"])
-	})
-
-	t.Run("oauth2", func(t *testing.T) {
-		ss := SecurityScheme{
-			Type: "oauth2",
-			Flows: &OAuthFlows{
-				AuthorizationCode: &OAuthFlow{
-					AuthorizationURL: "https://example.com/oauth/authorize",
-					TokenURL:         "https://example.com/oauth/token",
-					Scopes:           map[string]string{"read:pets": "Read pets", "write:pets": "Write pets"},
+	tests := []struct {
+		name      string
+		scheme    SecurityScheme
+		checkFunc func(*testing.T, map[string]any)
+	}{
+		{
+			name: "http bearer",
+			scheme: SecurityScheme{
+				Type:         "http",
+				Scheme:       "bearer",
+				BearerFormat: "JWT",
+				Description:  "Bearer token auth",
+			},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "http", parsed["type"])
+				assert.Equal(t, "bearer", parsed["scheme"])
+				assert.Equal(t, "JWT", parsed["bearerFormat"])
+			},
+		},
+		{
+			name: "apiKey",
+			scheme: SecurityScheme{
+				Type: "apiKey",
+				Name: "X-API-Key",
+				In:   "header",
+			},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "apiKey", parsed["type"])
+				assert.Equal(t, "X-API-Key", parsed["name"])
+				assert.Equal(t, "header", parsed["in"])
+			},
+		},
+		{
+			name: "oauth2",
+			scheme: SecurityScheme{
+				Type: "oauth2",
+				Flows: &OAuthFlows{
+					AuthorizationCode: &OAuthFlow{
+						AuthorizationURL: "https://example.com/oauth/authorize",
+						TokenURL:         "https://example.com/oauth/token",
+						Scopes:           map[string]string{"read:pets": "Read pets", "write:pets": "Write pets"},
+					},
 				},
 			},
-		}
-		data, err := json.Marshal(ss)
-		require.NoError(t, err)
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "oauth2", parsed["type"])
+				flows := parsed["flows"].(map[string]any)
+				assert.Contains(t, flows, "authorizationCode")
+			},
+		},
+		{
+			name: "openIdConnect",
+			scheme: SecurityScheme{
+				Type:             "openIdConnect",
+				OpenIDConnectURL: "https://example.com/.well-known/openid-configuration",
+			},
+			checkFunc: func(t *testing.T, parsed map[string]any) {
+				assert.Equal(t, "openIdConnect", parsed["type"])
+				assert.Equal(t, "https://example.com/.well-known/openid-configuration", parsed["openIdConnectUrl"])
+			},
+		},
+	}
 
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "oauth2", parsed["type"])
-		flows := parsed["flows"].(map[string]any)
-		assert.Contains(t, flows, "authorizationCode")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.scheme)
+			require.NoError(t, err)
 
-	t.Run("openIdConnect", func(t *testing.T) {
-		ss := SecurityScheme{
-			Type:             "openIdConnect",
-			OpenIDConnectURL: "https://example.com/.well-known/openid-configuration",
-		}
-		data, err := json.Marshal(ss)
-		require.NoError(t, err)
-
-		var parsed map[string]any
-		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "openIdConnect", parsed["type"])
-		assert.Equal(t, "https://example.com/.well-known/openid-configuration", parsed["openIdConnectUrl"])
-	})
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(data, &parsed))
+			tt.checkFunc(t, parsed)
+		})
+	}
 }
 
 func TestOAuthFlowsJSON(t *testing.T) {
@@ -1237,39 +1271,43 @@ func TestSchemaNewFields(t *testing.T) {
 }
 
 func TestSchemaTypeYAML(t *testing.T) {
-	t.Run("single type marshals as scalar", func(t *testing.T) {
-		st := TypeString("string")
-		data, err := yaml.Marshal(st)
-		require.NoError(t, err)
-		assert.Equal(t, "string\n", string(data))
+	t.Run("marshal", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    SchemaType
+			expected string
+		}{
+			{"single type marshals as scalar", TypeString("string"), "string\n"},
+			{"multiple types marshal as sequence", TypeArray("string", "null"), "- string\n- \"null\"\n"},
+			{"empty type marshals as null", SchemaType{}, "null\n"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				data, err := yaml.Marshal(tt.input)
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, string(data))
+			})
+		}
 	})
 
-	t.Run("multiple types marshal as sequence", func(t *testing.T) {
-		st := TypeArray("string", "null")
-		data, err := yaml.Marshal(st)
-		require.NoError(t, err)
-		assert.Equal(t, "- string\n- \"null\"\n", string(data))
-	})
+	t.Run("unmarshal", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    string
+			expected []string
+		}{
+			{"scalar", "integer", []string{"integer"}},
+			{"sequence", "- string\n- \"null\"\n", []string{"string", "null"}},
+		}
 
-	t.Run("empty type marshals as null", func(t *testing.T) {
-		var st SchemaType
-		data, err := yaml.Marshal(st)
-		require.NoError(t, err)
-		assert.Equal(t, "null\n", string(data))
-	})
-
-	t.Run("unmarshal scalar", func(t *testing.T) {
-		var st SchemaType
-		err := yaml.Unmarshal([]byte("integer"), &st)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"integer"}, st.Values())
-	})
-
-	t.Run("unmarshal sequence", func(t *testing.T) {
-		var st SchemaType
-		err := yaml.Unmarshal([]byte("- string\n- \"null\"\n"), &st)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"string", "null"}, st.Values())
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var st SchemaType
+				require.NoError(t, yaml.Unmarshal([]byte(tt.input), &st))
+				assert.Equal(t, tt.expected, st.Values())
+			})
+		}
 	})
 
 	t.Run("schema roundtrip through YAML", func(t *testing.T) {

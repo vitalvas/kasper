@@ -548,93 +548,125 @@ func TestDefaultResponse(t *testing.T) {
 		Message string `json:"message"`
 	}
 
-	t.Run("default response with body", func(t *testing.T) {
-		b := newOperationBuilder().
-			Response(200, nil).
-			DefaultResponse(ErrorBody{})
+	tests := []struct {
+		name           string
+		build          func() *OperationBuilder
+		totalResponses int
+		hasContent     bool
+		contentType    string
+	}{
+		{
+			name: "default response with body",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					Response(200, nil).
+					DefaultResponse(ErrorBody{})
+			},
+			totalResponses: 2,
+			hasContent:     true,
+			contentType:    "application/json",
+		},
+		{
+			name: "default response with nil body",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().DefaultResponse(nil)
+			},
+			totalResponses: 1,
+			hasContent:     false,
+		},
+		{
+			name: "default response content with custom type",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					DefaultResponseContent("application/xml", ErrorBody{})
+			},
+			totalResponses: 1,
+			hasContent:     true,
+			contentType:    "application/xml",
+		},
+		{
+			name: "default response alongside numeric responses",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					Response(200, nil).
+					Response(404, ErrorBody{}).
+					DefaultResponse(ErrorBody{})
+			},
+			totalResponses: 3,
+			hasContent:     true,
+			contentType:    "application/json",
+		},
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gen := NewSchemaGenerator()
+			op := tt.build().buildOperation(gen, "op", nil)
 
-		require.Len(t, op.Responses, 2)
-		require.Contains(t, op.Responses, "default")
-		assert.Equal(t, "Default response", op.Responses["default"].Description)
-		require.Contains(t, op.Responses["default"].Content, "application/json")
-	})
+			require.Len(t, op.Responses, tt.totalResponses)
+			require.Contains(t, op.Responses, "default")
 
-	t.Run("default response with nil body", func(t *testing.T) {
-		b := newOperationBuilder().
-			DefaultResponse(nil)
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Contains(t, op.Responses, "default")
-		assert.Nil(t, op.Responses["default"].Content)
-	})
-
-	t.Run("default response content with custom type", func(t *testing.T) {
-		b := newOperationBuilder().
-			DefaultResponseContent("application/xml", ErrorBody{})
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Contains(t, op.Responses, "default")
-		require.Contains(t, op.Responses["default"].Content, "application/xml")
-	})
-
-	t.Run("default response alongside numeric responses", func(t *testing.T) {
-		b := newOperationBuilder().
-			Response(200, nil).
-			Response(404, ErrorBody{}).
-			DefaultResponse(ErrorBody{})
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Len(t, op.Responses, 3)
-		assert.Contains(t, op.Responses, "200")
-		assert.Contains(t, op.Responses, "404")
-		assert.Contains(t, op.Responses, "default")
-	})
+			if tt.hasContent {
+				require.Contains(t, op.Responses["default"].Content, tt.contentType)
+			} else {
+				assert.Nil(t, op.Responses["default"].Content)
+			}
+		})
+	}
 }
 
 func TestResponseHeader(t *testing.T) {
-	t.Run("single header on response", func(t *testing.T) {
-		b := newOperationBuilder().
-			Response(200, nil).
-			ResponseHeader(200, "X-Rate-Limit", &Header{
-				Description: "Rate limit",
-				Schema:      &Schema{Type: TypeString("integer")},
-			})
+	tests := []struct {
+		name            string
+		build           func() *OperationBuilder
+		statusCode      string
+		expectedHeaders []string
+		headerCount     int
+	}{
+		{
+			name: "single header on response",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					Response(200, nil).
+					ResponseHeader(200, "X-Rate-Limit", &Header{
+						Description: "Rate limit",
+						Schema:      &Schema{Type: TypeString("integer")},
+					})
+			},
+			statusCode:      "200",
+			expectedHeaders: []string{"X-Rate-Limit"},
+			headerCount:     1,
+		},
+		{
+			name: "multiple headers on response",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					Response(200, nil).
+					ResponseHeader(200, "X-Rate-Limit", &Header{
+						Schema: &Schema{Type: TypeString("integer")},
+					}).
+					ResponseHeader(200, "X-Rate-Remaining", &Header{
+						Schema: &Schema{Type: TypeString("integer")},
+					})
+			},
+			statusCode:      "200",
+			expectedHeaders: []string{"X-Rate-Limit", "X-Rate-Remaining"},
+			headerCount:     2,
+		},
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gen := NewSchemaGenerator()
+			op := tt.build().buildOperation(gen, "op", nil)
 
-		require.Contains(t, op.Responses, "200")
-		require.Contains(t, op.Responses["200"].Headers, "X-Rate-Limit")
-		assert.Equal(t, "Rate limit", op.Responses["200"].Headers["X-Rate-Limit"].Description)
-	})
-
-	t.Run("multiple headers on response", func(t *testing.T) {
-		b := newOperationBuilder().
-			Response(200, nil).
-			ResponseHeader(200, "X-Rate-Limit", &Header{
-				Schema: &Schema{Type: TypeString("integer")},
-			}).
-			ResponseHeader(200, "X-Rate-Remaining", &Header{
-				Schema: &Schema{Type: TypeString("integer")},
-			})
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Contains(t, op.Responses, "200")
-		require.Len(t, op.Responses["200"].Headers, 2)
-		assert.Contains(t, op.Responses["200"].Headers, "X-Rate-Limit")
-		assert.Contains(t, op.Responses["200"].Headers, "X-Rate-Remaining")
-	})
+			require.Contains(t, op.Responses, tt.statusCode)
+			require.Len(t, op.Responses[tt.statusCode].Headers, tt.headerCount)
+			for _, h := range tt.expectedHeaders {
+				assert.Contains(t, op.Responses[tt.statusCode].Headers, h)
+			}
+		})
+	}
 
 	t.Run("headers on different status codes", func(t *testing.T) {
 		b := newOperationBuilder().
@@ -705,163 +737,158 @@ func TestResponseLink(t *testing.T) {
 }
 
 func TestRequestDescription(t *testing.T) {
-	t.Run("sets description on request body", func(t *testing.T) {
-		type Input struct {
-			Name string `json:"name"`
-		}
-		b := newOperationBuilder().
-			Request(Input{}).
-			RequestDescription("The user to create")
+	type Input struct {
+		Name string `json:"name"`
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
+	tests := []struct {
+		name           string
+		description    string
+		setDescription bool
+		expectedDesc   string
+	}{
+		{"sets description on request body", "The user to create", true, "The user to create"},
+		{"default has no description", "", false, ""},
+	}
 
-		require.NotNil(t, op.RequestBody)
-		assert.Equal(t, "The user to create", op.RequestBody.Description)
-		assert.True(t, op.RequestBody.Required)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newOperationBuilder().Request(Input{})
+			if tt.setDescription {
+				b.RequestDescription(tt.description)
+			}
 
-	t.Run("default has no description", func(t *testing.T) {
-		type Input struct {
-			Name string `json:"name"`
-		}
-		b := newOperationBuilder().
-			Request(Input{})
+			gen := NewSchemaGenerator()
+			op := b.buildOperation(gen, "op", nil)
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.NotNil(t, op.RequestBody)
-		assert.Empty(t, op.RequestBody.Description)
-	})
+			require.NotNil(t, op.RequestBody)
+			assert.Equal(t, tt.expectedDesc, op.RequestBody.Description)
+		})
+	}
 }
 
 func TestRequestRequired(t *testing.T) {
-	t.Run("default is required", func(t *testing.T) {
-		type Input struct {
-			Name string `json:"name"`
-		}
-		b := newOperationBuilder().
-			Request(Input{})
+	type Input struct {
+		Name string `json:"name"`
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
+	tests := []struct {
+		name     string
+		setReq   bool
+		reqVal   bool
+		expected bool
+	}{
+		{"default is required", false, false, true},
+		{"explicit optional", true, false, false},
+		{"explicit required", true, true, true},
+	}
 
-		require.NotNil(t, op.RequestBody)
-		assert.True(t, op.RequestBody.Required)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newOperationBuilder().Request(Input{})
+			if tt.setReq {
+				b.RequestRequired(tt.reqVal)
+			}
 
-	t.Run("explicit optional", func(t *testing.T) {
-		type Input struct {
-			Name string `json:"name"`
-		}
-		b := newOperationBuilder().
-			Request(Input{}).
-			RequestRequired(false)
+			gen := NewSchemaGenerator()
+			op := b.buildOperation(gen, "op", nil)
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.NotNil(t, op.RequestBody)
-		assert.False(t, op.RequestBody.Required)
-	})
-
-	t.Run("explicit required", func(t *testing.T) {
-		type Input struct {
-			Name string `json:"name"`
-		}
-		b := newOperationBuilder().
-			Request(Input{}).
-			RequestRequired(true)
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.NotNil(t, op.RequestBody)
-		assert.True(t, op.RequestBody.Required)
-	})
+			require.NotNil(t, op.RequestBody)
+			assert.Equal(t, tt.expected, op.RequestBody.Required)
+		})
+	}
 }
 
 func TestResponseDescription(t *testing.T) {
-	t.Run("numeric status code", func(t *testing.T) {
-		assert.Equal(t, "OK", responseDescription("200"))
-		assert.Equal(t, "Not Found", responseDescription("404"))
-	})
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"200 OK", "200", "OK"},
+		{"404 Not Found", "404", "Not Found"},
+		{"default key", "default", "Default response"},
+		{"unknown code", "999", "999"},
+	}
 
-	t.Run("default key", func(t *testing.T) {
-		assert.Equal(t, "Default response", responseDescription("default"))
-	})
-
-	t.Run("unknown code", func(t *testing.T) {
-		assert.Equal(t, "999", responseDescription("999"))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, responseDescription(tt.input))
+		})
+	}
 }
 
 func TestOperationID(t *testing.T) {
-	t.Run("overrides route name", func(t *testing.T) {
-		b := newOperationBuilder().
-			OperationID("customID").
-			Summary("Test")
+	tests := []struct {
+		name       string
+		customID   string
+		routeName  string
+		expectedID string
+	}{
+		{"overrides route name", "customID", "routeName", "customID"},
+		{"uses route name when not set", "", "routeName", "routeName"},
+		{"overrides empty route name", "myOp", "", "myOp"},
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "routeName", nil)
-		assert.Equal(t, "customID", op.OperationID)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newOperationBuilder().Summary("Test")
+			if tt.customID != "" {
+				b.OperationID(tt.customID)
+			}
 
-	t.Run("uses route name when not set", func(t *testing.T) {
-		b := newOperationBuilder().Summary("Test")
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "routeName", nil)
-		assert.Equal(t, "routeName", op.OperationID)
-	})
-
-	t.Run("overrides empty route name", func(t *testing.T) {
-		b := newOperationBuilder().
-			OperationID("myOp").
-			Summary("Test")
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "", nil)
-		assert.Equal(t, "myOp", op.OperationID)
-	})
+			gen := NewSchemaGenerator()
+			op := b.buildOperation(gen, tt.routeName, nil)
+			assert.Equal(t, tt.expectedID, op.OperationID)
+		})
+	}
 }
 
 func TestCustomResponseDescription(t *testing.T) {
-	t.Run("override status code description", func(t *testing.T) {
-		b := newOperationBuilder().
-			Response(200, nil).
-			ResponseDescription(200, "Successful user retrieval")
+	tests := []struct {
+		name         string
+		build        func() *OperationBuilder
+		key          string
+		expectedDesc string
+	}{
+		{
+			name: "override status code description",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					Response(200, nil).
+					ResponseDescription(200, "Successful user retrieval")
+			},
+			key:          "200",
+			expectedDesc: "Successful user retrieval",
+		},
+		{
+			name: "default auto-generated when not overridden",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().Response(200, nil)
+			},
+			key:          "200",
+			expectedDesc: "OK",
+		},
+		{
+			name: "override default response description",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					DefaultResponse(nil).
+					DefaultResponseDescription("Unexpected error")
+			},
+			key:          "default",
+			expectedDesc: "Unexpected error",
+		},
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Contains(t, op.Responses, "200")
-		assert.Equal(t, "Successful user retrieval", op.Responses["200"].Description)
-	})
-
-	t.Run("default auto-generated when not overridden", func(t *testing.T) {
-		b := newOperationBuilder().
-			Response(200, nil)
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Contains(t, op.Responses, "200")
-		assert.Equal(t, "OK", op.Responses["200"].Description)
-	})
-
-	t.Run("override default response description", func(t *testing.T) {
-		b := newOperationBuilder().
-			DefaultResponse(nil).
-			DefaultResponseDescription("Unexpected error")
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Contains(t, op.Responses, "default")
-		assert.Equal(t, "Unexpected error", op.Responses["default"].Description)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gen := NewSchemaGenerator()
+			op := tt.build().buildOperation(gen, "op", nil)
+			require.Contains(t, op.Responses, tt.key)
+			assert.Equal(t, tt.expectedDesc, op.Responses[tt.key].Description)
+		})
+	}
 
 	t.Run("partial override leaves others intact", func(t *testing.T) {
 		b := newOperationBuilder().
@@ -878,39 +905,51 @@ func TestCustomResponseDescription(t *testing.T) {
 }
 
 func TestDefaultResponseHeader(t *testing.T) {
-	t.Run("header on default response", func(t *testing.T) {
-		b := newOperationBuilder().
-			DefaultResponse(nil).
-			DefaultResponseHeader("X-Request-ID", &Header{
-				Description: "Request tracking ID",
-				Schema:      &Schema{Type: TypeString("string")},
-			})
+	tests := []struct {
+		name            string
+		build           func() *OperationBuilder
+		expectedHeaders []string
+	}{
+		{
+			name: "header on default response",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					DefaultResponse(nil).
+					DefaultResponseHeader("X-Request-ID", &Header{
+						Description: "Request tracking ID",
+						Schema:      &Schema{Type: TypeString("string")},
+					})
+			},
+			expectedHeaders: []string{"X-Request-ID"},
+		},
+		{
+			name: "multiple headers on default response",
+			build: func() *OperationBuilder {
+				return newOperationBuilder().
+					DefaultResponse(nil).
+					DefaultResponseHeader("X-Request-ID", &Header{
+						Schema: &Schema{Type: TypeString("string")},
+					}).
+					DefaultResponseHeader("X-Error-Code", &Header{
+						Schema: &Schema{Type: TypeString("integer")},
+					})
+			},
+			expectedHeaders: []string{"X-Request-ID", "X-Error-Code"},
+		},
+	}
 
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gen := NewSchemaGenerator()
+			op := tt.build().buildOperation(gen, "op", nil)
 
-		require.Contains(t, op.Responses, "default")
-		require.Contains(t, op.Responses["default"].Headers, "X-Request-ID")
-		assert.Equal(t, "Request tracking ID", op.Responses["default"].Headers["X-Request-ID"].Description)
-	})
-
-	t.Run("multiple headers on default response", func(t *testing.T) {
-		b := newOperationBuilder().
-			DefaultResponse(nil).
-			DefaultResponseHeader("X-Request-ID", &Header{
-				Schema: &Schema{Type: TypeString("string")},
-			}).
-			DefaultResponseHeader("X-Error-Code", &Header{
-				Schema: &Schema{Type: TypeString("integer")},
-			})
-
-		gen := NewSchemaGenerator()
-		op := b.buildOperation(gen, "op", nil)
-
-		require.Len(t, op.Responses["default"].Headers, 2)
-		assert.Contains(t, op.Responses["default"].Headers, "X-Request-ID")
-		assert.Contains(t, op.Responses["default"].Headers, "X-Error-Code")
-	})
+			require.Contains(t, op.Responses, "default")
+			require.Len(t, op.Responses["default"].Headers, len(tt.expectedHeaders))
+			for _, h := range tt.expectedHeaders {
+				assert.Contains(t, op.Responses["default"].Headers, h)
+			}
+		})
+	}
 }
 
 func TestDefaultResponseLink(t *testing.T) {
@@ -955,17 +994,15 @@ func TestResolveSchema(t *testing.T) {
 	t.Run("explicit schema passed through", func(t *testing.T) {
 		gen := NewSchemaGenerator()
 		s := &Schema{Type: TypeString("string"), Format: "binary"}
-		result := resolveSchema(gen, s)
-		assert.Same(t, s, result)
+		assert.Same(t, s, resolveSchema(gen, s))
 	})
 
-	t.Run("go type generates schema", func(t *testing.T) {
+	t.Run("go type generates schema and registers component", func(t *testing.T) {
 		type Item struct {
 			ID string `json:"id"`
 		}
 		gen := NewSchemaGenerator()
-		result := resolveSchema(gen, Item{})
-		assert.NotNil(t, result)
+		assert.NotNil(t, resolveSchema(gen, Item{}))
 		assert.Contains(t, gen.Schemas(), "Item")
 	})
 }

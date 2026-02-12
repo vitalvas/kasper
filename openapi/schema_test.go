@@ -12,111 +12,111 @@ import (
 )
 
 func TestGeneratePrimitives(t *testing.T) {
-	g := NewSchemaGenerator()
+	tests := []struct {
+		name         string
+		input        any
+		expectedType SchemaType
+		expectNil    bool
+	}{
+		{"bool", true, TypeString("boolean"), false},
+		{"int", 0, TypeString("integer"), false},
+		{"int64", int64(0), TypeString("integer"), false},
+		{"uint", uint(0), TypeString("integer"), false},
+		{"float64", 0.0, TypeString("number"), false},
+		{"float32", float32(0), TypeString("number"), false},
+		{"string", "", TypeString("string"), false},
+		{"nil", nil, SchemaType{}, true},
+	}
 
-	t.Run("bool", func(t *testing.T) {
-		s := g.Generate(true)
-		assert.Equal(t, TypeString("boolean"), s.Type)
-	})
-
-	t.Run("int", func(t *testing.T) {
-		s := g.Generate(0)
-		assert.Equal(t, TypeString("integer"), s.Type)
-	})
-
-	t.Run("int64", func(t *testing.T) {
-		s := g.Generate(int64(0))
-		assert.Equal(t, TypeString("integer"), s.Type)
-	})
-
-	t.Run("uint", func(t *testing.T) {
-		s := g.Generate(uint(0))
-		assert.Equal(t, TypeString("integer"), s.Type)
-	})
-
-	t.Run("float64", func(t *testing.T) {
-		s := g.Generate(0.0)
-		assert.Equal(t, TypeString("number"), s.Type)
-	})
-
-	t.Run("float32", func(t *testing.T) {
-		s := g.Generate(float32(0))
-		assert.Equal(t, TypeString("number"), s.Type)
-	})
-
-	t.Run("string", func(t *testing.T) {
-		s := g.Generate("")
-		assert.Equal(t, TypeString("string"), s.Type)
-	})
-
-	t.Run("nil", func(t *testing.T) {
-		s := g.Generate(nil)
-		assert.Nil(t, s)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewSchemaGenerator()
+			s := g.Generate(tt.input)
+			if tt.expectNil {
+				assert.Nil(t, s)
+			} else {
+				require.NotNil(t, s)
+				assert.Equal(t, tt.expectedType, s.Type)
+			}
+		})
+	}
 }
 
 func TestGenerateSpecialTypes(t *testing.T) {
-	g := NewSchemaGenerator()
+	tests := []struct {
+		name           string
+		input          any
+		expectedType   SchemaType
+		expectedFormat string
+	}{
+		{"time.Time", time.Time{}, TypeString("string"), "date-time"},
+		{"[]byte", []byte{}, TypeString("string"), "byte"},
+	}
 
-	t.Run("time.Time", func(t *testing.T) {
-		s := g.Generate(time.Time{})
-		assert.Equal(t, TypeString("string"), s.Type)
-		assert.Equal(t, "date-time", s.Format)
-	})
-
-	t.Run("[]byte", func(t *testing.T) {
-		s := g.Generate([]byte{})
-		assert.Equal(t, TypeString("string"), s.Type)
-		assert.Equal(t, "byte", s.Format)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewSchemaGenerator()
+			s := g.Generate(tt.input)
+			require.NotNil(t, s)
+			assert.Equal(t, tt.expectedType, s.Type)
+			assert.Equal(t, tt.expectedFormat, s.Format)
+		})
+	}
 }
 
 func TestGenerateSliceAndArray(t *testing.T) {
-	g := NewSchemaGenerator()
+	tests := []struct {
+		name             string
+		input            any
+		expectedItemType SchemaType
+	}{
+		{"[]string", []string{}, TypeString("string")},
+		{"[]int", []int{}, TypeString("integer")},
+		{"[3]string", [3]string{}, TypeString("string")},
+	}
 
-	t.Run("[]string", func(t *testing.T) {
-		s := g.Generate([]string{})
-		assert.Equal(t, TypeString("array"), s.Type)
-		require.NotNil(t, s.Items)
-		assert.Equal(t, TypeString("string"), s.Items.Type)
-	})
-
-	t.Run("[]int", func(t *testing.T) {
-		s := g.Generate([]int{})
-		assert.Equal(t, TypeString("array"), s.Type)
-		require.NotNil(t, s.Items)
-		assert.Equal(t, TypeString("integer"), s.Items.Type)
-	})
-
-	t.Run("[3]string", func(t *testing.T) {
-		s := g.Generate([3]string{})
-		assert.Equal(t, TypeString("array"), s.Type)
-		require.NotNil(t, s.Items)
-		assert.Equal(t, TypeString("string"), s.Items.Type)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewSchemaGenerator()
+			s := g.Generate(tt.input)
+			require.NotNil(t, s)
+			assert.Equal(t, TypeString("array"), s.Type)
+			require.NotNil(t, s.Items)
+			assert.Equal(t, tt.expectedItemType, s.Items.Type)
+		})
+	}
 }
 
 func TestGenerateMap(t *testing.T) {
-	g := NewSchemaGenerator()
+	tests := []struct {
+		name                  string
+		input                 any
+		hasAdditionalProps    bool
+		additionalPropsType   SchemaType
+		checkAdditionalNotNil bool
+	}{
+		{"map[string]int", map[string]int{}, true, TypeString("integer"), true},
+		{"map[string]any", map[string]any{}, true, SchemaType{}, false},
+		{"map[int]string", map[int]string{}, false, SchemaType{}, false},
+	}
 
-	t.Run("map[string]int", func(t *testing.T) {
-		s := g.Generate(map[string]int{})
-		assert.Equal(t, TypeString("object"), s.Type)
-		require.NotNil(t, s.AdditionalProperties)
-		assert.Equal(t, TypeString("integer"), s.AdditionalProperties.Type)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewSchemaGenerator()
+			s := g.Generate(tt.input)
+			require.NotNil(t, s)
+			assert.Equal(t, TypeString("object"), s.Type)
 
-	t.Run("map[string]any", func(t *testing.T) {
-		s := g.Generate(map[string]any{})
-		assert.Equal(t, TypeString("object"), s.Type)
-		require.NotNil(t, s.AdditionalProperties)
-	})
-
-	t.Run("map[int]string", func(t *testing.T) {
-		s := g.Generate(map[int]string{})
-		assert.Equal(t, TypeString("object"), s.Type)
-		assert.Nil(t, s.AdditionalProperties)
-	})
+			if tt.hasAdditionalProps {
+				require.NotNil(t, s.AdditionalProperties)
+				if tt.checkAdditionalNotNil {
+					assert.Equal(t, tt.additionalPropsType, s.AdditionalProperties.Type)
+				}
+			} else {
+				assert.Nil(t, s.AdditionalProperties)
+			}
+		})
+	}
 }
 
 type SimpleStruct struct {
@@ -494,7 +494,34 @@ type NoExampleUser struct {
 }
 
 func TestOpenAPIExampler(t *testing.T) {
-	t.Run("type with OpenAPIExample sets example", func(t *testing.T) {
+	t.Run("type with vs without OpenAPIExample", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			input      any
+			schemaName string
+			hasExample bool
+		}{
+			{"with OpenAPIExample", ExampleUser{}, "ExampleUser", true},
+			{"without OpenAPIExample", NoExampleUser{}, "NoExampleUser", false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				g := NewSchemaGenerator()
+				g.Generate(tt.input)
+				schema := g.Schemas()[tt.schemaName]
+				require.NotNil(t, schema)
+
+				if tt.hasExample {
+					require.NotNil(t, schema.Example)
+				} else {
+					assert.Nil(t, schema.Example)
+				}
+			})
+		}
+	})
+
+	t.Run("example values are correct", func(t *testing.T) {
 		g := NewSchemaGenerator()
 		g.Generate(ExampleUser{})
 
@@ -507,15 +534,6 @@ func TestOpenAPIExampler(t *testing.T) {
 		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", ex.ID)
 		assert.Equal(t, "Alice", ex.Name)
 		assert.Equal(t, "alice@example.com", ex.Email)
-	})
-
-	t.Run("type without OpenAPIExample has no example", func(t *testing.T) {
-		g := NewSchemaGenerator()
-		g.Generate(NoExampleUser{})
-
-		schema := g.Schemas()["NoExampleUser"]
-		require.NotNil(t, schema)
-		assert.Nil(t, schema.Example)
 	})
 
 	t.Run("example serializes to JSON", func(t *testing.T) {
@@ -543,7 +561,6 @@ func TestOpenAPIExampler(t *testing.T) {
 		}
 		s := g.Generate(Wrapper{})
 
-		// The wrapper field should be a $ref (via anyOf for nullable).
 		wrapperSchema := g.Schemas()["Wrapper"]
 		require.NotNil(t, wrapperSchema)
 		userProp := wrapperSchema.Properties["user"]
@@ -551,7 +568,6 @@ func TestOpenAPIExampler(t *testing.T) {
 		require.Len(t, userProp.AnyOf, 2)
 		assert.Equal(t, "#/components/schemas/ExampleUser", userProp.AnyOf[0].Ref)
 
-		// The component schema should have the example.
 		exSchema := g.Schemas()["ExampleUser"]
 		require.NotNil(t, exSchema)
 		assert.NotNil(t, exSchema.Example)
@@ -561,25 +577,23 @@ func TestOpenAPIExampler(t *testing.T) {
 }
 
 func TestSanitizeSchemaName(t *testing.T) {
-	t.Run("plain name unchanged", func(t *testing.T) {
-		assert.Equal(t, "User", sanitizeSchemaName("User"))
-	})
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain name unchanged", "User", "User"},
+		{"generic simple type", "ResponseData[User]", "ResponseDataUser"},
+		{"generic with package path", "ResponseData[github.com/foo/bar.User]", "ResponseDataUser"},
+		{"generic slice type", "ResponseData[[]User]", "ResponseDataUserList"},
+		{"generic slice with package path", "ResponseData[[]github.com/foo.User]", "ResponseDataUserList"},
+	}
 
-	t.Run("generic simple type", func(t *testing.T) {
-		assert.Equal(t, "ResponseDataUser", sanitizeSchemaName("ResponseData[User]"))
-	})
-
-	t.Run("generic with package path", func(t *testing.T) {
-		assert.Equal(t, "ResponseDataUser", sanitizeSchemaName("ResponseData[github.com/foo/bar.User]"))
-	})
-
-	t.Run("generic slice type", func(t *testing.T) {
-		assert.Equal(t, "ResponseDataUserList", sanitizeSchemaName("ResponseData[[]User]"))
-	})
-
-	t.Run("generic slice with package path", func(t *testing.T) {
-		assert.Equal(t, "ResponseDataUserList", sanitizeSchemaName("ResponseData[[]github.com/foo.User]"))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, sanitizeSchemaName(tt.input))
+		})
+	}
 }
 
 func TestSchemaNameCollision(t *testing.T) {
@@ -675,29 +689,24 @@ func TestSchemaNameCollision(t *testing.T) {
 }
 
 func TestPkgPrefix(t *testing.T) {
-	t.Run("standard library", func(t *testing.T) {
-		assert.Equal(t, "Http", pkgPrefix("net/http"))
-	})
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"standard library", "net/http", "Http"},
+		{"full package path", "github.com/foo/models", "Models"},
+		{"hyphenated package", "github.com/foo/go-utils", "Go_utils"},
+		{"dotted package", "github.com/foo/v2.api", "V2_api"},
+		{"empty string", "", ""},
+		{"no slash", "models", "Models"},
+	}
 
-	t.Run("full package path", func(t *testing.T) {
-		assert.Equal(t, "Models", pkgPrefix("github.com/foo/models"))
-	})
-
-	t.Run("hyphenated package", func(t *testing.T) {
-		assert.Equal(t, "Go_utils", pkgPrefix("github.com/foo/go-utils"))
-	})
-
-	t.Run("dotted package", func(t *testing.T) {
-		assert.Equal(t, "V2_api", pkgPrefix("github.com/foo/v2.api"))
-	})
-
-	t.Run("empty string", func(t *testing.T) {
-		assert.Equal(t, "", pkgPrefix(""))
-	})
-
-	t.Run("no slash", func(t *testing.T) {
-		assert.Equal(t, "Models", pkgPrefix("models"))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, pkgPrefix(tt.input))
+		})
+	}
 }
 
 type ResponseWrapper[T any] struct {
