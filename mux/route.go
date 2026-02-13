@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // matcher is the interface implemented by route matchers.
@@ -38,6 +39,11 @@ type Route struct {
 	useEncodedPath bool
 	buildVarsFunc  BuildVarsFunc
 	buildScheme    string
+
+	// staticCtx caches the routeContext for routes with no variables,
+	// avoiding a heap allocation per request after the first dispatch.
+	staticCtx     *routeContext
+	staticCtxOnce sync.Once
 }
 
 // Match matches this route against the request.
@@ -268,6 +274,9 @@ func (r *Route) Methods(methods ...string) *Route {
 // Headers adds a matcher for request header values per RFC 7230 Section 3.2.
 // It accepts pairs of header names and values. The value can be empty,
 // in which case the matcher will only check for the header presence.
+// Header keys are canonicalized at registration time so that matching
+// against http.Header (which uses canonical keys) requires no per-request
+// allocation.
 func (r *Route) Headers(pairs ...string) *Route {
 	if r.err == nil {
 		m, err := mapFromPairsToString(pairs...)
@@ -275,13 +284,19 @@ func (r *Route) Headers(pairs ...string) *Route {
 			r.err = err
 			return r
 		}
-		return r.addMatcher(headerMatcher(m))
+		canonical := make(map[string]string, len(m))
+		for k, v := range m {
+			canonical[http.CanonicalHeaderKey(k)] = v
+		}
+		return r.addMatcher(headerMatcher(canonical))
 	}
 	return r
 }
 
 // HeadersRegexp adds a matcher for request header values using regexps.
 // Header names are case-insensitive per RFC 7230 Section 3.2.
+// Header keys are canonicalized at registration time so that matching
+// against http.Header requires no per-request allocation.
 func (r *Route) HeadersRegexp(pairs ...string) *Route {
 	if r.err == nil {
 		m, err := mapFromPairsToRegex(pairs...)
@@ -289,7 +304,11 @@ func (r *Route) HeadersRegexp(pairs ...string) *Route {
 			r.err = err
 			return r
 		}
-		return r.addMatcher(headerRegexMatcher(m))
+		canonical := make(map[string]*regexp.Regexp, len(m))
+		for k, v := range m {
+			canonical[http.CanonicalHeaderKey(k)] = v
+		}
+		return r.addMatcher(headerRegexMatcher(canonical))
 	}
 	return r
 }
@@ -599,7 +618,7 @@ func (m methodMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 type headerMatcher map[string]string
 
 func (m headerMatcher) Match(r *http.Request, _ *RouteMatch) bool {
-	return matchMapWithString(map[string]string(m), map[string][]string(r.Header), true)
+	return matchMapWithString(map[string]string(m), map[string][]string(r.Header), false)
 }
 
 // headerRegexMatcher matches request headers against regexp patterns.
@@ -607,7 +626,7 @@ func (m headerMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 type headerRegexMatcher map[string]*regexp.Regexp
 
 func (m headerRegexMatcher) Match(r *http.Request, _ *RouteMatch) bool {
-	return matchMapWithRegex(map[string]*regexp.Regexp(m), map[string][]string(r.Header), true)
+	return matchMapWithRegex(map[string]*regexp.Regexp(m), map[string][]string(r.Header), false)
 }
 
 // schemeMatcher matches the request URL scheme per RFC 7230 Section 2.7.

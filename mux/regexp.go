@@ -196,9 +196,9 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 // Matches against the query (RFC 3986 Section 3.4), host
 // (RFC 7230 Section 5.4), or path (RFC 3986 Section 3.3) component
 // depending on the regexp type.
-func (r *routeRegexp) Match(req *http.Request, _ *RouteMatch) bool {
+func (r *routeRegexp) Match(req *http.Request, m *RouteMatch) bool {
 	if r.matchQuery {
-		return r.matchQueryString(req)
+		return r.matchQueryString(m.getQuery(req))
 	}
 	if r.matchHost {
 		host := getHost(req)
@@ -221,13 +221,14 @@ func (r *routeRegexp) matchAndValidate(input string) bool {
 		return r.regexp.MatchString(input)
 	}
 
-	matches := r.regexp.FindStringSubmatch(input)
-	if matches == nil {
+	indices := r.regexp.FindStringSubmatchIndex(input)
+	if indices == nil {
 		return false
 	}
 
 	for i := range r.varsN {
-		if i+1 < len(matches) && !r.varsR[i].MatchString(matches[i+1]) {
+		start, end := indices[(i+1)*2], indices[(i+1)*2+1]
+		if start >= 0 && !r.varsR[i].MatchString(input[start:end]) {
 			return false
 		}
 	}
@@ -253,14 +254,15 @@ func (r *routeRegexp) url(values map[string]string) (string, error) {
 
 // getURLVars extracts route variables from the given input string.
 func (r *routeRegexp) getURLVars(input string) map[string]string {
-	matches := r.regexp.FindStringSubmatch(input)
-	if matches == nil {
+	indices := r.regexp.FindStringSubmatchIndex(input)
+	if indices == nil {
 		return nil
 	}
 	vars := make(map[string]string, len(r.varsN))
 	for i, name := range r.varsN {
-		if i+1 < len(matches) {
-			vars[name] = matches[i+1]
+		start, end := indices[(i+1)*2], indices[(i+1)*2+1]
+		if start >= 0 {
+			vars[name] = input[start:end]
 		}
 	}
 	return vars
@@ -268,8 +270,7 @@ func (r *routeRegexp) getURLVars(input string) map[string]string {
 
 // matchQueryString matches the route against query parameter values
 // per RFC 3986 Section 3.4.
-func (r *routeRegexp) matchQueryString(req *http.Request) bool {
-	values := req.URL.Query()
+func (r *routeRegexp) matchQueryString(values url.Values) bool {
 	vals, ok := values[r.queryKey]
 	if !ok || len(vals) == 0 {
 		// If the template has no variables and no required value, it's a
@@ -360,8 +361,8 @@ func (v *routeRegexpGroup) varCount() int {
 
 // setMatch extracts variables from the request and stores them in the match.
 func (v *routeRegexpGroup) setMatch(req *http.Request, m *RouteMatch, _ *Route) {
-	if m.Vars == nil {
-		m.Vars = make(map[string]string, v.varCount())
+	if vc := v.varCount(); m.Vars == nil && vc > 0 {
+		m.Vars = make(map[string]string, vc)
 	}
 
 	if v.host != nil && len(v.host.varsN) > 0 {
@@ -387,7 +388,7 @@ func (v *routeRegexpGroup) setMatch(req *http.Request, m *RouteMatch, _ *Route) 
 	}
 
 	if len(v.queries) > 0 {
-		values := req.URL.Query()
+		values := m.getQuery(req)
 		for _, q := range v.queries {
 			if len(q.varsN) == 0 {
 				continue
@@ -406,13 +407,14 @@ func (v *routeRegexpGroup) setMatch(req *http.Request, m *RouteMatch, _ *Route) 
 // setVars extracts variables from input and writes them directly into dst.
 // Returns true if the input matched the regexp.
 func (r *routeRegexp) setVars(input string, dst map[string]string) bool {
-	matches := r.regexp.FindStringSubmatch(input)
-	if matches == nil {
+	indices := r.regexp.FindStringSubmatchIndex(input)
+	if indices == nil {
 		return false
 	}
 	for i, name := range r.varsN {
-		if i+1 < len(matches) {
-			dst[name] = matches[i+1]
+		start, end := indices[(i+1)*2], indices[(i+1)*2+1]
+		if start >= 0 {
+			dst[name] = input[start:end]
 		}
 	}
 	return true

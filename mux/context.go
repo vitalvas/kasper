@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 )
 
 // routeContextKey is an unexported type for the single context key.
@@ -57,9 +58,20 @@ func SetURLVars(r *http.Request, val map[string]string) *http.Request {
 }
 
 // setRouteContext stores both the matched route and vars in the request
-// context using a single WithContext call.
+// context using a single WithContext call. For static routes (no variables),
+// the routeContext is cached on the Route to avoid a heap allocation per
+// request after the first dispatch.
 func setRouteContext(r *http.Request, route *Route, vars map[string]string) *http.Request {
-	ctx := context.WithValue(r.Context(), ctxKey, &routeContext{route: route, vars: vars})
+	var rc *routeContext
+	if route != nil && vars == nil && route.buildVarsFunc == nil {
+		route.staticCtxOnce.Do(func() {
+			route.staticCtx = &routeContext{route: route}
+		})
+		rc = route.staticCtx
+	} else {
+		rc = &routeContext{route: route, vars: vars}
+	}
+	ctx := context.WithValue(r.Context(), ctxKey, rc)
 	return r.WithContext(ctx)
 }
 
@@ -83,6 +95,18 @@ type RouteMatch struct {
 	// 405 Method Not Allowed (RFC 7231 Section 6.5.5) instead of
 	// 404 Not Found (RFC 7231 Section 6.5.4).
 	methodNotAllowed bool
+
+	// parsedQuery caches the parsed query string to avoid repeated
+	// url.Query() calls during matching and variable extraction.
+	parsedQuery url.Values
+}
+
+// getQuery returns the parsed query string, caching it for reuse.
+func (m *RouteMatch) getQuery(req *http.Request) url.Values {
+	if m.parsedQuery == nil {
+		m.parsedQuery = req.URL.Query()
+	}
+	return m.parsedQuery
 }
 
 // MatcherFunc is the function signature used by custom matchers.

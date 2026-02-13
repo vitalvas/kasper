@@ -3,6 +3,7 @@ package mux
 import (
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Router registers routes to be matched and dispatches a handler.
@@ -29,6 +30,10 @@ type Router struct {
 	routes      []*Route
 	namedRoutes map[string]*Route
 	middlewares []MiddlewareFunc
+
+	// handlerCache caches the middleware-wrapped handler per route
+	// to avoid re-wrapping on every request.
+	handlerCache sync.Map // map[*Route]http.Handler
 
 	strictSlash    bool
 	skipClean      bool
@@ -67,7 +72,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.Match(req, &match) {
 		handler = match.Handler
 		if handler == nil {
-			handler = http.NotFoundHandler()
+			handler = defaultNotFoundHandler
 		}
 		req = setRouteContext(req, match.Route, match.Vars)
 	} else {
@@ -78,12 +83,12 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Allow", strings.Join(allowed, ", "))
 			handler = r.MethodNotAllowedHandler
 			if handler == nil {
-				handler = methodNotAllowedHandler()
+				handler = defaultMethodNotAllowedHandler
 			}
 		} else {
 			handler = r.NotFoundHandler
 			if handler == nil {
-				handler = http.NotFoundHandler()
+				handler = defaultNotFoundHandler
 			}
 		}
 	}
@@ -126,8 +131,14 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 			continue
 		}
 		if route.Match(req, match) {
-			if match.Handler != nil {
-				match.Handler = r.applyMiddleware(match.Handler)
+			if match.Handler != nil && len(r.middlewares) > 0 {
+				if cached, ok := r.handlerCache.Load(match.Route); ok {
+					match.Handler = cached.(http.Handler)
+				} else {
+					wrapped := r.applyMiddleware(match.Handler)
+					r.handlerCache.Store(match.Route, wrapped)
+					match.Handler = wrapped
+				}
 			}
 			return true
 		}

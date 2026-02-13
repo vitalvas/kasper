@@ -18,6 +18,9 @@ func cleanPath(p string) string {
 	if p[0] != '/' {
 		p = "/" + p
 	}
+	if isCleanPath(p) {
+		return p
+	}
 	np := path.Clean(p)
 	// path.Clean removes trailing slash except for root;
 	// put the trailing slash back if necessary.
@@ -25,6 +28,24 @@ func cleanPath(p string) string {
 		np += "/"
 	}
 	return np
+}
+
+// isCleanPath reports whether p is already clean (no //, /./, or /../
+// segments), allowing cleanPath to skip the path.Clean call.
+func isCleanPath(p string) bool {
+	n := len(p)
+	for i := 0; i < n; i++ {
+		if p[i] == '/' && i+1 < n {
+			c := p[i+1]
+			if c == '/' {
+				return false
+			}
+			if c == '.' && (i+2 == n || p[i+2] == '/' || p[i+2] == '.') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // checkPairs returns an error if the list of key/value pairs has odd length.
@@ -162,16 +183,33 @@ func allowedMethods(router *Router, req *http.Request) []string {
 	return allowed
 }
 
+// notFoundBody is the pre-allocated response body for 404 responses,
+// avoiding per-request allocations from fmt.Fprintln.
+var notFoundBody = []byte("404 page not found\n")
+
+// defaultNotFoundHandler is a cached http.Handler for 404 responses
+// that avoids the per-request allocations of http.NotFoundHandler().
+var defaultNotFoundHandler http.Handler = http.HandlerFunc(defaultNotFound)
+
+// defaultNotFound writes a 404 response without fmt.Fprintln overhead.
+// Equivalent to http.NotFound but uses a pre-allocated response body.
+func defaultNotFound(w http.ResponseWriter, _ *http.Request) {
+	h := w.Header()
+	delete(h, "Content-Length")
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusNotFound)
+	w.Write(notFoundBody) //nolint:errcheck
+}
+
+// defaultMethodNotAllowedHandler is a cached http.Handler for 405 responses.
+var defaultMethodNotAllowedHandler http.Handler = http.HandlerFunc(methodNotAllowed)
+
 // methodNotAllowed replies to the request with an HTTP 405 method not allowed.
 // RFC 7231 Section 6.5.5: the Allow header is set by the caller (Router.ServeHTTP)
 // before this handler is invoked.
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusMethodNotAllowed)
-}
-
-// methodNotAllowedHandler returns a HandlerFunc that replies with 405.
-func methodNotAllowedHandler() http.Handler {
-	return http.HandlerFunc(methodNotAllowed)
 }
 
 // subtractSlice returns elements in a that are not in b.

@@ -287,7 +287,7 @@ func TestMatchQueryStringPresenceCheck(t *testing.T) {
 			rr, err := newRouteRegexp(tt.template, regexpTypeQuery, routeRegexpOptions{})
 			require.NoError(t, err)
 			req := httptest.NewRequest(http.MethodGet, tt.requestURL, nil)
-			assert.Equal(t, tt.expected, rr.matchQueryString(req))
+			assert.Equal(t, tt.expected, rr.matchQueryString(req.URL.Query()))
 		})
 	}
 }
@@ -350,9 +350,10 @@ func BenchmarkRouteRegexpURL(b *testing.B) {
 func BenchmarkMatchQueryString(b *testing.B) {
 	rr, _ := newRouteRegexp("page={page:[0-9]+}", regexpTypeQuery, routeRegexpOptions{})
 	req := httptest.NewRequest(http.MethodGet, "/search?page=42&limit=10", nil)
+	values := req.URL.Query()
 	b.ResetTimer()
 	for b.Loop() {
-		rr.matchQueryString(req)
+		rr.matchQueryString(values)
 	}
 }
 
