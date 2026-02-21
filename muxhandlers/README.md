@@ -174,7 +174,7 @@ r.Use(muxhandlers.RecoveryMiddleware(muxhandlers.RecoveryConfig{
 
 ## Request ID Middleware
 
-`RequestIDMiddleware` generates or propagates a unique request identifier. The ID is set on both the request (for downstream handlers) and the response (for the caller). By default it generates UUID v4 values using `github.com/google/uuid`. Use `GenerateUUIDv7` for time-ordered IDs ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)). The `GenerateFunc` receives the current request, allowing ID generation based on request context.
+`RequestIDMiddleware` generates or propagates a unique request identifier. The ID is set on the request header, the response header, and the request context. Downstream handlers can retrieve it with `RequestIDFromContext`. By default it generates UUID v4 values using `github.com/google/uuid`. Use `GenerateUUIDv7` for time-ordered IDs ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)). The `GenerateFunc` receives the current request, allowing ID generation based on request context.
 
 ### RequestIDConfig
 
@@ -209,6 +209,15 @@ r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
 r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
     GenerateFunc: muxhandlers.GenerateUUIDv7,
 }))
+```
+
+### Reading the ID from context
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    id := muxhandlers.RequestIDFromContext(r.Context())
+    log.Printf("request %s", id)
+}
 ```
 
 ## Request Size Limit Middleware

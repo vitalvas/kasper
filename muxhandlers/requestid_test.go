@@ -1,6 +1,7 @@
 package muxhandlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -152,6 +153,45 @@ func TestRequestIDMiddleware(t *testing.T) {
 
 		assert.Empty(t, capturedRequestHeader)
 		assert.Empty(t, w.Header().Get("X-Request-ID"))
+	})
+
+	t.Run("id available via context", func(t *testing.T) {
+		var capturedCtxID string
+
+		r := mux.NewRouter()
+		r.HandleFunc("/test", func(_ http.ResponseWriter, req *http.Request) {
+			capturedCtxID = RequestIDFromContext(req.Context())
+		}).Methods(http.MethodGet)
+		r.Use(RequestIDMiddleware(RequestIDConfig{}))
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+		assert.NotEmpty(t, capturedCtxID)
+		assert.Equal(t, w.Header().Get("X-Request-ID"), capturedCtxID)
+	})
+
+	t.Run("empty id not in context", func(t *testing.T) {
+		var capturedCtxID string
+
+		r := mux.NewRouter()
+		r.HandleFunc("/test", func(_ http.ResponseWriter, req *http.Request) {
+			capturedCtxID = RequestIDFromContext(req.Context())
+		}).Methods(http.MethodGet)
+		r.Use(RequestIDMiddleware(RequestIDConfig{
+			GenerateFunc: func(_ *http.Request) string { return "" },
+		}))
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+		assert.Empty(t, capturedCtxID)
+	})
+}
+
+func TestRequestIDFromContext(t *testing.T) {
+	t.Run("returns empty for bare context", func(t *testing.T) {
+		assert.Empty(t, RequestIDFromContext(context.Background()))
 	})
 }
 

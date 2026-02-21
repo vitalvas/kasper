@@ -1,11 +1,24 @@
 package muxhandlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/vitalvas/kasper/mux"
 )
+
+type requestIDKey struct{}
+
+// RequestIDFromContext returns the request ID stored in the context by
+// RequestIDMiddleware. Returns an empty string if no ID is present.
+func RequestIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		return id
+	}
+
+	return ""
+}
 
 // RequestIDConfig configures the Request ID middleware behaviour.
 type RequestIDConfig struct {
@@ -53,6 +66,7 @@ func RequestIDMiddleware(cfg RequestIDConfig) mux.MiddlewareFunc {
 			if id != "" {
 				r.Header.Set(headerName, id)
 				w.Header().Set(headerName, id)
+				r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, id))
 			}
 
 			next.ServeHTTP(w, r)

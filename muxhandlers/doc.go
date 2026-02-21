@@ -69,11 +69,12 @@
 // # Request ID Middleware
 //
 // RequestIDMiddleware generates or propagates a unique request identifier.
-// The ID is set on both the request (for downstream handlers) and the
-// response (for the caller). By default it generates UUID v4 values using
-// github.com/google/uuid. Use GenerateUUIDv7 for time-ordered IDs (RFC 9562).
-// The GenerateFunc receives the current request, allowing ID generation based
-// on request context.
+// The ID is set on the request header, the response header, and the request
+// context. Downstream handlers can retrieve it with RequestIDFromContext.
+// By default it generates UUID v4 values using github.com/google/uuid.
+// Use GenerateUUIDv7 for time-ordered IDs (RFC 9562). The GenerateFunc
+// receives the current request, allowing ID generation based on request
+// context.
 //
 //	r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
 //	    TrustIncoming: true,
