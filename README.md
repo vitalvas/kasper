@@ -64,3 +64,6 @@ HTTP middleware for the mux router.
 | `CORSMiddleware` | Fetch Standard | Origin validation, preflight, wildcard/subdomain patterns |
 | `BasicAuthMiddleware` | RFC 7617 | Static or dynamic credentials, constant-time comparison |
 | `ProxyHeadersMiddleware` | RFC 7239 | X-Forwarded-For/Proto/Host, Forwarded header, trusted proxy validation |
+| `RecoveryMiddleware` | -- | Panic recovery, 500 response, optional log callback |
+| `RequestIDMiddleware` | RFC 9562 | UUID v4/v7 generation/propagation via X-Request-ID header |
+| `RequestSizeLimitMiddleware` | -- | Body size enforcement via `http.MaxBytesReader`, 413 on excess |

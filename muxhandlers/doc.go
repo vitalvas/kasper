@@ -53,4 +53,49 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # Recovery Middleware
+//
+// RecoveryMiddleware recovers from panics in downstream handlers, returns
+// 500 Internal Server Error to the client, and optionally invokes a custom
+// log function with the request and recovered value.
+//
+//	r.Use(muxhandlers.RecoveryMiddleware(muxhandlers.RecoveryConfig{
+//	    LogFunc: func(r *http.Request, err any) {
+//	        log.Printf("panic: %v %s", err, r.URL.Path)
+//	    },
+//	}))
+//
+// # Request ID Middleware
+//
+// RequestIDMiddleware generates or propagates a unique request identifier.
+// The ID is set on both the request (for downstream handlers) and the
+// response (for the caller). By default it generates UUID v4 values using
+// github.com/google/uuid. Use GenerateUUIDv7 for time-ordered IDs (RFC 9562).
+// The GenerateFunc receives the current request, allowing ID generation based
+// on request context.
+//
+//	r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
+//	    TrustIncoming: true,
+//	}))
+//
+// Time-ordered UUID v7:
+//
+//	r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
+//	    GenerateFunc: muxhandlers.GenerateUUIDv7,
+//	}))
+//
+// # Request Size Limit Middleware
+//
+// RequestSizeLimitMiddleware rejects request bodies that exceed a maximum
+// size. It wraps r.Body with http.MaxBytesReader, which returns 413 Request
+// Entity Too Large when the limit is exceeded.
+//
+//	mw, err := muxhandlers.RequestSizeLimitMiddleware(muxhandlers.RequestSizeLimitConfig{
+//	    MaxBytes: 1 << 20, // 1 MiB
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
 package muxhandlers

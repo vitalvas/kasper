@@ -147,3 +147,93 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## Recovery Middleware
+
+`RecoveryMiddleware` recovers from panics in downstream handlers, returns 500 Internal Server Error to the client, and optionally invokes a custom log callback with the request and recovered value.
+
+### RecoveryConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `LogFunc` | `func(*http.Request, any)` | Optional callback invoked with the request and recovered value; `nil` = no logging |
+
+### Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+r.Use(muxhandlers.RecoveryMiddleware(muxhandlers.RecoveryConfig{
+    LogFunc: func(r *http.Request, err any) {
+        log.Printf("panic: %v %s", err, r.URL.Path)
+    },
+}))
+```
+
+## Request ID Middleware
+
+`RequestIDMiddleware` generates or propagates a unique request identifier. The ID is set on both the request (for downstream handlers) and the response (for the caller). By default it generates UUID v4 values using `github.com/google/uuid`. Use `GenerateUUIDv7` for time-ordered IDs ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)). The `GenerateFunc` receives the current request, allowing ID generation based on request context.
+
+### RequestIDConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `HeaderName` | `string` | Header name for the request ID; defaults to `"X-Request-ID"` |
+| `GenerateFunc` | `func(*http.Request) string` | Custom ID generator receiving the request; defaults to `GenerateUUIDv4`; use `GenerateUUIDv7` for time-ordered IDs |
+| `TrustIncoming` | `bool` | Reuse existing header value from the incoming request instead of generating a new one |
+
+### Built-in Generators
+
+| Function | Description |
+|----------|-------------|
+| `GenerateUUIDv4` | Random UUID v4 via `github.com/google/uuid` (default) |
+| `GenerateUUIDv7` | Time-ordered UUID v7 via `github.com/google/uuid` ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)) |
+
+### Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
+    TrustIncoming: true,
+}))
+```
+
+### Usage with UUID v7
+
+```go
+r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
+    GenerateFunc: muxhandlers.GenerateUUIDv7,
+}))
+```
+
+## Request Size Limit Middleware
+
+`RequestSizeLimitMiddleware` limits the size of incoming request bodies. It wraps `r.Body` with `http.MaxBytesReader`, which returns 413 Request Entity Too Large when the limit is exceeded.
+
+### RequestSizeLimitConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `MaxBytes` | `int64` | Maximum allowed body size in bytes; must be greater than zero |
+
+### Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/upload", handleUpload).Methods(http.MethodPost)
+
+mw, err := muxhandlers.RequestSizeLimitMiddleware(muxhandlers.RequestSizeLimitConfig{
+    MaxBytes: 1 << 20, // 1 MiB
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
