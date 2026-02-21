@@ -1,41 +1,66 @@
 # Kasper
 
-HTTP toolkit for Go.
+HTTP toolkit for Go. Drop-in gorilla/mux replacement with WebSocket, OpenAPI, and middleware support.
+Inspired by [FastAPI](https://fastapi.tiangolo.com/).
 
-## Packages
+```bash
+go get github.com/vitalvas/kasper
+```
 
-### mux
+Requires Go 1.25+.
 
-HTTP request multiplexer with URL pattern matching.
+---
 
-Features:
+## mux `github.com/vitalvas/kasper/mux`
 
-- URL path variables with optional regex constraints
-- Host, method, header, query, and scheme matchers
-- Subrouters with path prefix grouping
-- Middleware support
-- Named routes with URL building
-- Strict slash and path cleaning options
-- Walk function for route inspection
-- CORS method middleware
+HTTP request multiplexer. API-compatible with gorilla/mux.
 
-### websocket
+| Feature | Details |
+|---------|---------|
+| Path variables | Regex constraints and macros: `uuid`, `int`, `float`, `slug`, `alpha`, `alphanum`, `date`, `hex`, `domain` |
+| Matchers | Host, method, header, query, scheme, custom `MatcherFunc` |
+| Routing | Subrouters, middleware, named routes, URL building |
+| Request/Response | `BindJSON`, `BindXML`, `ResponseJSON`, `ResponseXML` |
+| Standards | Strict slash (RFC 7538), path cleaning (RFC 3986), route walking |
 
-RFC 6455 and RFC 8441 compliant WebSocket implementation.
+---
 
-Features:
+## websocket `github.com/vitalvas/kasper/websocket`
 
-- Client and Server support
-- Text/binary messaging
-- Streaming API (NextReader/NextWriter)
-- Control frames (ping, pong, close)
-- Compression (permessage-deflate, RFC 7692, stateless)
-- Proxy support (HTTP CONNECT)
-- Subprotocol negotiation
-- JSON helpers
-- PreparedMessage for efficient broadcasting
-- WriteBufferPool for buffer reuse
+RFC 6455 / RFC 8441 WebSocket implementation.
 
-## License
+| Feature | Details |
+|---------|---------|
+| Connections | Client (`Dialer`) and server (`Upgrader`) |
+| Messaging | Text/binary, streaming (`NextReader`/`NextWriter`), JSON helpers |
+| Control | Ping, pong, close frames, subprotocol negotiation |
+| Compression | permessage-deflate (RFC 7692), stateless |
+| Performance | `PreparedMessage` for broadcasting, `BufferPool` for buffer reuse |
+| Network | Proxy support (HTTP CONNECT) |
 
-MIT
+---
+
+## openapi `github.com/vitalvas/kasper/openapi`
+
+Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and struct tags.
+
+| Feature | Details |
+|---------|---------|
+| Schema | JSON Schema Draft 2020-12, struct tags (`openapi:"format=email,minLength=1"`) |
+| Routes | Named routes (`Op`), direct attachment (`Route`), groups for shared metadata |
+| Security | Basic, bearer, OAuth2, API key schemes |
+| Content | Webhooks, callbacks, multiple content types, generic type support |
+| Docs UI | Swagger UI, RapiDoc, Redoc |
+| Export | JSON and YAML schema endpoints |
+
+---
+
+## muxhandlers `github.com/vitalvas/kasper/muxhandlers`
+
+HTTP middleware for the mux router.
+
+| Middleware | Standard | Details |
+|------------|----------|---------|
+| `CORSMiddleware` | Fetch Standard | Origin validation, preflight, wildcard/subdomain patterns |
+| `BasicAuthMiddleware` | RFC 7617 | Static or dynamic credentials, constant-time comparison |
+| `ProxyHeadersMiddleware` | RFC 7239 | X-Forwarded-For/Proto/Host, Forwarded header, trusted proxy validation |

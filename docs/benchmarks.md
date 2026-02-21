@@ -1,6 +1,7 @@
 # Performance Benchmarks: kasper/mux vs gorilla/mux
 
-Comparative benchmarks measuring route registration and request dispatching across different endpoint counts and complexity levels.
+Comparative benchmarks measuring route registration and request dispatching
+across different endpoint counts and complexity levels.
 
 **Environment**: Apple M3 Pro, darwin/arm64, Go 1.25
 
@@ -109,7 +110,8 @@ Comparative benchmarks measuring route registration and request dispatching acro
 
 Switching from gorilla/mux to kasper/mux provides the following improvements:
 
-**Faster startup.** Route registration is 8-11x faster with 10-13x less memory. Applications with hundreds of routes will see noticeably shorter initialization times.
+**Faster startup.** Route registration is 8-11x faster with 10-13x less memory.
+Applications with hundreds of routes will see noticeably shorter initialization times.
 
 **Lower per-request overhead.** Every dispatched request allocates fewer objects and completes faster:
 
@@ -119,9 +121,11 @@ Switching from gorilla/mux to kasper/mux provides the following improvements:
 | Medium           |           16-18%  |               7 |                9 |
 | Complex          |           23-25%  |              11 |               21 |
 
-**Less GC pressure.** Fewer allocations per request means less work for the garbage collector, which translates to more stable tail latencies under load.
+**Less GC pressure.** Fewer allocations per request means less work for the garbage collector,
+which translates to more stable tail latencies under load.
 
-**Equal 404 handling.** The miss path uses 96 B/op (same as gorilla/mux) and scales better at higher route counts, winning by 15-20% at 100-500 routes.
+**Equal 404 handling.** The miss path uses 96 B/op (same as gorilla/mux) and scales better
+at higher route counts, winning by 15-20% at 100-500 routes.
 
 ## Running Benchmarks
 
