@@ -523,27 +523,49 @@ Schema name mapping:
 
 ## Serving
 
-`Handle` registers all endpoints under a single base path:
+`Handle` registers all endpoints under a single base path. The config parameter is optional -- pass `nil` for defaults:
 
 ```go
 // Swagger UI (default) at /swagger/, schema at /swagger/schema.json and /swagger/schema.yaml
-spec.Handle(r, "/swagger", openapi.HandleConfig{})
+spec.Handle(r, "/swagger", nil)
 
 // RapiDoc
-spec.Handle(r, "/swagger", openapi.HandleConfig{UI: openapi.DocsRapiDoc})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{UI: openapi.DocsRapiDoc})
 
 // Redoc
-spec.Handle(r, "/swagger", openapi.HandleConfig{UI: openapi.DocsRedoc})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{UI: openapi.DocsRedoc})
 
 // Custom filenames (relative to base path)
-spec.Handle(r, "/swagger", openapi.HandleConfig{JSONFilename: "openapi.json", YAMLFilename: "openapi.yaml"})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: "openapi.json", YAMLFilename: "openapi.yaml"})
 
 // Disable YAML endpoint
-spec.Handle(r, "/swagger", openapi.HandleConfig{YAMLFilename: "-"})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{YAMLFilename: "-"})
 
 // Disable interactive docs, serve only spec files
-spec.Handle(r, "/swagger", openapi.HandleConfig{DisableDocs: true})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{DisableDocs: true})
 ```
+
+### Swagger UI configuration
+
+Pass additional SwaggerUIBundle options via `SwaggerUIConfig`. Values are JSON-encoded and rendered as JavaScript object properties:
+
+```go
+spec.Handle(r, "/swagger", &openapi.HandleConfig{
+    SwaggerUIConfig: map[string]any{
+        "docExpansion":             "none",
+        "deepLinking":              true,
+        "defaultModelsExpandDepth": 0,
+    },
+})
+```
+
+This produces:
+
+```js
+SwaggerUIBundle({url: "...", dom_id: "#swagger-ui", deepLinking: true, defaultModelsExpandDepth: 0, docExpansion: "none"});
+```
+
+Keys are sorted alphabetically for deterministic output. `SwaggerUIConfig` is only used when UI is `DocsSwaggerUI` (the default). See [Swagger UI Configuration](https://swagger.io/docs/open-source-tools/swagger-ui/usage/configuration/) for available options.
 
 ### Filename path resolution
 
@@ -551,16 +573,16 @@ Filenames are relative to the base path by default. Use an absolute path (starti
 
 ```go
 // Relative (default): schema at /swagger/schema.json
-spec.Handle(r, "/swagger", openapi.HandleConfig{})
+spec.Handle(r, "/swagger", nil)
 
 // Relative custom name: schema at /swagger/swagger.json
-spec.Handle(r, "/swagger", openapi.HandleConfig{JSONFilename: "swagger.json"})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: "swagger.json"})
 
 // Relative nested path: schema at /swagger/data/openapi.json
-spec.Handle(r, "/swagger", openapi.HandleConfig{JSONFilename: "data/openapi.json"})
+spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: "data/openapi.json"})
 
 // Absolute path: docs at /swagger/, schema at /api/v1/swagger.json
-spec.Handle(r, "/swagger", openapi.HandleConfig{
+spec.Handle(r, "/swagger", &openapi.HandleConfig{
     JSONFilename: "/api/v1/swagger.json",
     YAMLFilename: "-",
 })

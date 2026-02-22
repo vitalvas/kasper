@@ -512,7 +512,7 @@ func main() {
 		})
 
 	// Serve OpenAPI docs.
-	spec.Handle(r, "/swagger", openapi.HandleConfig{})
+	spec.Handle(r, "/swagger", nil)
 
 	fmt.Println("Server listening on http://localhost:8080")
 	fmt.Println("  Swagger UI:    http://localhost:8080/swagger/")

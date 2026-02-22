@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 
@@ -55,6 +56,17 @@ type HandleConfig struct {
 
 	// DisableDocs disables the interactive HTML docs UI endpoint.
 	DisableDocs bool
+
+	// SwaggerUIConfig provides additional SwaggerUIBundle configuration options.
+	// These are rendered as JavaScript object properties alongside the url and
+	// dom_id defaults. For example, {"docExpansion": "none"} produces:
+	//
+	//	SwaggerUIBundle({url: "...", dom_id: "#swagger-ui", "docExpansion": "none"});
+	//
+	// Only used when UI is DocsSwaggerUI (the default).
+	//
+	// See: https://swagger.io/docs/open-source-tools/swagger-ui/usage/configuration/
+	SwaggerUIConfig map[string]any
 }
 
 // jsonFilename returns the configured JSON spec filename, defaulting to "schema.json".
@@ -94,10 +106,14 @@ func resolvePath(basePath, filename string) string {
 //	<JSONFilename path>    - OpenAPI spec as JSON  (unless JSONFilename is "-")
 //	<YAMLFilename path>    - OpenAPI spec as YAML  (unless YAMLFilename is "-")
 //
+// The config parameter is optional; pass nil for defaults:
+//
+//	spec.Handle(r, "/swagger", nil)
+//
 // Filenames are relative to basePath by default. Use an absolute path
 // (starting with "/") to serve the schema at an independent location:
 //
-//	spec.Handle(r, "/swagger", HandleConfig{
+//	spec.Handle(r, "/swagger", &HandleConfig{
 //	    JSONFilename: "/api/v1/swagger.json",
 //	    YAMLFilename: "-",
 //	})
@@ -108,7 +124,10 @@ func resolvePath(basePath, filename string) string {
 // on first request and cached.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#openapi-document
-func (s *Spec) Handle(r *mux.Router, basePath string, cfg HandleConfig) {
+func (s *Spec) Handle(r *mux.Router, basePath string, cfg *HandleConfig) {
+	if cfg == nil {
+		cfg = &HandleConfig{}
+	}
 	basePath = strings.TrimRight(basePath, "/")
 
 	jsonFile := cfg.jsonFilename()
@@ -199,7 +218,7 @@ func (s *Spec) registerYAML(r *mux.Router, path string) {
 }
 
 // registerDocs registers a handler that serves the interactive HTML documentation UI.
-func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg HandleConfig, specURL string) {
+func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg *HandleConfig, specURL string) {
 	var (
 		once sync.Once
 		data []byte
@@ -218,7 +237,7 @@ func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg HandleConfig, sp
 			case DocsRedoc:
 				page = redocTemplate(title, specURL)
 			default:
-				page = swaggerUITemplate(title, specURL)
+				page = swaggerUITemplate(title, specURL, cfg.SwaggerUIConfig)
 			}
 			data = []byte(page)
 		})
@@ -235,7 +254,26 @@ func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg HandleConfig, sp
 	}
 }
 
-func swaggerUITemplate(title, specPath string) string {
+func swaggerUITemplate(title, specPath string, config map[string]any) string {
+	var extra string
+	if len(config) > 0 {
+		keys := make([]string, 0, len(config))
+		for k := range config {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		var buf strings.Builder
+		for _, k := range keys {
+			v, err := json.Marshal(config[k])
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(&buf, ", %s: %s", k, v)
+		}
+		extra = buf.String()
+	}
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -248,10 +286,10 @@ func swaggerUITemplate(title, specPath string) string {
 <div id="swagger-ui"></div>
 <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
 <script>
-SwaggerUIBundle({url: %q, dom_id: "#swagger-ui"});
+SwaggerUIBundle({url: %q, dom_id: "#swagger-ui"%s});
 </script>
 </body>
-</html>`, html.EscapeString(title), specPath)
+</html>`, html.EscapeString(title), specPath, extra)
 }
 
 func rapidocTemplate(title, specPath string) string {

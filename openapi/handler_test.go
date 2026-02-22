@@ -44,7 +44,7 @@ func serveRequest(r *mux.Router, method, path string) *httptest.ResponseRecorder
 func TestHandle(t *testing.T) {
 	t.Run("JSON spec at /swagger/schema.json", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{})
+		spec.Handle(r, "/swagger", nil)
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.json")
 
@@ -61,7 +61,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("YAML spec at /swagger/schema.yaml", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{})
+		spec.Handle(r, "/swagger", nil)
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.yaml")
 
@@ -75,7 +75,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("docs UI at /swagger/", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{})
+		spec.Handle(r, "/swagger", nil)
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
 
@@ -90,7 +90,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("docs UI at /swagger without trailing slash", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{})
+		spec.Handle(r, "/swagger", nil)
 
 		w := serveRequest(r, http.MethodGet, "/swagger")
 
@@ -102,7 +102,7 @@ func TestHandle(t *testing.T) {
 		tests := []struct {
 			name         string
 			basePath     string
-			config       HandleConfig
+			config       *HandleConfig
 			path         string
 			expectedCode int
 			contentType  string
@@ -110,7 +110,7 @@ func TestHandle(t *testing.T) {
 			{
 				name:         "trailing slash in basePath is normalized",
 				basePath:     "/swagger/",
-				config:       HandleConfig{},
+				config:       nil,
 				path:         "/swagger/schema.json",
 				expectedCode: http.StatusOK,
 				contentType:  "application/json",
@@ -118,7 +118,7 @@ func TestHandle(t *testing.T) {
 			{
 				name:         "custom JSON filename",
 				basePath:     "/swagger",
-				config:       HandleConfig{JSONFilename: "openapi.json"},
+				config:       &HandleConfig{JSONFilename: "openapi.json"},
 				path:         "/swagger/openapi.json",
 				expectedCode: http.StatusOK,
 				contentType:  "application/json",
@@ -126,7 +126,7 @@ func TestHandle(t *testing.T) {
 			{
 				name:         "custom YAML filename",
 				basePath:     "/swagger",
-				config:       HandleConfig{YAMLFilename: "openapi.yaml"},
+				config:       &HandleConfig{YAMLFilename: "openapi.yaml"},
 				path:         "/swagger/openapi.yaml",
 				expectedCode: http.StatusOK,
 				contentType:  "application/x-yaml",
@@ -147,7 +147,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("disable JSON endpoint", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{JSONFilename: "-"})
+		spec.Handle(r, "/swagger", &HandleConfig{JSONFilename: "-"})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.json")
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -158,7 +158,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("disable YAML endpoint", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{YAMLFilename: "-"})
+		spec.Handle(r, "/swagger", &HandleConfig{YAMLFilename: "-"})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.yaml")
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -169,7 +169,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("disable docs UI", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{DisableDocs: true})
+		spec.Handle(r, "/swagger", &HandleConfig{DisableDocs: true})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -183,7 +183,7 @@ func TestHandle(t *testing.T) {
 
 	t.Run("docs fallback to YAML when JSON disabled", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{JSONFilename: "-"})
+		spec.Handle(r, "/swagger", &HandleConfig{JSONFilename: "-"})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
 		body := w.Body.String()
@@ -196,37 +196,37 @@ func TestHandleDocsUI(t *testing.T) {
 	tests := []struct {
 		name         string
 		basePath     string
-		config       HandleConfig
+		config       *HandleConfig
 		bodyContains []string
 	}{
 		{
 			name:         "swagger UI default",
 			basePath:     "/docs",
-			config:       HandleConfig{},
+			config:       nil,
 			bodyContains: []string{"swagger-ui", "swagger-ui-bundle.js"},
 		},
 		{
 			name:         "rapidoc",
 			basePath:     "/docs",
-			config:       HandleConfig{UI: DocsRapiDoc},
+			config:       &HandleConfig{UI: DocsRapiDoc},
 			bodyContains: []string{"rapi-doc", "rapidoc"},
 		},
 		{
 			name:         "redoc",
 			basePath:     "/docs",
-			config:       HandleConfig{UI: DocsRedoc},
+			config:       &HandleConfig{UI: DocsRedoc},
 			bodyContains: []string{"redoc", "cdn.redoc.ly"},
 		},
 		{
 			name:         "custom title",
 			basePath:     "/docs",
-			config:       HandleConfig{Title: "Custom Docs"},
+			config:       &HandleConfig{Title: "Custom Docs"},
 			bodyContains: []string{"Custom Docs"},
 		},
 		{
 			name:         "spec URL points to schema.json under base path",
 			basePath:     "/api/v1/docs",
-			config:       HandleConfig{},
+			config:       nil,
 			bodyContains: []string{"/api/v1/docs/schema.json"},
 		},
 	}
@@ -258,7 +258,7 @@ func TestHandleCaching(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, spec := setupTestRouter()
-			spec.Handle(r, "/swagger", HandleConfig{})
+			spec.Handle(r, "/swagger", nil)
 
 			w1 := serveRequest(r, http.MethodGet, tt.path)
 			w2 := serveRequest(r, http.MethodGet, tt.path)
@@ -270,7 +270,7 @@ func TestHandleCaching(t *testing.T) {
 func TestHandleHTMLWellFormed(t *testing.T) {
 	t.Run("HTML structure", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{})
+		spec.Handle(r, "/swagger", nil)
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
 		body := w.Body.String()
@@ -297,7 +297,7 @@ func TestHandleSerializationError(t *testing.T) {
 				Response(http.StatusOK, nil)
 
 			spec.AddComponentExample("bad", &Example{Value: func() {}})
-			spec.Handle(r, "/swagger", HandleConfig{})
+			spec.Handle(r, "/swagger", nil)
 
 			w := serveRequest(r, http.MethodGet, tt.path)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -309,7 +309,7 @@ func TestHandleSerializationError(t *testing.T) {
 func TestHandleBothSpecsDisabled(t *testing.T) {
 	t.Run("docs UI not registered when both JSON and YAML disabled", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", HandleConfig{
+		spec.Handle(r, "/swagger", &HandleConfig{
 			JSONFilename: "-",
 			YAMLFilename: "-",
 		})
@@ -325,7 +325,7 @@ func TestHandleBothSpecsDisabled(t *testing.T) {
 func TestHandleRootBasePath(t *testing.T) {
 	t.Run("base path / serves docs and schemas", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/", HandleConfig{})
+		spec.Handle(r, "/", nil)
 
 		// Docs UI at /.
 		w := serveRequest(r, http.MethodGet, "/")
@@ -349,7 +349,7 @@ func TestHandleRootBasePath(t *testing.T) {
 func TestHandleAbsoluteFilename(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   HandleConfig
+		config   *HandleConfig
 		requests []struct {
 			path           string
 			expectedCode   int
@@ -360,7 +360,7 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 	}{
 		{
 			name: "absolute JSON path",
-			config: HandleConfig{
+			config: &HandleConfig{
 				JSONFilename: "/api/v1/swagger.json",
 				YAMLFilename: "-",
 			},
@@ -378,7 +378,7 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 		},
 		{
 			name: "absolute YAML path",
-			config: HandleConfig{
+			config: &HandleConfig{
 				JSONFilename: "-",
 				YAMLFilename: "/api/v1/openapi.yaml",
 			},
@@ -395,7 +395,7 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 		},
 		{
 			name:   "relative filename under basePath",
-			config: HandleConfig{JSONFilename: "swagger.json"},
+			config: &HandleConfig{JSONFilename: "swagger.json"},
 			requests: []struct {
 				path           string
 				expectedCode   int
@@ -408,7 +408,7 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 		},
 		{
 			name: "relative nested path under basePath",
-			config: HandleConfig{
+			config: &HandleConfig{
 				JSONFilename: "data/openapi.json",
 				YAMLFilename: "-",
 			},
@@ -425,7 +425,7 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 		},
 		{
 			name: "mixed absolute JSON and relative YAML",
-			config: HandleConfig{
+			config: &HandleConfig{
 				JSONFilename: "/api/v1/swagger.json",
 				YAMLFilename: "schema.yaml",
 			},
@@ -466,11 +466,83 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 	}
 }
 
+func TestHandleSwaggerUIConfig(t *testing.T) {
+	t.Run("nil config produces default output", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", nil)
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.Contains(t, body, `SwaggerUIBundle({url: "/swagger/schema.json", dom_id: "#swagger-ui"});`)
+	})
+
+	t.Run("single option", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			SwaggerUIConfig: map[string]any{
+				"docExpansion": "none",
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.Contains(t, body, `docExpansion: "none"`)
+	})
+
+	t.Run("multiple options in deterministic order", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			SwaggerUIConfig: map[string]any{
+				"docExpansion": "none",
+				"deepLinking":  true,
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		// Keys sorted alphabetically: deepLinking before docExpansion.
+		deepIdx := strings.Index(body, "deepLinking")
+		docIdx := strings.Index(body, "docExpansion")
+		require.NotEqual(t, -1, deepIdx)
+		require.NotEqual(t, -1, docIdx)
+		assert.Less(t, deepIdx, docIdx)
+	})
+
+	t.Run("boolean and numeric values", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			SwaggerUIConfig: map[string]any{
+				"deepLinking":              true,
+				"defaultModelsExpandDepth": 0,
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.Contains(t, body, `deepLinking: true`)
+		assert.Contains(t, body, `defaultModelsExpandDepth: 0`)
+	})
+
+	t.Run("string values are JSON-encoded", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			SwaggerUIConfig: map[string]any{
+				"docExpansion": `<script>alert("xss")</script>`,
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.NotContains(t, body, `<script>alert("xss")</script>`)
+		assert.Contains(t, body, `"\u003cscript\u003ealert(\"xss\")\u003c/script\u003e"`)
+	})
+}
+
 func TestHandleXSSSafe(t *testing.T) {
 	t.Run("title is HTML escaped", func(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: `<script>alert("xss")</script>`, Version: "1.0.0"})
-		spec.Handle(r, "/swagger", HandleConfig{})
+		spec.Handle(r, "/swagger", nil)
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
 		body := w.Body.String()

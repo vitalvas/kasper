@@ -380,9 +380,10 @@
 //
 // # Serving the Specification
 //
-// Handle registers all OpenAPI endpoints under a base path:
+// Handle registers all OpenAPI endpoints under a base path. The config
+// parameter is optional -- pass nil for defaults:
 //
-//	spec.Handle(r, "/swagger", openapi.HandleConfig{})
+//	spec.Handle(r, "/swagger", nil)
 //
 // This registers three routes:
 //
@@ -396,7 +397,7 @@
 // Filenames are relative to the base path by default. Use an absolute path
 // (starting with "/") to serve the schema at an independent location:
 //
-//	spec.Handle(r, "/swagger", openapi.HandleConfig{
+//	spec.Handle(r, "/swagger", &openapi.HandleConfig{
 //	    JSONFilename: "/api/v1/swagger.json",
 //	    YAMLFilename: "-",
 //	})
@@ -408,6 +409,15 @@
 //	openapi.DocsSwaggerUI (default)
 //	openapi.DocsRapiDoc
 //	openapi.DocsRedoc
+//
+// Pass additional Swagger UI options via SwaggerUIConfig:
+//
+//	spec.Handle(r, "/swagger", &openapi.HandleConfig{
+//	    SwaggerUIConfig: map[string]any{
+//	        "docExpansion": "none",
+//	        "deepLinking":  true,
+//	    },
+//	})
 //
 // # Building the Document
 //
