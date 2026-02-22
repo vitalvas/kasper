@@ -10,24 +10,26 @@ go get github.com/vitalvas/kasper/muxhandlers
 
 ## CORS Middleware
 
-`CORSMiddleware` implements the full CORS protocol. It validates the `Origin` header, handles preflight `OPTIONS` requests, and sets the appropriate response headers.
+`CORSMiddleware` implements the full CORS protocol. It validates the
+`Origin` header, handles preflight `OPTIONS` requests, and sets the
+appropriate response headers.
 
 ### CORSConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `AllowedOrigins` | `[]string` | Exact origins, `"*"` for wildcard, or subdomain patterns like `"https://*.example.com"` |
+| `AllowedOrigins` | `[]string` | Exact origins, `"*"` for wildcard, or subdomain patterns |
 | `AllowOriginFunc` | `func(string) bool` | Optional dynamic origin check (receives raw origin) |
 | `AllowedMethods` | `[]string` | Override methods; empty = auto-discover from router |
-| `AllowedHeaders` | `[]string` | Preflight allowed headers; empty = reflect request; `"*"` = reflect all requested headers |
+| `AllowedHeaders` | `[]string` | Preflight allowed headers; empty = reflect request |
 | `ExposeHeaders` | `[]string` | Headers exposed to client code |
 | `AllowCredentials` | `bool` | Send `Access-Control-Allow-Credentials: true` |
 | `MaxAge` | `int` | Preflight cache seconds; 0 = omit, negative = `"0"` |
 | `OptionsStatusCode` | `int` | Preflight HTTP status; 0 = 204 No Content |
-| `OptionsPassthrough` | `bool` | Forward preflight to next handler after setting CORS headers |
-| `AllowPrivateNetwork` | `bool` | Respond to `Access-Control-Request-Private-Network` with allow header |
+| `OptionsPassthrough` | `bool` | Forward preflight to next handler after setting headers |
+| `AllowPrivateNetwork` | `bool` | Respond to private network access requests |
 
-### Usage
+### CORS Usage
 
 ```go
 r := mux.NewRouter()
@@ -51,17 +53,22 @@ r.Use(mw)
 
 ## Basic Auth Middleware
 
-`BasicAuthMiddleware` implements HTTP Basic Authentication per [RFC 7617](https://www.rfc-editor.org/rfc/rfc7617). Credentials can be validated via a dynamic callback (`ValidateFunc`) or a static map (`Credentials`). When both are set, `ValidateFunc` takes priority. Static credential comparison uses `crypto/subtle.ConstantTimeCompare` to prevent timing attacks.
+`BasicAuthMiddleware` implements HTTP Basic Authentication per
+[RFC 7617](https://www.rfc-editor.org/rfc/rfc7617). Credentials can be
+validated via a dynamic callback (`ValidateFunc`) or a static map
+(`Credentials`). When both are set, `ValidateFunc` takes priority.
+Static credential comparison uses `crypto/subtle.ConstantTimeCompare`
+to prevent timing attacks.
 
 ### BasicAuthConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Realm` | `string` | Authentication realm for `WWW-Authenticate` header; defaults to `"Restricted"` |
-| `ValidateFunc` | `func(string, string) bool` | Dynamic credential validation callback (username, password); takes priority over `Credentials` |
-| `Credentials` | `map[string]string` | Static username-to-password map; compared with constant-time comparison |
+| `Realm` | `string` | Authentication realm for `WWW-Authenticate` header |
+| `ValidateFunc` | `func(string, string) bool` | Dynamic credential validation callback |
+| `Credentials` | `map[string]string` | Static username-to-password map |
 
-### Usage with ValidateFunc
+### BasicAuth Usage with ValidateFunc
 
 ```go
 r := mux.NewRouter()
@@ -81,7 +88,7 @@ if err != nil {
 r.Use(mw)
 ```
 
-### Usage with Credentials
+### BasicAuth Usage with Credentials
 
 ```go
 mw, err := muxhandlers.BasicAuthMiddleware(muxhandlers.BasicAuthConfig{
@@ -99,18 +106,24 @@ r.Use(mw)
 
 ## Proxy Headers Middleware
 
-`ProxyHeadersMiddleware` populates request fields from reverse proxy headers when the request originates from a trusted proxy. A trusted proxy list (IPs and CIDRs) restricts which peers are allowed to set these headers, preventing spoofing from untrusted clients. When `TrustedProxies` is empty, `DefaultTrustedProxies` (RFC 1918, RFC 4193, and loopback ranges) is used.
+`ProxyHeadersMiddleware` populates request fields from reverse proxy
+headers when the request originates from a trusted proxy. A trusted
+proxy list (IPs and CIDRs) restricts which peers are allowed to set
+these headers, preventing spoofing from untrusted clients. When
+`TrustedProxies` is empty, `DefaultTrustedProxies` (RFC 1918,
+RFC 4193, and loopback ranges) is used.
 
 ### Supported Headers
 
 | Field | Headers (priority order) |
 |-------|--------------------------|
 | `r.RemoteAddr` | `X-Forwarded-For` > `X-Real-IP` > `Forwarded: for=`* |
-| `r.URL.Scheme` | `X-Forwarded-Proto` > `X-Forwarded-Scheme` > `Forwarded: proto=`* |
+| `r.URL.Scheme` | `X-Forwarded-Proto` > `X-Forwarded-Scheme`* |
 | `r.Host` | `X-Forwarded-Host` > `Forwarded: host=`* |
 | `X-Forwarded-By` header | `Forwarded: by=`* |
 
-*Requires `EnableForwarded: true` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)).
+*Requires `EnableForwarded: true`
+([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)).
 
 ### DefaultTrustedProxies
 
@@ -128,10 +141,10 @@ r.Use(mw)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `TrustedProxies` | `[]string` | IP addresses and CIDR ranges of trusted proxies; empty = `DefaultTrustedProxies` |
-| `EnableForwarded` | `bool` | Parse RFC 7239 `Forwarded` header as lowest-priority fallback |
+| `TrustedProxies` | `[]string` | IP/CIDR of trusted proxies; empty = defaults |
+| `EnableForwarded` | `bool` | Parse RFC 7239 `Forwarded` header as fallback |
 
-### Usage
+### ProxyHeaders Usage
 
 ```go
 r := mux.NewRouter()
@@ -150,15 +163,17 @@ r.Use(mw)
 
 ## Recovery Middleware
 
-`RecoveryMiddleware` recovers from panics in downstream handlers, returns 500 Internal Server Error to the client, and optionally invokes a custom log callback with the request and recovered value.
+`RecoveryMiddleware` recovers from panics in downstream handlers,
+returns 500 Internal Server Error to the client, and optionally
+invokes a custom log callback with the request and recovered value.
 
 ### RecoveryConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `LogFunc` | `func(*http.Request, any)` | Optional callback invoked with the request and recovered value; `nil` = no logging |
+| `LogFunc` | `func(*http.Request, any)` | Optional callback; `nil` = no logging |
 
-### Usage
+### Recovery Usage
 
 ```go
 r := mux.NewRouter()
@@ -174,24 +189,31 @@ r.Use(muxhandlers.RecoveryMiddleware(muxhandlers.RecoveryConfig{
 
 ## Request ID Middleware
 
-`RequestIDMiddleware` generates or propagates a unique request identifier. The ID is set on the request header, the response header, and the request context. Downstream handlers can retrieve it with `RequestIDFromContext`. By default it generates UUID v4 values using `github.com/google/uuid`. Use `GenerateUUIDv7` for time-ordered IDs ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)). The `GenerateFunc` receives the current request, allowing ID generation based on request context.
+`RequestIDMiddleware` generates or propagates a unique request
+identifier. The ID is set on the request header, the response header,
+and the request context. Downstream handlers can retrieve it with
+`RequestIDFromContext`. By default it generates UUID v4 values using
+`github.com/google/uuid`. Use `GenerateUUIDv7` for time-ordered IDs
+([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)).
+The `GenerateFunc` receives the current request, allowing ID
+generation based on request context.
 
 ### RequestIDConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `HeaderName` | `string` | Header name for the request ID; defaults to `"X-Request-ID"` |
-| `GenerateFunc` | `func(*http.Request) string` | Custom ID generator receiving the request; defaults to `GenerateUUIDv4`; use `GenerateUUIDv7` for time-ordered IDs |
-| `TrustIncoming` | `bool` | Reuse existing header value from the incoming request instead of generating a new one |
+| `HeaderName` | `string` | Header name; defaults to `"X-Request-ID"` |
+| `GenerateFunc` | `func(*http.Request) string` | Custom ID generator; defaults to UUID v4 |
+| `TrustIncoming` | `bool` | Reuse existing header from the incoming request |
 
 ### Built-in Generators
 
 | Function | Description |
 |----------|-------------|
-| `GenerateUUIDv4` | Random UUID v4 via `github.com/google/uuid` (default) |
-| `GenerateUUIDv7` | Time-ordered UUID v7 via `github.com/google/uuid` ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)) |
+| `GenerateUUIDv4` | Random UUID v4 (default) |
+| `GenerateUUIDv7` | Time-ordered UUID v7 (RFC 9562) |
 
-### Usage
+### RequestID Usage
 
 ```go
 r := mux.NewRouter()
@@ -203,7 +225,7 @@ r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
 }))
 ```
 
-### Usage with UUID v7
+### RequestID Usage with UUID v7
 
 ```go
 r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
@@ -222,15 +244,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 ## Request Size Limit Middleware
 
-`RequestSizeLimitMiddleware` limits the size of incoming request bodies. It wraps `r.Body` with `http.MaxBytesReader`, which returns 413 Request Entity Too Large when the limit is exceeded.
+`RequestSizeLimitMiddleware` limits the size of incoming request
+bodies. It wraps `r.Body` with `http.MaxBytesReader`, which returns
+413 Request Entity Too Large when the limit is exceeded.
 
 ### RequestSizeLimitConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MaxBytes` | `int64` | Maximum allowed body size in bytes; must be greater than zero |
+| `MaxBytes` | `int64` | Maximum allowed body size in bytes; must be > 0 |
 
-### Usage
+### RequestSizeLimit Usage
 
 ```go
 r := mux.NewRouter()
@@ -249,16 +273,19 @@ r.Use(mw)
 
 ## Timeout Middleware
 
-`TimeoutMiddleware` limits handler execution time by wrapping the handler with `http.TimeoutHandler`. It returns 503 Service Unavailable when the handler does not complete within the configured duration.
+`TimeoutMiddleware` limits handler execution time by wrapping the
+handler with `http.TimeoutHandler`. It returns 503 Service
+Unavailable when the handler does not complete within the configured
+duration.
 
 ### TimeoutConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Duration` | `time.Duration` | Maximum time allowed for the handler to complete; must be greater than zero |
-| `Message` | `string` | Custom response body returned on timeout; empty = stdlib default |
+| `Duration` | `time.Duration` | Maximum handler execution time; must be > 0 |
+| `Message` | `string` | Custom timeout body; empty = stdlib default |
 
-### Usage
+### Timeout Usage
 
 ```go
 r := mux.NewRouter()
@@ -277,16 +304,22 @@ r.Use(mw)
 
 ## Compression Middleware
 
-`CompressionMiddleware` compresses response bodies using gzip or deflate when the client advertises support via the `Accept-Encoding` header. Gzip is preferred over deflate when both are accepted. Quality values (`q=`) are respected for encoding selection. It uses `sync.Pool` instances to reuse writers for performance. Compression is skipped for inherently compressed content types (images, video, audio, archives) and when a `Content-Encoding` is already set.
+`CompressionMiddleware` compresses response bodies using gzip or
+deflate when the client advertises support via the `Accept-Encoding`
+header. Gzip is preferred over deflate when both are accepted.
+Quality values (`q=`) are respected for encoding selection. It uses
+`sync.Pool` instances to reuse writers for performance. Compression
+is skipped for inherently compressed content types (images, video,
+audio, archives) and when a `Content-Encoding` is already set.
 
 ### CompressionConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Level` | `int` | Compression level for gzip and deflate; 0 = `flate.DefaultCompression`; must be in `[flate.HuffmanOnly, flate.BestCompression]` |
-| `MinLength` | `int` | Minimum response body size in bytes before compression is applied; 0 = always compress |
+| `Level` | `int` | Compression level; 0 = default; `[HuffmanOnly, BestCompression]` |
+| `MinLength` | `int` | Minimum body bytes before compressing; 0 = always |
 
-### Usage
+### Compression Usage
 
 ```go
 r := mux.NewRouter()
@@ -306,23 +339,27 @@ r.Use(mw)
 
 ## Security Headers Middleware
 
-`SecurityHeadersMiddleware` sets common security response headers with sensible defaults. By default it sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: strict-origin-when-cross-origin`. HSTS, CSP, Permissions-Policy, and Cross-Origin-Opener-Policy headers are opt-in.
+`SecurityHeadersMiddleware` sets common security response headers
+with sensible defaults. By default it sets
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
+`Referrer-Policy: strict-origin-when-cross-origin`. HSTS, CSP,
+Permissions-Policy, and Cross-Origin-Opener-Policy are opt-in.
 
 ### SecurityHeadersConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `DisableContentTypeNosniff` | `bool` | Disable `X-Content-Type-Options: nosniff`; enabled by default |
-| `FrameOption` | `string` | `X-Frame-Options` value; `"DENY"` (default), `"SAMEORIGIN"`, or empty to skip |
-| `ReferrerPolicy` | `string` | `Referrer-Policy` value; defaults to `"strict-origin-when-cross-origin"` |
-| `HSTSMaxAge` | `int` | `Strict-Transport-Security` max-age in seconds; 0 = skip |
-| `HSTSIncludeSubDomains` | `bool` | Append `includeSubDomains` directive; only when `HSTSMaxAge > 0` |
-| `HSTSPreload` | `bool` | Append `preload` directive; only when `HSTSMaxAge > 0` |
-| `CrossOriginOpenerPolicy` | `string` | `Cross-Origin-Opener-Policy` value; empty = skip |
-| `ContentSecurityPolicy` | `string` | `Content-Security-Policy` value; empty = skip |
-| `PermissionsPolicy` | `string` | `Permissions-Policy` value; empty = skip |
+| `DisableContentTypeNosniff` | `bool` | Disable nosniff; enabled by default |
+| `FrameOption` | `string` | `"DENY"` (default), `"SAMEORIGIN"`, or empty |
+| `ReferrerPolicy` | `string` | Defaults to `"strict-origin-when-cross-origin"` |
+| `HSTSMaxAge` | `int` | HSTS max-age in seconds; 0 = skip |
+| `HSTSIncludeSubDomains` | `bool` | Append `includeSubDomains`; requires `HSTSMaxAge` |
+| `HSTSPreload` | `bool` | Append `preload`; requires `HSTSMaxAge` |
+| `CrossOriginOpenerPolicy` | `string` | COOP value; empty = skip |
+| `ContentSecurityPolicy` | `string` | CSP value; empty = skip |
+| `PermissionsPolicy` | `string` | Permissions-Policy value; empty = skip |
 
-### Usage
+### SecurityHeaders Usage
 
 ```go
 r := mux.NewRouter()
