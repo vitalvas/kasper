@@ -215,4 +215,23 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # Static Files Handler
+//
+// StaticFilesHandler serves static files from any fs.FS implementation
+// (os.DirFS, embed.FS, fstest.MapFS, etc.) using http.FileServerFS.
+// It is not middleware — it returns an http.Handler that serves files
+// directly. Directory listing is disabled by default; when a directory
+// has no index.html, a 404 is returned instead of a file listing.
+// When SPAFallback is enabled, requests for non-existent paths serve
+// the root index.html, allowing client-side routers to handle routing.
+//
+//	handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
+//	    FS:          os.DirFS("./public"),
+//	    SPAFallback: true,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.PathPrefix("/").Handler(handler)
 package muxhandlers

@@ -74,3 +74,4 @@ HTTP middleware for the mux router.
 | `ContentTypeCheckMiddleware` | -- | Content-Type validation with case-insensitive matching, parameter-ignoring, 415 on mismatch |
 | `ServerMiddleware` | -- | Sets `X-Server-Hostname` response header, resolved once via `os.Hostname` or static value |
 | `CacheControlMiddleware` | -- | Sets `Cache-Control` and `Expires` response headers based on Content-Type prefix rules, case-insensitive matching |
+| `StaticFilesHandler` | -- | Serves static files from any `fs.FS` via `http.FileServerFS`, directory listing disabled by default, SPA fallback support |

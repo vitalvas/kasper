@@ -520,3 +520,72 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## Static Files Handler
+
+`StaticFilesHandler` serves static files from any `fs.FS` implementation
+(`os.DirFS`, `embed.FS`, `fstest.MapFS`, etc.) using `http.FileServerFS`.
+It is not middleware — it returns an `http.Handler` that serves files
+directly. Directory listing is disabled by default; when a directory has
+no `index.html`, a 404 is returned instead of a file listing. When
+`SPAFallback` is enabled, requests for non-existent paths serve the root
+`index.html`, allowing client-side routers to handle routing.
+
+### StaticFilesConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `FS` | `fs.FS` | File system to serve files from; required |
+| `EnableDirectoryListing` | `bool` | Show directory contents when no `index.html` is present; `false` by default |
+| `SPAFallback` | `bool` | Serve root `index.html` for non-existent paths; requires `index.html` at FS root |
+
+### StaticFiles Usage
+
+```go
+r := mux.NewRouter()
+
+handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
+    FS: os.DirFS("./public"),
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
+```
+
+### StaticFiles Usage with SPA
+
+```go
+r := mux.NewRouter()
+
+// API routes first
+r.PathPrefix("/api/").Handler(apiRouter)
+
+// SPA handler last — catches all unmatched routes
+handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
+    FS:          os.DirFS("./public"),
+    SPAFallback: true,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.PathPrefix("/").Handler(handler)
+```
+
+### StaticFiles Usage with embed.FS
+
+```go
+//go:embed static
+var staticFS embed.FS
+
+handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
+    FS: staticFS,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
+```
