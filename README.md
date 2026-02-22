@@ -55,6 +55,21 @@ Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and stru
 
 ---
 
+## httpsig `github.com/vitalvas/kasper/httpsig`
+
+HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530).
+
+| Feature | Standard | Details |
+|---------|----------|---------|
+| Signing | RFC 9421 | `SignRequest` adds Signature and Signature-Input headers |
+| Verification | RFC 9421 | `VerifyRequest` with key resolver, max age, required components |
+| Client Transport | RFC 9421 | `http.RoundTripper` for automatic request signing |
+| Server Middleware | RFC 9421 | `mux.MiddlewareFunc` for automatic request verification |
+| Content-Digest | RFC 9530 | SHA-256/SHA-512 body digest generation and verification |
+| Algorithms | RFC 9421 | Ed25519, ECDSA P-256/P-384, RSA-PSS, RSA v1.5, HMAC-SHA256 |
+
+---
+
 ## muxhandlers `github.com/vitalvas/kasper/muxhandlers`
 
 HTTP middleware for the mux router.
