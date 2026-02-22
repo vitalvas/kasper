@@ -67,3 +67,6 @@ HTTP middleware for the mux router.
 | `RecoveryMiddleware` | -- | Panic recovery, 500 response, optional log callback |
 | `RequestIDMiddleware` | RFC 9562 | UUID v4/v7 generation/propagation via X-Request-ID header |
 | `RequestSizeLimitMiddleware` | -- | Body size enforcement via `http.MaxBytesReader`, 413 on excess |
+| `TimeoutMiddleware` | -- | Handler execution time limit via `http.TimeoutHandler`, 503 on timeout |
+| `CompressionMiddleware` | -- | Gzip/deflate response compression with `sync.Pool`, quality-based encoding selection, min-length threshold |
+| `SecurityHeadersMiddleware` | -- | X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS, CSP, Permissions-Policy |

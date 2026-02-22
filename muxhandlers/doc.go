@@ -99,4 +99,53 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # Timeout Middleware
+//
+// TimeoutMiddleware limits handler execution time by wrapping the handler
+// with http.TimeoutHandler. It returns 503 Service Unavailable when the
+// handler does not complete within the configured duration.
+//
+//	mw, err := muxhandlers.TimeoutMiddleware(muxhandlers.TimeoutConfig{
+//	    Duration: 30 * time.Second,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
+// # Compression Middleware
+//
+// CompressionMiddleware compresses response bodies using gzip or deflate when
+// the client advertises support via the Accept-Encoding header. Gzip is
+// preferred over deflate when both are accepted. It uses sync.Pool instances
+// to reuse writers for performance. Compression is skipped for inherently
+// compressed content types (images, video, audio, archives).
+//
+//	mw, err := muxhandlers.CompressionMiddleware(muxhandlers.CompressionConfig{
+//	    Level:     gzip.BestSpeed,
+//	    MinLength: 1024,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
+// # Security Headers Middleware
+//
+// SecurityHeadersMiddleware sets common security response headers with
+// sensible defaults. Headers are set before calling the next handler.
+// By default it sets X-Content-Type-Options: nosniff, X-Frame-Options: DENY,
+// and Referrer-Policy: strict-origin-when-cross-origin. HSTS, CSP,
+// Permissions-Policy, and Cross-Origin-Opener-Policy headers are opt-in.
+//
+//	mw, err := muxhandlers.SecurityHeadersMiddleware(muxhandlers.SecurityHeadersConfig{
+//	    HSTSMaxAge:            63072000,
+//	    HSTSIncludeSubDomains: true,
+//	    HSTSPreload:           true,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
 package muxhandlers

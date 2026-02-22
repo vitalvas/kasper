@@ -246,3 +246,97 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## Timeout Middleware
+
+`TimeoutMiddleware` limits handler execution time by wrapping the handler with `http.TimeoutHandler`. It returns 503 Service Unavailable when the handler does not complete within the configured duration.
+
+### TimeoutConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Duration` | `time.Duration` | Maximum time allowed for the handler to complete; must be greater than zero |
+| `Message` | `string` | Custom response body returned on timeout; empty = stdlib default |
+
+### Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.TimeoutMiddleware(muxhandlers.TimeoutConfig{
+    Duration: 30 * time.Second,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+## Compression Middleware
+
+`CompressionMiddleware` compresses response bodies using gzip or deflate when the client advertises support via the `Accept-Encoding` header. Gzip is preferred over deflate when both are accepted. Quality values (`q=`) are respected for encoding selection. It uses `sync.Pool` instances to reuse writers for performance. Compression is skipped for inherently compressed content types (images, video, audio, archives) and when a `Content-Encoding` is already set.
+
+### CompressionConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Level` | `int` | Compression level for gzip and deflate; 0 = `flate.DefaultCompression`; must be in `[flate.HuffmanOnly, flate.BestCompression]` |
+| `MinLength` | `int` | Minimum response body size in bytes before compression is applied; 0 = always compress |
+
+### Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.CompressionMiddleware(muxhandlers.CompressionConfig{
+    Level:     gzip.BestSpeed,
+    MinLength: 1024,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+## Security Headers Middleware
+
+`SecurityHeadersMiddleware` sets common security response headers with sensible defaults. By default it sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: strict-origin-when-cross-origin`. HSTS, CSP, Permissions-Policy, and Cross-Origin-Opener-Policy headers are opt-in.
+
+### SecurityHeadersConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `DisableContentTypeNosniff` | `bool` | Disable `X-Content-Type-Options: nosniff`; enabled by default |
+| `FrameOption` | `string` | `X-Frame-Options` value; `"DENY"` (default), `"SAMEORIGIN"`, or empty to skip |
+| `ReferrerPolicy` | `string` | `Referrer-Policy` value; defaults to `"strict-origin-when-cross-origin"` |
+| `HSTSMaxAge` | `int` | `Strict-Transport-Security` max-age in seconds; 0 = skip |
+| `HSTSIncludeSubDomains` | `bool` | Append `includeSubDomains` directive; only when `HSTSMaxAge > 0` |
+| `HSTSPreload` | `bool` | Append `preload` directive; only when `HSTSMaxAge > 0` |
+| `CrossOriginOpenerPolicy` | `string` | `Cross-Origin-Opener-Policy` value; empty = skip |
+| `ContentSecurityPolicy` | `string` | `Content-Security-Policy` value; empty = skip |
+| `PermissionsPolicy` | `string` | `Permissions-Policy` value; empty = skip |
+
+### Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.SecurityHeadersMiddleware(muxhandlers.SecurityHeadersConfig{
+    HSTSMaxAge:            63072000,
+    HSTSIncludeSubDomains: true,
+    HSTSPreload:           true,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
