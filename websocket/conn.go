@@ -50,6 +50,8 @@ var (
 	ErrControlFramePayloadTooBig = errors.New("websocket: control frame payload too big")
 	ErrUnexpectedContinuation    = errors.New("websocket: unexpected continuation frame")
 	ErrExpectedContinuation      = errors.New("websocket: expected continuation frame")
+	ErrMaskViolation             = errors.New("websocket: mask bit violation")
+	ErrInvalidClosePayload       = errors.New("websocket: invalid close frame payload length")
 )
 
 // CloseError represents a WebSocket close error.
@@ -377,7 +379,12 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 }
 
 // NextWriter returns a writer for the next message to send.
+// Only TextMessage and BinaryMessage are valid message types.
 func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
+	if messageType != TextMessage && messageType != BinaryMessage {
+		return nil, ErrInvalidMessageType
+	}
+
 	c.writeMu.Lock()
 
 	if c.writeErr != nil {
@@ -520,6 +527,23 @@ func (c *Conn) readFrame() (frameType int, payload []byte, final bool, compresse
 
 	frameType = int(c.readBuf[0] & opcodeMask)
 	masked := c.readBuf[1]&maskBit != 0
+
+	// RFC 6455, section 5.1: client-to-server frames MUST be masked,
+	// server-to-client frames MUST NOT be masked.
+	if c.isServer && !masked {
+		return 0, nil, false, false, ErrMaskViolation
+	}
+
+	if !c.isServer && masked {
+		return 0, nil, false, false, ErrMaskViolation
+	}
+
+	// RFC 6455, section 5.5: RSV1 must be 0 on control frames, even
+	// when permessage-deflate is negotiated (RFC 7692, section 6.1).
+	if compressed && frameType >= CloseMessage {
+		return 0, nil, false, false, ErrReservedBits
+	}
+
 	payloadLen := int64(c.readBuf[1] & payloadLenMask)
 
 	switch payloadLen {
@@ -544,6 +568,11 @@ func (c *Conn) readFrame() (frameType int, payload []byte, final bool, compresse
 
 	if frameType >= CloseMessage && !final {
 		return 0, nil, false, false, ErrFragmentedControlFrame
+	}
+
+	// RFC 6455, section 5.5.1: close frame payload must be 0 or >= 2 bytes.
+	if frameType == CloseMessage && payloadLen == 1 {
+		return 0, nil, false, false, ErrInvalidClosePayload
 	}
 
 	// Check read limit (0 means unlimited).

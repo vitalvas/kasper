@@ -403,6 +403,64 @@ func (m *mockConn) SetDeadline(_ time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(_ time.Time) error { return nil }
 
+// buildMaskedFrame constructs a WebSocket frame with the mask bit set,
+// as required for client-to-server frames per RFC 6455.
+func buildMaskedFrame(opcode byte, payload []byte, final bool) []byte {
+	mask := []byte{0x12, 0x34, 0x56, 0x78}
+	maskedPayload := make([]byte, len(payload))
+	copy(maskedPayload, payload)
+	maskBytes(mask, 0, maskedPayload)
+
+	header := opcode
+	if final {
+		header |= finalBit
+	}
+
+	var lenBytes []byte
+	switch {
+	case len(payload) <= 125:
+		lenBytes = []byte{byte(len(payload)) | maskBit}
+	case len(payload) <= 65535:
+		lenBytes = []byte{
+			payloadLen16 | maskBit,
+			byte(len(payload) >> 8),
+			byte(len(payload)),
+		}
+	default:
+		lenBytes = []byte{
+			payloadLen64 | maskBit,
+			byte(len(payload) >> 56), byte(len(payload) >> 48),
+			byte(len(payload) >> 40), byte(len(payload) >> 32),
+			byte(len(payload) >> 24), byte(len(payload) >> 16),
+			byte(len(payload) >> 8), byte(len(payload)),
+		}
+	}
+
+	frame := make([]byte, 0, 1+len(lenBytes)+4+len(payload))
+	frame = append(frame, header)
+	frame = append(frame, lenBytes...)
+	frame = append(frame, mask...)
+	frame = append(frame, maskedPayload...)
+
+	return frame
+}
+
+// buildMaskedFrameRaw constructs a masked WebSocket frame with a custom first byte.
+// Use this when you need to set specific flags (e.g., RSV1 for compression).
+func buildMaskedFrameRaw(firstByte byte, payload []byte) []byte {
+	mask := []byte{0x12, 0x34, 0x56, 0x78}
+	maskedPayload := make([]byte, len(payload))
+	copy(maskedPayload, payload)
+	maskBytes(mask, 0, maskedPayload)
+
+	frame := make([]byte, 0, 2+4+len(payload))
+	frame = append(frame, firstByte, byte(len(payload))|maskBit)
+	frame = append(frame, mask...)
+	frame = append(frame, maskedPayload...)
+
+	return frame
+}
+
 func TestWriteControlFrame(t *testing.T) {
 	t.Run("Server writes ping", func(t *testing.T) {
 		mock := newMockConn()
@@ -467,8 +525,7 @@ func TestWriteDataFrame(t *testing.T) {
 func TestReadFrame(t *testing.T) {
 	t.Run("Read text frame", func(t *testing.T) {
 		mock := newMockConn()
-		frame := []byte{byte(TextMessage) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
-		mock.readBuf.Write(frame)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -515,7 +572,7 @@ func TestReadFrame(t *testing.T) {
 		frame = append(frame, payload...)
 		mock.readBuf.Write(frame)
 
-		conn := newConn(mock, true, 0, 0)
+		conn := newConn(mock, false, 0, 0)
 
 		msgType, data, final, _, err := conn.readFrame()
 		require.NoError(t, err)
@@ -540,7 +597,7 @@ func TestReadFrame(t *testing.T) {
 		frame := []byte{byte(PingMessage) | finalBit, payloadLen16, 0, 200}
 		mock.readBuf.Write(frame)
 
-		conn := newConn(mock, true, 0, 0)
+		conn := newConn(mock, false, 0, 0)
 
 		_, _, _, _, err := conn.readFrame()
 		assert.ErrorIs(t, err, ErrControlFramePayloadTooBig)
@@ -551,7 +608,7 @@ func TestReadFrame(t *testing.T) {
 		frame := []byte{byte(PingMessage), 5, 'h', 'e', 'l', 'l', 'o'}
 		mock.readBuf.Write(frame)
 
-		conn := newConn(mock, true, 0, 0)
+		conn := newConn(mock, false, 0, 0)
 
 		_, _, _, _, err := conn.readFrame()
 		assert.ErrorIs(t, err, ErrFragmentedControlFrame)
@@ -564,7 +621,7 @@ func TestReadFrame(t *testing.T) {
 		frame = append(frame, make([]byte, 100)...)
 		mock.readBuf.Write(frame)
 
-		conn := newConn(mock, true, 0, 0)
+		conn := newConn(mock, false, 0, 0)
 		conn.SetReadLimit(50)
 
 		_, _, _, _, err := conn.readFrame()
@@ -575,8 +632,7 @@ func TestReadFrame(t *testing.T) {
 func TestNextReader(t *testing.T) {
 	t.Run("Read text message", func(t *testing.T) {
 		mock := newMockConn()
-		frame := []byte{byte(TextMessage) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
-		mock.readBuf.Write(frame)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -593,8 +649,7 @@ func TestNextReader(t *testing.T) {
 
 func TestReadMessage(t *testing.T) {
 	mock := newMockConn()
-	frame := []byte{byte(TextMessage) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
-	mock.readBuf.Write(frame)
+	mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 	conn := newConn(mock, true, 0, 0)
 
@@ -646,10 +701,8 @@ func TestMessageWriter(t *testing.T) {
 func TestNextReaderEdgeCases(t *testing.T) {
 	t.Run("Handle ping during read", func(t *testing.T) {
 		mock := newMockConn()
-		pingFrame := []byte{byte(PingMessage) | finalBit, 4, 'p', 'i', 'n', 'g'}
-		textFrame := []byte{byte(TextMessage) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
-		mock.readBuf.Write(pingFrame)
-		mock.readBuf.Write(textFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(PingMessage), []byte("ping"), true))
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 		conn := newConn(mock, true, 0, 0)
 		pingHandled := false
@@ -670,8 +723,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Ping handler error", func(t *testing.T) {
 		mock := newMockConn()
-		pingFrame := []byte{byte(PingMessage) | finalBit, 4, 'p', 'i', 'n', 'g'}
-		mock.readBuf.Write(pingFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(PingMessage), []byte("ping"), true))
 
 		conn := newConn(mock, true, 0, 0)
 		testErr := errors.New("ping handler error")
@@ -685,8 +737,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Pong handler error", func(t *testing.T) {
 		mock := newMockConn()
-		pongFrame := []byte{byte(PongMessage) | finalBit, 4, 'p', 'o', 'n', 'g'}
-		mock.readBuf.Write(pongFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(PongMessage), []byte("pong"), true))
 
 		conn := newConn(mock, true, 0, 0)
 		testErr := errors.New("pong handler error")
@@ -700,8 +751,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Close handler error", func(t *testing.T) {
 		mock := newMockConn()
-		closeFrame := []byte{byte(CloseMessage) | finalBit, 2, 0x03, 0xe8}
-		mock.readBuf.Write(closeFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8}, true))
 
 		conn := newConn(mock, true, 0, 0)
 		testErr := errors.New("close handler error")
@@ -715,8 +765,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Handle close frame", func(t *testing.T) {
 		mock := newMockConn()
-		closeFrame := []byte{byte(CloseMessage) | finalBit, 2, 0x03, 0xe8}
-		mock.readBuf.Write(closeFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8}, true))
 
 		conn := newConn(mock, true, 0, 0)
 		closeHandled := false
@@ -736,8 +785,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Handle close frame with text", func(t *testing.T) {
 		mock := newMockConn()
-		closeFrame := []byte{byte(CloseMessage) | finalBit, 5, 0x03, 0xe8, 'b', 'y', 'e'}
-		mock.readBuf.Write(closeFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8, 'b', 'y', 'e'}, true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -750,8 +798,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Unexpected continuation frame", func(t *testing.T) {
 		mock := newMockConn()
-		frame := []byte{byte(continuationFrame) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
-		mock.readBuf.Write(frame)
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), []byte("hello"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -761,8 +808,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 
 	t.Run("Invalid opcode", func(t *testing.T) {
 		mock := newMockConn()
-		frame := []byte{byte(3) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
-		mock.readBuf.Write(frame)
+		mock.readBuf.Write(buildMaskedFrame(3, []byte("hello"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -792,8 +838,7 @@ func TestNextReaderEdgeCases(t *testing.T) {
 func TestMessageReaderRead(t *testing.T) {
 	t.Run("Read in chunks", func(t *testing.T) {
 		mock := newMockConn()
-		frame := []byte{byte(TextMessage) | finalBit, 10, 'h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd'}
-		mock.readBuf.Write(frame)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("helloworld"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -817,10 +862,8 @@ func TestMessageReaderRead(t *testing.T) {
 
 	t.Run("Read fragmented message with continuation", func(t *testing.T) {
 		mock := newMockConn()
-		firstFrame := []byte{byte(TextMessage), 5, 'h', 'e', 'l', 'l', 'o'}
-		contFrame := []byte{byte(continuationFrame) | finalBit, 5, 'w', 'o', 'r', 'l', 'd'}
-		mock.readBuf.Write(firstFrame)
-		mock.readBuf.Write(contFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), false))
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), []byte("world"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -834,10 +877,8 @@ func TestMessageReaderRead(t *testing.T) {
 
 	t.Run("Read error on expected continuation", func(t *testing.T) {
 		mock := newMockConn()
-		firstFrame := []byte{byte(TextMessage), 5, 'h', 'e', 'l', 'l', 'o'}
-		badFrame := []byte{byte(TextMessage) | finalBit, 5, 'w', 'o', 'r', 'l', 'd'}
-		mock.readBuf.Write(firstFrame)
-		mock.readBuf.Write(badFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), false))
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("world"), true))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -854,8 +895,7 @@ func TestMessageReaderRead(t *testing.T) {
 
 	t.Run("Read error on continuation frame", func(t *testing.T) {
 		mock := newMockConn()
-		firstFrame := []byte{byte(TextMessage), 5, 'h', 'e', 'l', 'l', 'o'}
-		mock.readBuf.Write(firstFrame)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), false))
 
 		conn := newConn(mock, true, 0, 0)
 
@@ -879,16 +919,7 @@ func TestLargeFrames(t *testing.T) {
 			payload[i] = byte(i % 256)
 		}
 
-		frame := make([]byte, 0, 10+len(payload))
-		frame = append(frame, byte(BinaryMessage)|finalBit, payloadLen64)
-		lenBytes := make([]byte, 8)
-		lenBytes[4] = byte(len(payload) >> 24)
-		lenBytes[5] = byte(len(payload) >> 16)
-		lenBytes[6] = byte(len(payload) >> 8)
-		lenBytes[7] = byte(len(payload))
-		frame = append(frame, lenBytes...)
-		frame = append(frame, payload...)
-		mock.readBuf.Write(frame)
+		mock.readBuf.Write(buildMaskedFrame(byte(BinaryMessage), payload, true))
 
 		conn := newConn(mock, true, 0, 0)
 		conn.SetReadLimit(100000)
@@ -896,7 +927,7 @@ func TestLargeFrames(t *testing.T) {
 		msgType, data, err := conn.ReadMessage()
 		require.NoError(t, err)
 		assert.Equal(t, BinaryMessage, msgType)
-		assert.Equal(t, len(payload), len(data))
+		assert.Equal(t, payload, data)
 	})
 
 	t.Run("Write large message client", func(t *testing.T) {
@@ -956,6 +987,121 @@ func TestWriteMessageToClosedConn(t *testing.T) {
 
 	err := conn.WriteMessage(TextMessage, []byte("test"))
 	assert.Error(t, err)
+}
+
+func TestMaskViolation(t *testing.T) {
+	t.Run("Server rejects unmasked frame", func(t *testing.T) {
+		mock := newMockConn()
+		frame := []byte{byte(TextMessage) | finalBit, 5, 'h', 'e', 'l', 'l', 'o'}
+		mock.readBuf.Write(frame)
+
+		conn := newConn(mock, true, 0, 0)
+
+		_, _, _, _, err := conn.readFrame()
+		assert.ErrorIs(t, err, ErrMaskViolation)
+	})
+
+	t.Run("Client rejects masked frame", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
+
+		conn := newConn(mock, false, 0, 0)
+
+		_, _, _, _, err := conn.readFrame()
+		assert.ErrorIs(t, err, ErrMaskViolation)
+	})
+}
+
+func TestRSV1OnControlFrame(t *testing.T) {
+	t.Run("RSV1 rejected on ping with compression enabled", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrameRaw(byte(PingMessage)|finalBit|rsv1Bit, []byte("ping")))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.compressionEnabled = true
+
+		_, _, _, _, err := conn.readFrame()
+		assert.ErrorIs(t, err, ErrReservedBits)
+	})
+
+	t.Run("RSV1 rejected on close with compression enabled", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrameRaw(byte(CloseMessage)|finalBit|rsv1Bit, []byte{0x03, 0xe8}))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.compressionEnabled = true
+
+		_, _, _, _, err := conn.readFrame()
+		assert.ErrorIs(t, err, ErrReservedBits)
+	})
+
+	t.Run("RSV1 rejected on pong with compression enabled", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrameRaw(byte(PongMessage)|finalBit|rsv1Bit, []byte("pong")))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.compressionEnabled = true
+
+		_, _, _, _, err := conn.readFrame()
+		assert.ErrorIs(t, err, ErrReservedBits)
+	})
+}
+
+func TestNextWriterInvalidMessageType(t *testing.T) {
+	tests := []struct {
+		name    string
+		msgType int
+	}{
+		{"Ping", PingMessage},
+		{"Pong", PongMessage},
+		{"Close", CloseMessage},
+		{"Continuation", continuationFrame},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockConn()
+			conn := newConn(mock, true, 0, 0)
+
+			_, err := conn.NextWriter(tt.msgType)
+			assert.ErrorIs(t, err, ErrInvalidMessageType)
+		})
+	}
+}
+
+func TestInvalidClosePayload(t *testing.T) {
+	t.Run("Close frame with 1-byte payload rejected", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03}, true))
+
+		conn := newConn(mock, true, 0, 0)
+
+		_, _, _, _, err := conn.readFrame()
+		assert.ErrorIs(t, err, ErrInvalidClosePayload)
+	})
+
+	t.Run("Close frame with 0-byte payload accepted", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), nil, true))
+
+		conn := newConn(mock, true, 0, 0)
+
+		frameType, _, _, _, err := conn.readFrame()
+		require.NoError(t, err)
+		assert.Equal(t, CloseMessage, frameType)
+	})
+
+	t.Run("Close frame with 2-byte payload accepted", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8}, true))
+
+		conn := newConn(mock, true, 0, 0)
+
+		frameType, payload, _, _, err := conn.readFrame()
+		require.NoError(t, err)
+		assert.Equal(t, CloseMessage, frameType)
+		assert.Equal(t, []byte{0x03, 0xe8}, payload)
+	})
 }
 
 func BenchmarkWriteMessage(b *testing.B) {
@@ -1033,7 +1179,7 @@ func BenchmarkReadMessage(b *testing.B) {
 			payload[i] = byte(i % 256)
 		}
 
-		frame := buildFrame(BinaryMessage, payload, false, false)
+		frame := buildFrame(BinaryMessage, payload, true, false)
 
 		b.Run(size.name, func(b *testing.B) {
 			b.SetBytes(int64(size.size))
@@ -1393,14 +1539,9 @@ func (m *mockRWC) Close() error {
 
 func TestNextReaderControlFrames(t *testing.T) {
 	t.Run("Pong message handled", func(t *testing.T) {
-		// Build a pong frame followed by a text message.
 		var buf bytes.Buffer
-
-		// Pong frame (opcode 10, FIN, no mask, 4 bytes payload).
-		buf.Write([]byte{0x8a, 0x04, 'p', 'o', 'n', 'g'})
-
-		// Text message frame.
-		buf.Write([]byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'})
+		buf.Write(buildMaskedFrame(byte(PongMessage), []byte("pong"), true))
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1423,12 +1564,8 @@ func TestNextReaderControlFrames(t *testing.T) {
 
 	t.Run("Ping message triggers pong", func(t *testing.T) {
 		var buf bytes.Buffer
-
-		// Ping frame (opcode 9, FIN, no mask, 4 bytes payload).
-		buf.Write([]byte{0x89, 0x04, 'p', 'i', 'n', 'g'})
-
-		// Text message frame.
-		buf.Write([]byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'})
+		buf.Write(buildMaskedFrame(byte(PingMessage), []byte("ping"), true))
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1450,12 +1587,12 @@ func TestNextReaderInvalidFrames(t *testing.T) {
 	}{
 		{
 			name:    "Invalid opcode",
-			frame:   []byte{0x83, 0x05, 'h', 'e', 'l', 'l', 'o'},
+			frame:   buildMaskedFrame(3, []byte("hello"), true),
 			wantErr: ErrInvalidOpcode,
 		},
 		{
 			name:    "Unexpected continuation frame",
-			frame:   []byte{0x80, 0x05, 'h', 'e', 'l', 'l', 'o'},
+			frame:   buildMaskedFrame(byte(continuationFrame), []byte("hello"), true),
 			wantErr: ErrUnexpectedContinuation,
 		},
 	}
@@ -1501,16 +1638,12 @@ func TestMessageWriterContinuation(t *testing.T) {
 
 func TestCompressedMessages(t *testing.T) {
 	t.Run("Compressed single frame message", func(t *testing.T) {
-		// Create a compressed payload using deflate.
 		original := []byte("hello world, this is a test message for compression testing")
 		compressed, err := compressData(original, -1)
 		require.NoError(t, err)
 
 		var buf bytes.Buffer
-		// Text frame with RSV1 bit set (compressed), FIN set.
-		buf.WriteByte(byte(TextMessage) | finalBit | rsv1Bit)
-		buf.WriteByte(byte(len(compressed)))
-		buf.Write(compressed)
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|finalBit|rsv1Bit, compressed))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1526,26 +1659,17 @@ func TestCompressedMessages(t *testing.T) {
 	})
 
 	t.Run("Compressed fragmented message", func(t *testing.T) {
-		// Create a compressed payload.
 		original := []byte("hello world, this is a fragmented test message")
 		compressed, err := compressData(original, -1)
 		require.NoError(t, err)
 
-		// Split compressed data into two parts.
 		half := len(compressed) / 2
 		part1 := compressed[:half]
 		part2 := compressed[half:]
 
 		var buf bytes.Buffer
-		// First frame: Text with RSV1 (compressed), no FIN.
-		buf.WriteByte(byte(TextMessage) | rsv1Bit)
-		buf.WriteByte(byte(len(part1)))
-		buf.Write(part1)
-
-		// Continuation frame with FIN.
-		buf.WriteByte(byte(continuationFrame) | finalBit)
-		buf.WriteByte(byte(len(part2)))
-		buf.Write(part2)
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, part1))
+		buf.Write(buildMaskedFrameRaw(byte(continuationFrame)|finalBit, part2))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1565,11 +1689,7 @@ func TestCompressedMessages(t *testing.T) {
 		require.NoError(t, err)
 
 		var buf bytes.Buffer
-		// First frame: Text with RSV1 (compressed), no FIN.
-		buf.WriteByte(byte(TextMessage) | rsv1Bit)
-		buf.WriteByte(byte(len(compressed)))
-		buf.Write(compressed)
-		// No continuation frame - will cause read error.
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, compressed))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1584,14 +1704,8 @@ func TestCompressedMessages(t *testing.T) {
 		require.NoError(t, err)
 
 		var buf bytes.Buffer
-		// First frame: Text with RSV1 (compressed), no FIN.
-		buf.WriteByte(byte(TextMessage) | rsv1Bit)
-		buf.WriteByte(byte(len(compressed)))
-		buf.Write(compressed)
-		// Wrong frame type (Text instead of continuation).
-		buf.WriteByte(byte(TextMessage) | finalBit)
-		buf.WriteByte(5)
-		buf.Write([]byte("hello"))
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, compressed))
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), true))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1604,10 +1718,7 @@ func TestCompressedMessages(t *testing.T) {
 
 	t.Run("Invalid compressed data", func(t *testing.T) {
 		var buf bytes.Buffer
-		// Text frame with RSV1 bit set (compressed) but invalid compressed data.
-		buf.WriteByte(byte(TextMessage) | finalBit | rsv1Bit)
-		buf.WriteByte(5)
-		buf.Write([]byte("hello")) // Invalid deflate data.
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|finalBit|rsv1Bit, []byte("hello")))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
@@ -1637,9 +1748,7 @@ func TestWriteCompressedMessage(t *testing.T) {
 func TestCloseNoStatusReceived(t *testing.T) {
 	t.Run("Close frame without status code", func(t *testing.T) {
 		var buf bytes.Buffer
-		// Close frame with no payload.
-		buf.WriteByte(byte(CloseMessage) | finalBit)
-		buf.WriteByte(0)
+		buf.Write(buildMaskedFrame(byte(CloseMessage), nil, true))
 
 		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
 		conn := newConn(mockConn, true, 1024, 1024)
