@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/vitalvas/kasper/compare/v0.2.0...v0.3.0) (2026-02-22)
+
+
+### Features
+
+* **openapi:** add SwaggerUIConfig and make HandleConfig optional ([08df124](https://github.com/vitalvas/kasper/commit/08df12415bfab3b0e6b67c8bd51cf2f3d11df7cd))
+
 ## [0.2.0](https://github.com/vitalvas/kasper/compare/v0.1.0...v0.2.0) (2026-02-22)
 
 
