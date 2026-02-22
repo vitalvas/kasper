@@ -180,4 +180,39 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # Server Middleware
+//
+// ServerMiddleware sets server identification response headers. It sets
+// X-Server-Hostname with the machine hostname, resolved once at factory
+// time via os.Hostname. Use the Hostname field to provide a static value
+// instead.
+//
+//	mw, err := muxhandlers.ServerMiddleware(muxhandlers.ServerConfig{})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
+// # Cache-Control Middleware
+//
+// CacheControlMiddleware sets Cache-Control and Expires response headers
+// based on the response Content-Type. Rules are evaluated in order; the
+// first rule whose ContentType prefix matches wins. If no rule matches and
+// DefaultValue/DefaultExpires is non-empty, it is used. When the handler
+// already sets a Cache-Control or Expires header, the middleware does not
+// overwrite the respective header.
+//
+//	mw, err := muxhandlers.CacheControlMiddleware(muxhandlers.CacheControlConfig{
+//	    Rules: []muxhandlers.CacheControlRule{
+//	        {ContentType: "image/", Value: "public, max-age=86400", Expires: 24 * time.Hour},
+//	        {ContentType: "application/json", Value: "no-cache", Expires: 0},
+//	    },
+//	    DefaultValue:   "no-store",
+//	    DefaultExpires: 0,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
 package muxhandlers

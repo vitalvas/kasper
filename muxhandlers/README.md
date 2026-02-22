@@ -443,3 +443,80 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## Server Middleware
+
+`ServerMiddleware` sets server identification response headers. It
+sets `X-Server-Hostname` with the machine hostname, resolved once at
+factory time via `os.Hostname`. Use the `Hostname` field to provide a
+static value instead.
+
+### ServerConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Hostname` | `string` | Static hostname value; takes priority over `HostnameEnv` |
+| `HostnameEnv` | `[]string` | Environment variable names checked in order (e.g. `["POD_NAME", "HOSTNAME"]`); first non-empty wins; fallback = `os.Hostname()` |
+
+### Server Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.ServerMiddleware(muxhandlers.ServerConfig{})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+## Cache-Control Middleware
+
+`CacheControlMiddleware` sets `Cache-Control` and `Expires` response
+headers based on the response `Content-Type`. Rules are evaluated in
+order; the first rule whose `ContentType` prefix matches wins. If no
+rule matches and `DefaultValue`/`DefaultExpires` is non-empty, it is
+used. When the handler already sets a `Cache-Control` or `Expires`
+header, the middleware does not overwrite the respective header.
+Matching is case-insensitive.
+
+### CacheControlRule
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ContentType` | `string` | Content type prefix to match (e.g. `"image/"`, `"application/json"`) |
+| `Value` | `string` | Cache-Control header value to set when this rule matches |
+| `Expires` | `time.Duration` | Offset from current time for the Expires header; `0` = epoch (already expired); negative = no header |
+
+### CacheControlConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Rules` | `[]CacheControlRule` | Ordered list of rules; first match wins; at least one required |
+| `DefaultValue` | `string` | Cache-Control value for unmatched types; empty = no header |
+| `DefaultExpires` | `time.Duration` | Default Expires offset for unmatched types; negative = no header |
+
+### CacheControl Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.CacheControlMiddleware(muxhandlers.CacheControlConfig{
+    Rules: []muxhandlers.CacheControlRule{
+        {ContentType: "image/", Value: "public, max-age=86400", Expires: 24 * time.Hour},
+        {ContentType: "application/json", Value: "no-cache", Expires: 0},
+    },
+    DefaultValue:   "no-store",
+    DefaultExpires: 0,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```

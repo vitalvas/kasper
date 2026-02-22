@@ -72,3 +72,5 @@ HTTP middleware for the mux router.
 | `SecurityHeadersMiddleware` | -- | X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS, CSP, Permissions-Policy |
 | `MethodOverrideMiddleware` | -- | HTTP method override via configurable header, POST-only, allowed method validation |
 | `ContentTypeCheckMiddleware` | -- | Content-Type validation with case-insensitive matching, parameter-ignoring, 415 on mismatch |
+| `ServerMiddleware` | -- | Sets `X-Server-Hostname` response header, resolved once via `os.Hostname` or static value |
+| `CacheControlMiddleware` | -- | Sets `Cache-Control` and `Expires` response headers based on Content-Type prefix rules, case-insensitive matching |
