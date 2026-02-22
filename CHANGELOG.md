@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.0](https://github.com/vitalvas/kasper/compare/v0.1.0...v0.2.0) (2026-02-22)
+
+
+### Features
+
+* **httpsig:** add HTTP Message Signatures (RFC 9421) package ([fe28e54](https://github.com/vitalvas/kasper/commit/fe28e54854eade52b8a0563cfedd654d683d0c55))
+* **muxhandlers:** add method override and content-type check middleware ([404c804](https://github.com/vitalvas/kasper/commit/404c804978bda6591bcb418a36ec88077e1732ad))
+* **muxhandlers:** add recovery, request ID, and request size limit middleware ([2713063](https://github.com/vitalvas/kasper/commit/27130635c3f9f5d80197e5ca9b48303eefc7d478))
+* **muxhandlers:** add server and cache-control middleware ([d9886f5](https://github.com/vitalvas/kasper/commit/d9886f5c0aa85452375ac85c6acef0badbdc4ae2))
+* **muxhandlers:** add static files handler with SPA fallback ([9a6c68f](https://github.com/vitalvas/kasper/commit/9a6c68ffbad4b72fb62eed3d8d7f1fca3c352a59))
+* **muxhandlers:** add timeout, compression, and security headers middleware ([a4101a7](https://github.com/vitalvas/kasper/commit/a4101a7ef713c29f7facb16a2980c3f8c4be3e3c))
+
+
+### Bug Fixes
+
+* **muxhandlers:** pass request ID via context ([f394f39](https://github.com/vitalvas/kasper/commit/f394f39da043fd0d75613605a86cc848b451363d))
+* **websocket:** enforce RFC 6455 masking, control frame RSV1, close payload, and NextWriter validation ([41dc0cd](https://github.com/vitalvas/kasper/commit/41dc0cde2ac9f790d4fd4b5bbd4fbea416af528b))
+
 ## [0.1.0](https://github.com/vitalvas/kasper/compare/v0.0.1...v0.1.0) (2026-02-20)
 
 
