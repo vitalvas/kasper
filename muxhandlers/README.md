@@ -377,3 +377,69 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## Method Override Middleware
+
+`MethodOverrideMiddleware` allows clients to override the HTTP method
+via a configurable header. By default only `POST` requests are
+eligible for override; use `OriginalMethods` to allow other methods.
+The first non-empty header value from `HeaderNames` is uppercased and
+checked against the allowed set. When allowed, `r.Method` is updated
+and the header is removed from the request.
+
+### MethodOverrideConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `HeaderNames` | `[]string` | Header names checked in order; first non-empty value wins; `nil` = `X-HTTP-Method-Override`, `X-Method-Override`, `X-HTTP-Method` |
+| `OriginalMethods` | `[]string` | Methods eligible for override; `nil` = POST |
+| `AllowedMethods` | `[]string` | Allowed override methods; `nil` = PUT, PATCH, DELETE, HEAD, OPTIONS |
+
+### MethodOverride Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", updateUser).Methods(http.MethodPut)
+
+mw, err := muxhandlers.MethodOverrideMiddleware(muxhandlers.MethodOverrideConfig{})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+## Content-Type Check Middleware
+
+`ContentTypeCheckMiddleware` validates that requests carry a matching
+`Content-Type` header. Matching is case-insensitive and ignores
+parameters such as charset (e.g. `"application/json"` matches
+`"application/json; charset=utf-8"`). It returns `415 Unsupported
+Media Type` when the `Content-Type` is missing or does not match
+any of the allowed types. By default it checks `POST`, `PUT`, and
+`PATCH` requests.
+
+### ContentTypeCheckConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AllowedTypes` | `[]string` | Acceptable Content-Type values; case-insensitive, ignores params |
+| `Methods` | `[]string` | HTTP methods that require validation; `nil` = POST, PUT, PATCH |
+
+### ContentTypeCheck Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", createUser).Methods(http.MethodPost)
+
+mw, err := muxhandlers.ContentTypeCheckMiddleware(muxhandlers.ContentTypeCheckConfig{
+    AllowedTypes: []string{"application/json"},
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```

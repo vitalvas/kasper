@@ -148,4 +148,36 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # Method Override Middleware
+//
+// MethodOverrideMiddleware allows clients to override the HTTP method via a
+// configurable header. By default only POST requests are eligible for
+// override; use OriginalMethods to allow other methods. The first non-empty
+// header value from HeaderNames is uppercased and checked against the allowed
+// set. When allowed, r.Method is updated and the header is removed from the
+// request. By default it checks X-HTTP-Method-Override, X-Method-Override,
+// and X-HTTP-Method in that order.
+//
+//	mw, err := muxhandlers.MethodOverrideMiddleware(muxhandlers.MethodOverrideConfig{})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
+// # Content-Type Check Middleware
+//
+// ContentTypeCheckMiddleware validates that requests carry a matching
+// Content-Type header. Matching is case-insensitive and ignores parameters
+// such as charset. It returns 415 Unsupported Media Type when the
+// Content-Type is missing or does not match any of the allowed types.
+// By default it checks POST, PUT, and PATCH requests.
+//
+//	mw, err := muxhandlers.ContentTypeCheckMiddleware(muxhandlers.ContentTypeCheckConfig{
+//	    AllowedTypes: []string{"application/json"},
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
 package muxhandlers

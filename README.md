@@ -70,3 +70,5 @@ HTTP middleware for the mux router.
 | `TimeoutMiddleware` | -- | Handler execution time limit via `http.TimeoutHandler`, 503 on timeout |
 | `CompressionMiddleware` | -- | Gzip/deflate response compression with `sync.Pool`, quality-based encoding selection, min-length threshold |
 | `SecurityHeadersMiddleware` | -- | X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS, CSP, Permissions-Policy |
+| `MethodOverrideMiddleware` | -- | HTTP method override via configurable header, POST-only, allowed method validation |
+| `ContentTypeCheckMiddleware` | -- | Content-Type validation with case-insensitive matching, parameter-ignoring, 415 on mismatch |
