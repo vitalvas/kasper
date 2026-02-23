@@ -8,6 +8,7 @@ HTTP request multiplexer with URL pattern matching.
 - Host, method, header, query, and scheme matchers
 - Subrouters with path prefix grouping
 - Inline subrouters (`Route` and `Group`) for closure-based route definitions
+- Inline middleware (`With`) for declaring middleware at route-registration time
 - Middleware support
 - Named routes with URL building
 - Custom error handlers (404, 405)
@@ -453,6 +454,82 @@ route.Use(func(next http.Handler) http.Handler {
 
 ```go
 h := route.GetHandlerWithMiddlewares()
+```
+
+### Inline Middleware (With)
+
+`With` creates a lightweight carrier that applies middleware to individual routes without affecting other routes on the same router:
+
+```go
+r.With(authMiddleware).HandleFunc("/secret", secretHandler)
+r.HandleFunc("/public", publicHandler) // no auth middleware
+```
+
+Multiple middleware can be passed; they execute in order:
+
+```go
+r.With(loggingMiddleware, authMiddleware).HandleFunc("/admin", adminHandler)
+```
+
+`With` calls can be chained to incrementally layer middleware:
+
+```go
+r.With(loggingMiddleware).With(authMiddleware).HandleFunc("/admin", handler)
+// Order: logging -> auth -> handler
+```
+
+Each chained `With` creates a new carrier. The parent carrier is not modified, so different branches can share a common base:
+
+```go
+logged := r.With(loggingMiddleware)
+logged.HandleFunc("/public", publicHandler)                 // logging only
+logged.With(authMiddleware).HandleFunc("/private", handler) // logging + auth
+```
+
+### With combined with Route and Group
+
+`With` works with `Route` and `Group` to apply middleware to all routes in a subrouter:
+
+```go
+r.With(authMiddleware).Route("/admin", func(admin *mux.Router) {
+    admin.HandleFunc("/users", usersHandler)
+    admin.HandleFunc("/settings", settingsHandler)
+})
+
+r.With(authMiddleware).Group(func(authed *mux.Router) {
+    authed.HandleFunc("/dashboard", dashboardHandler)
+    authed.HandleFunc("/profile", profileHandler)
+})
+```
+
+`With` can also be used inside `Route` and `Group` callbacks to apply middleware to a subset of the subrouter's routes:
+
+```go
+r.Route("/api", func(api *mux.Router) {
+    api.HandleFunc("/health", healthHandler)
+    api.With(authMiddleware).HandleFunc("/secret", secretHandler)
+})
+```
+
+### With combined with Use
+
+`With` middleware composes with router-level middleware (`Use`) and route-level middleware (`Route.Use`). Router middleware runs first (outermost), then `With` middleware, then route-level `Use` middleware (innermost before handler):
+
+```go
+r.Use(loggingMiddleware)
+r.With(authMiddleware).HandleFunc("/admin", adminHandler).Use(auditMiddleware)
+// Order: logging -> auth -> audit -> adminHandler
+```
+
+All layers can be combined with `Route` and `Group`:
+
+```go
+r.Use(loggingMiddleware)
+r.With(authMiddleware).Route("/admin", func(admin *mux.Router) {
+    admin.Use(adminAuditMiddleware)
+    admin.HandleFunc("/users", usersHandler)
+})
+// Order: logging -> auth -> adminAudit -> usersHandler
 ```
 
 ## Named Routes and URL Building

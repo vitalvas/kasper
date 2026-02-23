@@ -383,3 +383,15 @@ func (r *Router) applyMiddleware(handler http.Handler) http.Handler {
 func (r *Router) Use(mwf ...MiddlewareFunc) {
 	r.middlewares = append(r.middlewares, mwf...)
 }
+
+// With creates a MiddlewareRoute that carries the given middleware. Routes
+// registered through the returned MiddlewareRoute will have the middleware
+// applied via Route.Use, without affecting other routes on this router.
+//
+//	r.With(authMiddleware).HandleFunc("/secret", handler)
+func (r *Router) With(mwf ...MiddlewareFunc) *MiddlewareRoute {
+	return &MiddlewareRoute{
+		router:      r,
+		middlewares: append([]MiddlewareFunc(nil), mwf...),
+	}
+}

@@ -15,6 +15,7 @@
 //   - Custom matcher functions
 //   - Subrouters for route grouping
 //   - Inline subrouters (Route and Group) for closure-based route definitions
+//   - Inline middleware (With) for declaring middleware at route-registration time
 //   - Middleware support
 //   - Reverse URL building
 //   - Walking registered routes
@@ -166,6 +167,67 @@
 //	        api.HandleFunc("/secrets", secretsHandler)
 //	    })
 //	})
+//
+// # Inline Middleware
+//
+// With creates a lightweight carrier that applies middleware to individual
+// routes without affecting other routes on the same router. This is useful
+// when you want to attach middleware inline at route-registration time:
+//
+//	r.With(authMiddleware).HandleFunc("/secret", secretHandler)
+//	r.HandleFunc("/public", publicHandler) // no auth middleware
+//
+// Multiple middleware can be passed to With; they execute in order:
+//
+//	r.With(loggingMiddleware, authMiddleware).HandleFunc("/admin", adminHandler)
+//
+// The returned MiddlewareRoute supports the same route-registration methods
+// as Router (Handle, HandleFunc, Path, PathPrefix, Host, Methods, Headers,
+// HeadersRegexp, Queries, Schemes, MatcherFunc, Name, NewRoute). Routes
+// created through it are registered on the parent router but carry the
+// additional middleware via Route.Use.
+//
+// With calls can be chained to incrementally layer middleware:
+//
+//	r.With(loggingMiddleware).With(authMiddleware).HandleFunc("/admin", handler)
+//	// request flow: logging -> auth -> handler
+//
+// Each chained With creates a new carrier; the parent carrier is not
+// modified, so different branches can share a common base:
+//
+//	logged := r.With(loggingMiddleware)
+//	logged.HandleFunc("/public", publicHandler)                 // logging only
+//	logged.With(authMiddleware).HandleFunc("/private", handler) // logging + auth
+//
+// With works with Route and Group to apply middleware to all routes in a
+// subrouter:
+//
+//	r.With(authMiddleware).Route("/admin", func(admin *mux.Router) {
+//	    admin.HandleFunc("/users", usersHandler)
+//	    admin.HandleFunc("/settings", settingsHandler)
+//	})
+//
+//	r.With(authMiddleware).Group(func(authed *mux.Router) {
+//	    authed.HandleFunc("/dashboard", dashboardHandler)
+//	    authed.HandleFunc("/profile", profileHandler)
+//	})
+//
+// With can also be used inside Route and Group callbacks to apply middleware
+// to a subset of the subrouter's routes:
+//
+//	r.Route("/api", func(api *mux.Router) {
+//	    api.HandleFunc("/health", healthHandler)
+//	    api.With(authMiddleware).HandleFunc("/secret", secretHandler)
+//	})
+//
+// With middleware composes with router-level middleware (Use) and
+// route-level middleware (Route.Use). Router middleware runs first
+// (outermost), then With middleware, then route-level Use middleware
+// (innermost before handler):
+//
+//	r.Use(loggingMiddleware)
+//	r.With(authMiddleware).HandleFunc("/admin", adminHandler).Use(auditMiddleware)
+//	// request flow: logging -> auth -> audit -> adminHandler
 //
 // # Error Handling
 //
