@@ -504,6 +504,60 @@ func TestRouteMetadata(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "second", val)
 	})
+
+	t.Run("MetadataMap sets multiple keys", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			MetadataMap(map[any]any{"role": "admin", "limit": 100})
+
+		md := route.GetMetadata()
+		require.Len(t, md, 2)
+		assert.Equal(t, "admin", md["role"])
+		assert.Equal(t, 100, md["limit"])
+	})
+
+	t.Run("MetadataMap merges with existing", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("existing", "value").
+			MetadataMap(map[any]any{"new": "entry"})
+
+		md := route.GetMetadata()
+		require.Len(t, md, 2)
+		assert.Equal(t, "value", md["existing"])
+		assert.Equal(t, "entry", md["new"])
+	})
+
+	t.Run("MetadataMap overwrites existing keys", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("key", "first").
+			MetadataMap(map[any]any{"key": "second"})
+
+		val, err := route.GetMetadataValue("key")
+		require.NoError(t, err)
+		assert.Equal(t, "second", val)
+	})
+
+	t.Run("MetadataMap with nil map is no-op", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			MetadataMap(nil)
+
+		assert.Nil(t, route.GetMetadata())
+	})
+
+	t.Run("MetadataMap is chainable", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			MetadataMap(map[any]any{"a": 1}).
+			MetadataMap(map[any]any{"b": 2})
+
+		md := route.GetMetadata()
+		require.Len(t, md, 2)
+		assert.Equal(t, 1, md["a"])
+		assert.Equal(t, 2, md["b"])
+	})
 }
 
 func TestRouteMethodMatcher(t *testing.T) {

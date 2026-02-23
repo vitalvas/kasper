@@ -3,6 +3,7 @@ package mux
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -367,6 +368,19 @@ func (r *Route) Metadata(key any, value any) *Route {
 		r.metadata = make(map[any]any)
 	}
 	r.metadata[key] = value
+	return r
+}
+
+// MetadataMap merges all entries from m into the route's metadata map.
+// Existing keys are overwritten.
+func (r *Route) MetadataMap(m map[any]any) *Route {
+	if len(m) == 0 {
+		return r
+	}
+	if r.metadata == nil {
+		r.metadata = make(map[any]any, len(m))
+	}
+	maps.Copy(r.metadata, m)
 	return r
 }
 

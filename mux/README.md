@@ -569,6 +569,13 @@ r.HandleFunc("/admin/users", handler).
     Metadata("rateLimit", 100)
 ```
 
+Set multiple keys at once with `MetadataMap`:
+
+```go
+r.HandleFunc("/admin/users", handler).
+    MetadataMap(map[any]any{"role": "admin", "rateLimit": 100})
+```
+
 Read metadata inside a handler via `CurrentRoute`:
 
 ```go
@@ -590,6 +597,7 @@ limit := route.GetMetadataValueOr("rateLimit", 60)
 | Method | Description |
 |--------|-------------|
 | `Metadata(key, value any)` | Set a key-value pair (fluent, chainable) |
+| `MetadataMap(m map[any]any)` | Merge a map into metadata (fluent, chainable) |
 | `GetMetadata()` | Return the full metadata map (`nil` if unset) |
 | `MetadataContains(key any)` | Check whether a key exists |
 | `GetMetadataValue(key any)` | Get value or `ErrMetadataKeyNotFound` |
