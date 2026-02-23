@@ -192,6 +192,45 @@ func TestRouterUseEncodedPath(t *testing.T) {
 	})
 }
 
+func TestRouterGetStrictSlash(t *testing.T) {
+	t.Run("returns false by default", func(t *testing.T) {
+		r := NewRouter()
+		assert.False(t, r.GetStrictSlash())
+	})
+
+	t.Run("returns true when enabled", func(t *testing.T) {
+		r := NewRouter()
+		r.StrictSlash(true)
+		assert.True(t, r.GetStrictSlash())
+	})
+}
+
+func TestRouterGetSkipClean(t *testing.T) {
+	t.Run("returns false by default", func(t *testing.T) {
+		r := NewRouter()
+		assert.False(t, r.GetSkipClean())
+	})
+
+	t.Run("returns true when enabled", func(t *testing.T) {
+		r := NewRouter()
+		r.SkipClean(true)
+		assert.True(t, r.GetSkipClean())
+	})
+}
+
+func TestRouterGetUseEncodedPath(t *testing.T) {
+	t.Run("returns false by default", func(t *testing.T) {
+		r := NewRouter()
+		assert.False(t, r.GetUseEncodedPath())
+	})
+
+	t.Run("returns true when enabled", func(t *testing.T) {
+		r := NewRouter()
+		r.UseEncodedPath()
+		assert.True(t, r.GetUseEncodedPath())
+	})
+}
+
 func TestRouterMatch(t *testing.T) {
 	t.Run("matches first registered route", func(t *testing.T) {
 		r := NewRouter()

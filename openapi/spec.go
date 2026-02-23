@@ -318,6 +318,12 @@ func (s *Spec) Build(r *mux.Router) *Document {
 	}
 
 	_ = r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
+		// Skip build-only routes: they are used only for URL building
+		// and should not appear in the generated spec.
+		if route.IsBuildOnly() {
+			return nil
+		}
+
 		pathTpl, err := route.GetPathTemplate()
 		if err != nil {
 			return nil
@@ -341,12 +347,31 @@ func (s *Spec) Build(r *mux.Router) *Document {
 		// Parse path variables and convert to OpenAPI path.
 		openAPIPath, pathParams := parsePath(pathTpl)
 
+		// Auto-generate header parameters from route header matchers.
+		if headers, err := route.GetHeaders(); err == nil {
+			for name, value := range headers {
+				p := &Parameter{
+					Name:     name,
+					In:       "header",
+					Required: true,
+					Schema:   &Schema{Type: TypeString("string")},
+				}
+				if value != "" {
+					p.Schema.Enum = []any{value}
+				}
+				pathParams = append(pathParams, p)
+			}
+		}
+
 		// Get or create PathItem.
 		pathItem, ok := doc.Paths[openAPIPath]
 		if !ok {
 			pathItem = &PathItem{}
 			doc.Paths[openAPIPath] = pathItem
 		}
+
+		// Collect route-level schemes for auto-generating operation servers.
+		schemes, _ := route.GetSchemes()
 
 		// Build one operation per method. When a route registers multiple
 		// methods, each gets a distinct operationId to satisfy the OpenAPI
@@ -360,6 +385,19 @@ func (s *Spec) Build(r *mux.Router) *Document {
 				opID = opID + strings.ToUpper(method[:1]) + strings.ToLower(method[1:])
 			}
 			op := builder.buildOperation(gen, opID, pathParams)
+
+			// Auto-populate operation servers from route scheme constraints
+			// only when no servers are configured at any level (operation,
+			// path, or document). Operation-level servers in OpenAPI override
+			// path and document servers, so adding incomplete scheme-only
+			// URLs would discard configured base URLs.
+			if len(schemes) > 0 && len(builder.meta.servers) == 0 &&
+				len(s.pathServers[openAPIPath]) == 0 && len(s.servers) == 0 {
+				for _, scheme := range schemes {
+					op.Servers = append(op.Servers, Server{URL: scheme + "://"})
+				}
+			}
+
 			assignOperation(pathItem, method, op)
 		}
 

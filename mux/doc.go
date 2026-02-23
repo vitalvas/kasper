@@ -194,6 +194,13 @@
 //	queries, _ := route.GetQueriesTemplates() // e.g. ["q={query}"]
 //	qre, _ := route.GetQueriesRegexp()        // compiled query regexp strings
 //	vars, _ := route.GetVarNames()            // e.g. ["category", "id"]
+//	buildOnly := route.IsBuildOnly()              // true if build-only
+//
+// Router configuration can also be inspected:
+//
+//	strictSlash := router.GetStrictSlash()       // trailing slash redirect
+//	skipClean := router.GetSkipClean()           // path cleaning disabled
+//	encodedPath := router.GetUseEncodedPath()    // percent-encoded matching
 //
 // # Strict Slash
 //

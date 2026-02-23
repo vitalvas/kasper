@@ -1361,3 +1361,278 @@ func TestMultiMethodOperationID(t *testing.T) {
 		assert.Equal(t, "listItems", pathItem.Get.OperationID)
 	})
 }
+
+func TestBuildSkipsBuildOnlyRoutes(t *testing.T) {
+	t.Run("build-only route with Op is skipped", func(t *testing.T) {
+		r := mux.NewRouter()
+		r.HandleFunc("/internal", dummyHandler).
+			Methods(http.MethodGet).
+			Name("internal").
+			BuildOnly()
+
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+		spec.Op("internal").Summary("Should not appear")
+
+		doc := spec.Build(r)
+		assert.Empty(t, doc.Paths)
+	})
+
+	t.Run("build-only route with Route is skipped", func(t *testing.T) {
+		r := mux.NewRouter()
+		route := r.HandleFunc("/internal", dummyHandler).
+			Methods(http.MethodGet).
+			BuildOnly()
+
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+		spec.Route(route).Summary("Should not appear")
+
+		doc := spec.Build(r)
+		assert.Empty(t, doc.Paths)
+	})
+
+	t.Run("non-build-only route still appears", func(t *testing.T) {
+		r := mux.NewRouter()
+		r.HandleFunc("/public", dummyHandler).
+			Methods(http.MethodGet).
+			Name("public")
+
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+		spec.Op("public").Summary("Public endpoint")
+
+		doc := spec.Build(r)
+		require.Contains(t, doc.Paths, "/public")
+		require.NotNil(t, doc.Paths["/public"].Get)
+		assert.Equal(t, "Public endpoint", doc.Paths["/public"].Get.Summary)
+	})
+}
+
+func TestBuildSchemesAutoServers(t *testing.T) {
+	t.Run("route schemes auto-populate operation servers", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/secure", dummyHandler).
+			Methods(http.MethodGet).
+			Schemes("https")).
+			Summary("Secure endpoint")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/secure")
+		require.NotNil(t, doc.Paths["/secure"].Get)
+		require.Len(t, doc.Paths["/secure"].Get.Servers, 1)
+		assert.Equal(t, "https://", doc.Paths["/secure"].Get.Servers[0].URL)
+	})
+
+	t.Run("multiple schemes generate multiple servers", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/dual", dummyHandler).
+			Methods(http.MethodGet).
+			Schemes("http", "https")).
+			Summary("Dual scheme")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/dual")
+		require.NotNil(t, doc.Paths["/dual"].Get)
+		require.Len(t, doc.Paths["/dual"].Get.Servers, 2)
+		assert.Equal(t, "http://", doc.Paths["/dual"].Get.Servers[0].URL)
+		assert.Equal(t, "https://", doc.Paths["/dual"].Get.Servers[1].URL)
+	})
+
+	t.Run("schemes not added when builder has explicit servers", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/custom", dummyHandler).
+			Methods(http.MethodGet).
+			Schemes("https")).
+			Summary("Custom server").
+			Server(Server{URL: "https://custom.example.com", Description: "Custom"})
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/custom")
+		require.NotNil(t, doc.Paths["/custom"].Get)
+		require.Len(t, doc.Paths["/custom"].Get.Servers, 1)
+		assert.Equal(t, "https://custom.example.com", doc.Paths["/custom"].Get.Servers[0].URL)
+	})
+
+	t.Run("no schemes means no auto servers", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/plain", dummyHandler).
+			Methods(http.MethodGet)).
+			Summary("Plain endpoint")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/plain")
+		require.NotNil(t, doc.Paths["/plain"].Get)
+		assert.Empty(t, doc.Paths["/plain"].Get.Servers)
+	})
+
+	t.Run("schemes not added when document has servers", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
+			AddServer(Server{URL: "https://api.example.com", Description: "Production"})
+
+		spec.Route(r.HandleFunc("/secure", dummyHandler).
+			Methods(http.MethodGet).
+			Schemes("https")).
+			Summary("Secure endpoint")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/secure")
+		require.NotNil(t, doc.Paths["/secure"].Get)
+		assert.Empty(t, doc.Paths["/secure"].Get.Servers)
+		require.Len(t, doc.Servers, 1)
+		assert.Equal(t, "https://api.example.com", doc.Servers[0].URL)
+	})
+
+	t.Run("schemes not added when path has servers", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
+			AddPathServer("/secure", Server{URL: "https://secure.example.com", Description: "Secure"})
+
+		spec.Route(r.HandleFunc("/secure", dummyHandler).
+			Methods(http.MethodGet).
+			Schemes("https")).
+			Summary("Secure endpoint")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/secure")
+		require.NotNil(t, doc.Paths["/secure"].Get)
+		assert.Empty(t, doc.Paths["/secure"].Get.Servers)
+		require.Len(t, doc.Paths["/secure"].Servers, 1)
+		assert.Equal(t, "https://secure.example.com", doc.Paths["/secure"].Servers[0].URL)
+	})
+}
+
+func TestBuildHeadersAutoParameters(t *testing.T) {
+	t.Run("headers auto-populate parameters", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/tenant", dummyHandler).
+			Methods(http.MethodGet).
+			Headers("X-Tenant-ID", "")).
+			Summary("Tenant endpoint")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/tenant")
+		require.NotNil(t, doc.Paths["/tenant"].Get)
+		require.Len(t, doc.Paths["/tenant"].Get.Parameters, 1)
+		param := doc.Paths["/tenant"].Get.Parameters[0]
+		assert.Equal(t, "X-Tenant-Id", param.Name)
+		assert.Equal(t, "header", param.In)
+		assert.True(t, param.Required)
+		assert.Equal(t, TypeString("string"), param.Schema.Type)
+		assert.Nil(t, param.Schema.Enum)
+	})
+
+	t.Run("headers with value set enum", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/json-only", dummyHandler).
+			Methods(http.MethodGet).
+			Headers("Content-Type", "application/json")).
+			Summary("JSON only")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/json-only")
+		require.NotNil(t, doc.Paths["/json-only"].Get)
+		require.Len(t, doc.Paths["/json-only"].Get.Parameters, 1)
+		param := doc.Paths["/json-only"].Get.Parameters[0]
+		assert.Equal(t, "Content-Type", param.Name)
+		assert.Equal(t, "header", param.In)
+		assert.True(t, param.Required)
+		require.Len(t, param.Schema.Enum, 1)
+		assert.Equal(t, "application/json", param.Schema.Enum[0])
+	})
+
+	t.Run("user-defined header overrides auto-generated", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			routeHeader string
+			paramName   string
+			paramDesc   string
+			path        string
+		}{
+			{
+				name:        "exact case match",
+				routeHeader: "X-Tenant-Id",
+				paramName:   "X-Tenant-Id",
+				paramDesc:   "Custom tenant header",
+				path:        "/override",
+			},
+			{
+				name:        "case-insensitive match",
+				routeHeader: "X-Tenant-ID",
+				paramName:   "x-tenant-id",
+				paramDesc:   "Custom tenant lowercase",
+				path:        "/ci",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				r := mux.NewRouter()
+				spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+				spec.Route(r.HandleFunc(tt.path, dummyHandler).
+					Methods(http.MethodGet).
+					Headers(tt.routeHeader, "")).
+					Summary("Override test").
+					Parameter(&Parameter{
+						Name:        tt.paramName,
+						In:          "header",
+						Description: tt.paramDesc,
+						Required:    false,
+						Schema:      &Schema{Type: TypeString("string")},
+					})
+
+				doc := spec.Build(r)
+
+				require.Contains(t, doc.Paths, tt.path)
+				require.NotNil(t, doc.Paths[tt.path].Get)
+				params := doc.Paths[tt.path].Get.Parameters
+				require.Len(t, params, 1)
+				assert.Equal(t, tt.paramName, params[0].Name)
+				assert.Equal(t, tt.paramDesc, params[0].Description)
+				assert.False(t, params[0].Required)
+			})
+		}
+	})
+
+	t.Run("headers combined with path params", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		spec.Route(r.HandleFunc("/items/{id:uuid}", dummyHandler).
+			Methods(http.MethodGet).
+			Headers("X-Tenant-Id", "")).
+			Summary("Get item with tenant")
+
+		doc := spec.Build(r)
+
+		require.Contains(t, doc.Paths, "/items/{id}")
+		require.NotNil(t, doc.Paths["/items/{id}"].Get)
+		params := doc.Paths["/items/{id}"].Get.Parameters
+		require.Len(t, params, 2)
+
+		// Path param should be first (from parsePath), header param appended.
+		assert.Equal(t, "id", params[0].Name)
+		assert.Equal(t, "path", params[0].In)
+		assert.Equal(t, "X-Tenant-Id", params[1].Name)
+		assert.Equal(t, "header", params[1].In)
+	})
+}

@@ -415,6 +415,19 @@ func TestRouteBuildOnly(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "/articles/42", u.Path)
 	})
+
+	t.Run("IsBuildOnly returns true when set", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/old", func(_ http.ResponseWriter, _ *http.Request) {}).
+			BuildOnly()
+		assert.True(t, route.IsBuildOnly())
+	})
+
+	t.Run("IsBuildOnly returns false by default", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+		assert.False(t, route.IsBuildOnly())
+	})
 }
 
 func TestRouteMethodMatcher(t *testing.T) {

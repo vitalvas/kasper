@@ -346,6 +346,12 @@ func (r *Route) BuildOnly() *Route {
 	return r
 }
 
+// IsBuildOnly reports whether the route is used only for URL building
+// and not for request matching.
+func (r *Route) IsBuildOnly() bool {
+	return r.buildOnly
+}
+
 // Subrouter creates a new Router for the route.
 func (r *Route) Subrouter() *Router {
 	router := &Router{

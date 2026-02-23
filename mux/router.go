@@ -180,6 +180,22 @@ func (r *Router) UseEncodedPath() *Router {
 	return r
 }
 
+// GetStrictSlash reports whether the router has strict slash behavior enabled.
+func (r *Router) GetStrictSlash() bool {
+	return r.strictSlash
+}
+
+// GetSkipClean reports whether the router has path cleaning disabled.
+func (r *Router) GetSkipClean() bool {
+	return r.skipClean
+}
+
+// GetUseEncodedPath reports whether the router matches against the
+// percent-encoded original path instead of the decoded path.
+func (r *Router) GetUseEncodedPath() bool {
+	return r.useEncodedPath
+}
+
 // --- Route factory methods ---
 
 // NewRoute creates an empty route for configuration.

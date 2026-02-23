@@ -323,10 +323,25 @@ func (b *OperationBuilder) Server(server Server) *OperationBuilder {
 	return b
 }
 
+// paramKey returns a normalized key for parameter deduplication.
+// Header names are case-insensitive per RFC 7230 Section 3.2, so they
+// are canonicalized before comparison. Other parameter locations use
+// the name as-is.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object (parameters)
+func paramKey(p *Parameter) [2]string {
+	name := p.Name
+	if p.In == "header" {
+		name = http.CanonicalHeaderKey(name)
+	}
+	return [2]string{name, p.In}
+}
+
 // mergeParameters combines auto-generated path parameters with custom
 // parameters. Custom parameters with the same name+in override the
 // auto-generated ones. Parameters not present in custom are kept from auto.
 // Per the spec, parameter uniqueness is determined by name and location (in).
+// Header names are compared case-insensitively per RFC 7230 Section 3.2.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#operation-object (parameters)
 func mergeParameters(auto, custom []*Parameter) []*Parameter {
@@ -334,16 +349,16 @@ func mergeParameters(auto, custom []*Parameter) []*Parameter {
 		return nil
 	}
 
-	// Index custom parameters by name+in for O(1) lookup.
+	// Index custom parameters by normalized name+in for O(1) lookup.
 	overrides := make(map[[2]string]struct{}, len(custom))
 	for _, p := range custom {
-		overrides[[2]string{p.Name, p.In}] = struct{}{}
+		overrides[paramKey(p)] = struct{}{}
 	}
 
 	// Keep auto parameters that are not overridden by custom.
 	var merged []*Parameter
 	for _, p := range auto {
-		if _, ok := overrides[[2]string{p.Name, p.In}]; !ok {
+		if _, ok := overrides[paramKey(p)]; !ok {
 			merged = append(merged, p)
 		}
 	}
