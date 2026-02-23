@@ -14,6 +14,7 @@
 //   - Header and query matching
 //   - Custom matcher functions
 //   - Subrouters for route grouping
+//   - Inline subrouters (Route and Group) for closure-based route definitions
 //   - Middleware support
 //   - Reverse URL building
 //   - Walking registered routes
@@ -108,6 +109,64 @@
 //	s.NotFoundHandler = http.HandlerFunc(apiNotFoundHandler)
 //	s.HandleFunc("/users", UsersHandler)
 //
+// # Inline Subrouters
+//
+// Route and Group provide a closure-based API for defining sub-routes
+// inline, without saving intermediate variables.
+//
+// Route creates a subrouter with a path prefix and calls a function with it.
+// It is equivalent to PathPrefix(path).Subrouter():
+//
+//	r.Route("/api/v1", func(api *mux.Router) {
+//	    api.HandleFunc("/users", listUsers).Methods(http.MethodGet)
+//	    api.HandleFunc("/users/{id}", getUser).Methods(http.MethodGet)
+//	})
+//
+// Middleware can be scoped to a Route subrouter so it only applies
+// to routes within the prefix:
+//
+//	r.Route("/admin", func(admin *mux.Router) {
+//	    admin.Use(authMiddleware)
+//	    admin.Use(loggingMiddleware)
+//	    admin.HandleFunc("/users", adminUsersHandler).Methods(http.MethodGet)
+//	    admin.HandleFunc("/settings", adminSettingsHandler).Methods(http.MethodGet)
+//	})
+//
+// Route calls can be nested:
+//
+//	r.Route("/api", func(api *mux.Router) {
+//	    api.Route("/v1", func(v1 *mux.Router) {
+//	        v1.HandleFunc("/users", listUsers)
+//	    })
+//	})
+//
+// Group creates a subrouter with no path prefix, purely for grouping
+// routes with shared middleware. It is equivalent to NewRoute().Subrouter():
+//
+//	r.Group(func(authed *mux.Router) {
+//	    authed.Use(authMiddleware)
+//	    authed.HandleFunc("/dashboard", dashboardHandler)
+//	    authed.HandleFunc("/settings", settingsHandler)
+//	})
+//
+// Both methods return the parent router for chaining:
+//
+//	r.Route("/api", func(api *mux.Router) {
+//	    api.HandleFunc("/users", listUsers)
+//	}).Route("/admin", func(admin *mux.Router) {
+//	    admin.HandleFunc("/stats", statsHandler)
+//	})
+//
+// Use Route inside Group (not Group inside Route) when combining
+// middleware grouping with path prefixes:
+//
+//	r.Group(func(authed *mux.Router) {
+//	    authed.Use(authMiddleware)
+//	    authed.Route("/api", func(api *mux.Router) {
+//	        api.HandleFunc("/secrets", secretsHandler)
+//	    })
+//	})
+//
 // # Error Handling
 //
 // The Router provides two handler fields for error responses:
@@ -162,7 +221,7 @@
 //
 // Middleware can be added to a router or subrouter to wrap matched handlers:
 //
-//	r.Use(mux.MiddlewareFunc(loggingMiddleware))
+//	r.Use(loggingMiddleware)
 //
 // Subrouter middleware is applied after parent router middleware.
 //

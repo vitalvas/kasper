@@ -249,6 +249,24 @@ func (r *Router) PathPrefix(tpl string) *Route {
 	return r.NewRoute().PathPrefix(tpl)
 }
 
+// Route creates a subrouter with the given path prefix and invokes fn
+// to register routes on it. Sugar for PathPrefix(path).Subrouter().
+// Returns the parent router for chaining.
+func (r *Router) Route(path string, fn func(sub *Router)) *Router {
+	sub := r.PathPrefix(path).Subrouter()
+	fn(sub)
+	return r
+}
+
+// Group creates a subrouter with no path prefix and invokes fn to register
+// routes on it. Useful for grouping routes that share middleware without
+// adding a path prefix. Returns the parent router for chaining.
+func (r *Router) Group(fn func(sub *Router)) *Router {
+	sub := r.NewRoute().Subrouter()
+	fn(sub)
+	return r
+}
+
 // Host registers a new route with a matcher for the URL host.
 func (r *Router) Host(tpl string) *Route {
 	return r.NewRoute().Host(tpl)

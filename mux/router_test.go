@@ -1158,6 +1158,260 @@ func TestSubrouterMiddlewareOrder(t *testing.T) {
 	})
 }
 
+func TestRouterRoute(t *testing.T) {
+	t.Run("basic routing with path prefix", func(t *testing.T) {
+		r := NewRouter()
+		r.Route("/api", func(sub *Router) {
+			sub.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "users")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "users", w.Body.String())
+	})
+
+	t.Run("middleware applied to sub-routes only", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/root", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "root")
+		})
+		r.Route("/api", func(sub *Router) {
+			sub.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("X-Sub", "yes")
+					next.ServeHTTP(w, req)
+				})
+			})
+			sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "data")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "data", w.Body.String())
+		assert.Equal(t, "yes", w.Header().Get("X-Sub"))
+
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/root", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "root", w.Body.String())
+		assert.Empty(t, w.Header().Get("X-Sub"))
+	})
+
+	t.Run("nested Route calls", func(t *testing.T) {
+		r := NewRouter()
+		r.Route("/api", func(api *Router) {
+			api.Route("/v1", func(v1 *Router) {
+				v1.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(w, "v1-users")
+				})
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "v1-users", w.Body.String())
+	})
+
+	t.Run("chaining Route calls", func(t *testing.T) {
+		r := NewRouter()
+		r.Route("/api", func(sub *Router) {
+			sub.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "users")
+			})
+		}).Route("/admin", func(sub *Router) {
+			sub.HandleFunc("/dashboard", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "dashboard")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "users", w.Body.String())
+
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "dashboard", w.Body.String())
+	})
+
+	t.Run("variables from prefix available in handler", func(t *testing.T) {
+		r := NewRouter()
+		r.Route("/users/{id}", func(sub *Router) {
+			sub.HandleFunc("/profile", func(w http.ResponseWriter, req *http.Request) {
+				fmt.Fprint(w, "user:"+Vars(req)["id"])
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/users/42/profile", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "user:42", w.Body.String())
+	})
+
+	t.Run("404 for unmatched paths within prefix", func(t *testing.T) {
+		r := NewRouter()
+		r.Route("/api", func(sub *Router) {
+			sub.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "users")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/posts", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+func TestRouterGroup(t *testing.T) {
+	t.Run("basic routing with shared middleware", func(t *testing.T) {
+		r := NewRouter()
+		r.Group(func(sub *Router) {
+			sub.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("X-Group", "yes")
+					next.ServeHTTP(w, req)
+				})
+			})
+			sub.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "users")
+			})
+			sub.HandleFunc("/posts", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "posts")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "users", w.Body.String())
+		assert.Equal(t, "yes", w.Header().Get("X-Group"))
+
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/posts", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "posts", w.Body.String())
+		assert.Equal(t, "yes", w.Header().Get("X-Group"))
+	})
+
+	t.Run("middleware applied only to group routes", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/public", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "public")
+		})
+		r.Group(func(sub *Router) {
+			sub.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("X-Auth", "required")
+					next.ServeHTTP(w, req)
+				})
+			})
+			sub.HandleFunc("/private", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "private")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/private", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "private", w.Body.String())
+		assert.Equal(t, "required", w.Header().Get("X-Auth"))
+
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/public", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "public", w.Body.String())
+		assert.Empty(t, w.Header().Get("X-Auth"))
+	})
+
+	t.Run("chaining Group calls", func(t *testing.T) {
+		r := NewRouter()
+		var order []string
+		r.Group(func(sub *Router) {
+			sub.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					order = append(order, "group1")
+					next.ServeHTTP(w, req)
+				})
+			})
+			sub.HandleFunc("/a", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "a")
+			})
+		}).Group(func(sub *Router) {
+			sub.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					order = append(order, "group2")
+					next.ServeHTTP(w, req)
+				})
+			})
+			sub.HandleFunc("/b", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "b")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/a", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "a", w.Body.String())
+		assert.Equal(t, []string{"group1"}, order)
+
+		order = nil
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/b", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "b", w.Body.String())
+		assert.Equal(t, []string{"group2"}, order)
+	})
+
+	t.Run("Route inside Group", func(t *testing.T) {
+		r := NewRouter()
+		r.Group(func(authed *Router) {
+			authed.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("X-Auth", "checked")
+					next.ServeHTTP(w, req)
+				})
+			})
+			authed.Route("/api", func(api *Router) {
+				api.HandleFunc("/secret", func(w http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(w, "secret")
+				})
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/secret", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, "secret", w.Body.String())
+		assert.Equal(t, "checked", w.Header().Get("X-Auth"))
+	})
+
+	t.Run("routes use full paths", func(t *testing.T) {
+		r := NewRouter()
+		r.Group(func(sub *Router) {
+			sub.HandleFunc("/full/path", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "full")
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/full/path", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "full", w.Body.String())
+	})
+}
+
 func BenchmarkMiddlewareChain(b *testing.B) {
 	r := NewRouter()
 	for range 5 {

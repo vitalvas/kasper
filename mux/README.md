@@ -7,6 +7,7 @@ HTTP request multiplexer with URL pattern matching.
 - URL path variables with optional regex constraints (`{name}`, `{id:[0-9]+}`) or named macros (`{id:uuid}`)
 - Host, method, header, query, and scheme matchers
 - Subrouters with path prefix grouping
+- Inline subrouters (`Route` and `Group`) for closure-based route definitions
 - Middleware support
 - Named routes with URL building
 - Custom error handlers (404, 405)
@@ -210,6 +211,94 @@ api.HandleFunc("/users", createUser).Methods(http.MethodPost)
 api.HandleFunc("/users/{id}", getUser).Methods(http.MethodGet)
 ```
 
+## Inline Subrouters
+
+`Route` and `Group` provide a closure-based API for defining sub-routes inline, without saving intermediate variables.
+
+### Route
+
+`Route` creates a subrouter with a path prefix and calls the function with it. It is equivalent to `PathPrefix(path).Subrouter()`:
+
+```go
+r.Route("/api/v1", func(api *mux.Router) {
+    api.HandleFunc("/users", listUsers).Methods(http.MethodGet)
+    api.HandleFunc("/users", createUser).Methods(http.MethodPost)
+    api.HandleFunc("/users/{id}", getUser).Methods(http.MethodGet)
+})
+```
+
+Middleware can be scoped to a `Route` subrouter so it only applies to routes within the prefix:
+
+```go
+r.Route("/admin", func(admin *mux.Router) {
+    admin.Use(authMiddleware)
+    admin.Use(loggingMiddleware)
+    admin.HandleFunc("/users", adminUsersHandler).Methods(http.MethodGet)
+    admin.HandleFunc("/settings", adminSettingsHandler).Methods(http.MethodGet)
+})
+```
+
+Path variables in the prefix are available in handlers:
+
+```go
+r.Route("/users/{id}", func(sub *mux.Router) {
+    sub.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
+        id := mux.Vars(r)["id"]
+        fmt.Fprintf(w, "profile for %s", id)
+    })
+})
+```
+
+`Route` calls can be nested:
+
+```go
+r.Route("/api", func(api *mux.Router) {
+    api.Route("/v1", func(v1 *mux.Router) {
+        v1.HandleFunc("/users", listUsers)
+        v1.HandleFunc("/health", healthHandler)
+    })
+})
+```
+
+### Group
+
+`Group` creates a subrouter with no path prefix, purely for grouping routes with shared middleware. It is equivalent to `NewRoute().Subrouter()`:
+
+```go
+r.HandleFunc("/public", publicHandler)
+
+r.Group(func(authed *mux.Router) {
+    authed.Use(authMiddleware)
+    authed.HandleFunc("/dashboard", dashboardHandler)
+    authed.HandleFunc("/settings", settingsHandler)
+})
+```
+
+`Route` can be used inside `Group` to apply shared middleware to prefixed sub-routes:
+
+```go
+r.Group(func(authed *mux.Router) {
+    authed.Use(authMiddleware)
+    authed.Route("/api", func(api *mux.Router) {
+        api.HandleFunc("/secrets", secretsHandler)
+    })
+})
+```
+
+`Group` does not add a path prefix. When nesting `Group` inside `Route`, child routes do not inherit the parent `Route` path prefix. Use `Route` inside `Group` (not `Group` inside `Route`) when combining middleware grouping with path prefixes.
+
+### Chaining
+
+Both methods return the parent router, allowing chained calls:
+
+```go
+r.Route("/api", func(api *mux.Router) {
+    api.HandleFunc("/users", listUsers)
+}).Route("/admin", func(admin *mux.Router) {
+    admin.HandleFunc("/stats", statsHandler)
+})
+```
+
 ## Error Handling
 
 ### NotFoundHandler
@@ -333,15 +422,15 @@ func loggingMiddleware(next http.Handler) http.Handler {
     })
 }
 
-r.Use(mux.MiddlewareFunc(loggingMiddleware))
+r.Use(loggingMiddleware)
 ```
 
 Subrouter middleware is applied after parent router middleware:
 
 ```go
-r.Use(mux.MiddlewareFunc(parentMiddleware))
+r.Use(parentMiddleware)
 sub := r.PathPrefix("/api").Subrouter()
-sub.Use(mux.MiddlewareFunc(subMiddleware))
+sub.Use(subMiddleware)
 // Order: parentMiddleware -> subMiddleware -> handler
 ```
 
