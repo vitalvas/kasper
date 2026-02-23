@@ -1,11 +1,27 @@
 package openapi
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// Namer can be implemented by types to override the default component
+// schema name. The returned string is used as the base name in the
+// Components Object schemas map. Standard collision-resolution logic
+// (package prefix, numeric suffix) still applies when names collide.
+//
+//	func (User) OpenAPIName() string {
+//	    return "UserAccount"
+//	}
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
+type Namer interface {
+	OpenAPIName() string
+}
 
 // Exampler can be implemented by types to provide an example value
 // for the generated JSON Schema. The returned value is set as the "example"
@@ -52,6 +68,40 @@ func (g *SchemaGenerator) Schemas() map[string]*Schema {
 	return g.schemas
 }
 
+// Document builds a complete OpenAPI Document from the collected component
+// schemas. This allows exporting a spec without a mux router, useful for
+// non-server applications such as schema-only documentation or code
+// generation tooling.
+//
+// The returned document has its own schemas map (adding more schemas to
+// the generator will not affect previously returned documents), but the
+// individual *Schema values are shared with the generator. Callers
+// should not mutate the schema objects in the returned document.
+//
+//	gen := openapi.NewSchemaGenerator()
+//	gen.Generate(User{})
+//	gen.Generate(Order{})
+//	doc := gen.Document(openapi.Info{Title: "My API", Version: "1.0.0"})
+//	data, _ := doc.JSON()
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object
+func (g *SchemaGenerator) Document(info Info) *Document {
+	doc := &Document{
+		OpenAPI: "3.1.0",
+		Info:    info,
+	}
+
+	if len(g.schemas) > 0 {
+		schemas := make(map[string]*Schema, len(g.schemas))
+		maps.Copy(schemas, g.schemas)
+		doc.Components = &Components{
+			Schemas: schemas,
+		}
+	}
+
+	return doc
+}
+
 // Generate produces a JSON Schema for the given Go value.
 // Named struct types are stored in the generator's component schemas
 // and referenced via $ref.
@@ -71,15 +121,17 @@ func (g *SchemaGenerator) Generate(v any) *Schema {
 // See: https://spec.openapis.org/oas/v3.1.0#schema-object
 // See: https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3 ($ref)
 func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
-	// Unwrap pointer and mark nullable.
+	// Unwrap all pointer levels and mark nullable.
+	// encoding/json recursively dereferences pointers, so **T
+	// serializes identically to *T.
 	nullable := false
-	if t.Kind() == reflect.Pointer {
+	for t.Kind() == reflect.Pointer {
 		nullable = true
 		t = t.Elem()
 	}
 
 	// Named struct types → $ref (except time.Time which is a special case).
-	if t.Kind() == reflect.Struct && t != reflect.TypeOf(time.Time{}) {
+	if t.Kind() == reflect.Struct && t != reflect.TypeFor[time.Time]() {
 		name := g.schemaName(t)
 		if name != "" {
 			// Generate the schema if not already visited.
@@ -121,7 +173,7 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 // See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.1.1
 func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 	// Special cases first.
-	if t == reflect.TypeOf(time.Time{}) {
+	if t == reflect.TypeFor[time.Time]() {
 		return &Schema{Type: TypeString("string"), Format: "date-time"}
 	}
 
@@ -157,9 +209,6 @@ func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 		}
 
 	case reflect.Map:
-		if t.Key().Kind() != reflect.String {
-			return &Schema{Type: TypeString("object")}
-		}
 		return &Schema{
 			Type:                 TypeString("object"),
 			AdditionalProperties: g.generateType(t.Elem()),
@@ -409,13 +458,25 @@ func parseExampleValue(schema *Schema, value string) any {
 // See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
 // See: https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3 ($ref)
 func (g *SchemaGenerator) schemaName(t reflect.Type) string {
-	simple := sanitizeSchemaName(t.Name())
-	if simple == "" || t.PkgPath() == "" {
-		return ""
-	}
-
 	if name, ok := g.typeNames[t]; ok {
 		return name
+	}
+
+	// Check if the type implements Namer for a custom base name.
+	// Skip promoted methods from embedded fields: if an anonymous field
+	// returns the same name, the method is inherited, not directly defined.
+	simple := ""
+	if n, ok := reflect.New(t).Interface().(Namer); ok {
+		candidate := n.OpenAPIName()
+		if candidate != "" && isValidComponentName(candidate) && !isPromotedNamer(t, candidate) {
+			simple = candidate
+		}
+	}
+	if simple == "" {
+		simple = sanitizeSchemaName(t.Name())
+	}
+	if simple == "" || t.PkgPath() == "" {
+		return ""
 	}
 
 	name := simple
@@ -439,6 +500,71 @@ func (g *SchemaGenerator) schemaName(t reflect.Type) string {
 	return name
 }
 
+// isPromotedNamer checks whether a Namer method on type t is promoted from
+// an anonymous (embedded) field rather than directly defined. It returns true
+// when any embedded field's OpenAPIName returns the same value as the parent,
+// indicating the method is inherited. Both struct and non-struct embedded
+// types are checked; for embedded interfaces, the method set is inspected
+// directly since there is no concrete value to call.
+//
+// Limitation: if a type embeds a Namer and also defines its own OpenAPIName
+// returning the identical string, the method is incorrectly treated as
+// promoted. Go reflection does not expose whether a method is directly
+// defined vs inherited, so this edge case cannot be resolved at runtime.
+func isPromotedNamer(t reflect.Type, name string) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if !field.Anonymous {
+			continue
+		}
+		ft := field.Type
+		if ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		// For embedded interfaces, check the method set directly
+		// since there is no concrete value to instantiate.
+		if ft.Kind() == reflect.Interface {
+			if _, ok := ft.MethodByName("OpenAPIName"); ok {
+				return true
+			}
+			continue
+		}
+		// For concrete types (struct or non-struct), instantiate and call.
+		if embedded, ok := reflect.New(ft).Interface().(Namer); ok {
+			if embedded.OpenAPIName() == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isValidComponentName checks whether name is a valid OpenAPI Components
+// Object key. The specification requires keys to match ^[a-zA-Z0-9._-]+$.
+// Names with other characters (e.g., "/" or "~") would produce invalid
+// $ref JSON Pointers.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#components-object
+func isValidComponentName(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // pkgPrefix extracts the last segment of a Go package path and capitalizes
 // it for use as a schema name prefix (e.g., "net/http" -> "Http").
 //
@@ -458,7 +584,9 @@ func pkgPrefix(pkgPath string) string {
 // sanitizeSchemaName cleans up Go type names for use as OpenAPI component
 // schema keys. Generic type names like "ResponseData[User]" are converted
 // to "ResponseDataUser", and "ResponseData[[]User]" becomes
-// "ResponseDataUserList". Package paths in type parameters are stripped.
+// "ResponseDataUserList". Multi-parameter generics like "Pair[int,string]"
+// become "PairIntString". Nested generics like "Outer[Inner[T]]" are
+// handled recursively. Package paths in type parameters are stripped.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#components-object (schemas)
 func sanitizeSchemaName(name string) string {
@@ -468,22 +596,77 @@ func sanitizeSchemaName(name string) string {
 	}
 
 	base := name[:idx]
+	// Strip package path from the base: "github.com/foo/bar.Inner" → "Inner".
+	if dot := strings.LastIndexByte(base, '.'); dot >= 0 {
+		base = base[dot+1:]
+	}
 	inner := name[idx+1 : len(name)-1]
 
-	isList := strings.HasPrefix(inner, "[]")
-	inner = strings.TrimPrefix(inner, "[]")
+	var result strings.Builder
+	result.WriteString(base)
 
-	// Strip package path: "github.com/foo/bar.User" → "User".
-	if dot := strings.LastIndexByte(inner, '.'); dot >= 0 {
-		inner = inner[dot+1:]
+	for _, param := range splitTopLevelParams(inner) {
+		// Strip pointer and slice markers in any combination
+		// (e.g., "*User", "[]User", "[]*User", "*[]User").
+		isList := false
+		for {
+			switch {
+			case strings.HasPrefix(param, "[]"):
+				isList = true
+				param = param[2:]
+			case strings.HasPrefix(param, "*"):
+				param = param[1:]
+			default:
+				goto stripped
+			}
+		}
+	stripped:
+
+		// Recursively sanitize nested generic parameters.
+		if strings.ContainsRune(param, '[') {
+			param = sanitizeSchemaName(param)
+		} else {
+			// Strip package path: "github.com/foo/bar.User" → "User".
+			if dot := strings.LastIndexByte(param, '.'); dot >= 0 {
+				param = param[dot+1:]
+			}
+		}
+
+		// Capitalize the first letter for readability in multi-param names.
+		if len(param) > 0 {
+			result.WriteString(strings.ToUpper(param[:1]))
+			result.WriteString(param[1:])
+		}
+
+		if isList {
+			result.WriteString("List")
+		}
 	}
 
-	result := base + inner
-	if isList {
-		result += "List"
-	}
+	return result.String()
+}
 
-	return result
+// splitTopLevelParams splits a type parameter string on commas that are
+// not nested inside brackets. For example, "Map[A,B],C" splits into
+// ["Map[A,B]", "C"].
+func splitTopLevelParams(s string) []string {
+	var params []string
+	depth := 0
+	start := 0
+	for i, r := range s {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				params = append(params, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(params, s[start:])
 }
 
 // applyNullable modifies a schema to allow null values by converting
@@ -512,14 +695,7 @@ func applyStringEncoding(schema *Schema) {
 	if len(types) == 0 {
 		return
 	}
-	var hasNull bool
-	for _, t := range types {
-		if t == "null" {
-			hasNull = true
-			break
-		}
-	}
-	if hasNull {
+	if slices.Contains(types, "null") {
 		schema.Type = TypeArray("string", "null")
 	} else {
 		schema.Type = TypeString("string")

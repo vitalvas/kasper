@@ -29,6 +29,10 @@ type ErrorResponse struct {
 	Message string `json:"message" openapi:"description=Human-readable description"`
 }
 
+func (ErrorResponse) OpenAPIName() string {
+	return "GenericErrorResponse"
+}
+
 // store is a simple in-memory item store.
 type store struct {
 	items map[string]Item

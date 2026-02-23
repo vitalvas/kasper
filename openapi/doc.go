@@ -378,6 +378,58 @@
 //	spec.Op("listUsers").Response(http.StatusOK, ResponseData[[]User]{})
 //	// → schema "ResponseDataUserList" with Result typed as array of $ref User
 //
+// # Custom Schema Names
+//
+// Implement the Namer interface to override the default component schema
+// name for a type. The returned string is used as the base name in the
+// components/schemas map, with standard collision resolution still applied:
+//
+//	func (User) OpenAPIName() string {
+//	    return "UserAccount"
+//	}
+//
+// If OpenAPIName returns an empty string, the default name (the Go type name)
+// is used as a fallback.
+//
+// # Schema-Only Document (No Server Required)
+//
+// Use SchemaGenerator.Document to produce a complete OpenAPI document from
+// Go types without a mux router. This is useful for schema-only documentation,
+// code generation tooling, or non-HTTP applications:
+//
+//	gen := openapi.NewSchemaGenerator()
+//	gen.Generate(User{})
+//	gen.Generate(Order{})
+//
+//	doc := gen.Document(openapi.Info{Title: "My API", Version: "1.0.0"})
+//	jsonBytes, _ := doc.JSON()
+//	yamlBytes, _ := doc.YAML()
+//
+// # Parsing Documents
+//
+// Use DocumentFromJSON or DocumentFromYAML to parse existing OpenAPI
+// documents from serialized form:
+//
+//	doc, err := openapi.DocumentFromJSON(jsonBytes)
+//	doc, err := openapi.DocumentFromYAML(yamlBytes)
+//
+// # Merging Documents
+//
+// MergeDocuments combines multiple OpenAPI documents into a single unified
+// document. This is useful when different services each produce their own
+// spec and you need a combined view:
+//
+//	merged, err := openapi.MergeDocuments(
+//	    openapi.Info{Title: "Platform API", Version: "1.0.0"},
+//	    usersDoc,
+//	    billingDoc,
+//	)
+//
+// Paths, webhooks, and all component types are merged. Duplicate entries with
+// identical definitions are deduplicated; conflicts produce an error. Tags are
+// deduplicated by name, security requirements are unioned, and source servers
+// are dropped (set them on the returned document instead).
+//
 // # Serving the Specification
 //
 // Handle registers all OpenAPI endpoints under a base path. The config
@@ -426,6 +478,28 @@
 //
 //	doc := spec.Build(r)
 //	data, _ := json.MarshalIndent(doc, "", "  ")
+//
+// # Exporting to JSON or YAML
+//
+// Any *Document (from Build, SchemaGenerator.Document, DocumentFromJSON,
+// DocumentFromYAML, or MergeDocuments) can be serialized to bytes:
+//
+//	doc := spec.Build(r)
+//	jsonBytes, _ := doc.JSON()   // indented JSON
+//	yamlBytes, _ := doc.YAML()   // YAML
+//
+// This works for all document sources, including schema-only documents:
+//
+//	gen := openapi.NewSchemaGenerator()
+//	gen.Generate(User{})
+//	doc := gen.Document(openapi.Info{Title: "Schemas", Version: "1.0.0"})
+//	data, _ := doc.JSON()
+//	os.WriteFile("openapi.json", data, 0644)
+//
+// And for merged documents:
+//
+//	merged, _ := openapi.MergeDocuments(info, usersDoc, billingDoc)
+//	data, _ := merged.YAML()
 //
 // # Subrouter Integration
 //

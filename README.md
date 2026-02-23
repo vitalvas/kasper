@@ -46,12 +46,15 @@ Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and stru
 
 | Feature | Details |
 |---------|---------|
-| Schema | JSON Schema Draft 2020-12, struct tags (`openapi:"format=email,minLength=1"`) |
+| Schema | JSON Schema Draft 2020-12, struct tags (`openapi:"format=email,minLength=1"`), `Namer`/`Exampler` interfaces |
 | Routes | Named routes (`Op`), direct attachment (`Route`), groups for shared metadata |
 | Security | Basic, bearer, OAuth2, API key schemes |
 | Content | Webhooks, callbacks, multiple content types, generic type support |
 | Docs UI | Swagger UI, RapiDoc, Redoc |
-| Export | JSON and YAML schema endpoints |
+| Export | `doc.JSON()`, `doc.YAML()`, JSON/YAML schema endpoints |
+| Parsing | `DocumentFromJSON`, `DocumentFromYAML` |
+| Merge | `MergeDocuments` combines multiple specs with conflict detection |
+| Standalone | `SchemaGenerator.Document` produces a spec without a mux router |
 
 ---
 

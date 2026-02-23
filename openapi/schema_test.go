@@ -97,7 +97,7 @@ func TestGenerateMap(t *testing.T) {
 	}{
 		{"map[string]int", map[string]int{}, true, TypeString("integer"), true},
 		{"map[string]any", map[string]any{}, true, SchemaType{}, false},
-		{"map[int]string", map[int]string{}, false, SchemaType{}, false},
+		{"map[int]string", map[int]string{}, true, TypeString("string"), true},
 	}
 
 	for _, tt := range tests {
@@ -362,6 +362,36 @@ func TestGenerateNullableTypes(t *testing.T) {
 		assert.Equal(t, "#/components/schemas/Inner", innerSchema.AnyOf[0].Ref)
 		assert.Equal(t, TypeString("null"), innerSchema.AnyOf[1].Type)
 	})
+
+	t.Run("double pointer to primitive", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		type WithDoublePtr struct {
+			Value **int `json:"value"`
+		}
+		g.Generate(WithDoublePtr{})
+		schema := g.Schemas()["WithDoublePtr"]
+		require.NotNil(t, schema)
+		valSchema := schema.Properties["value"]
+		require.NotNil(t, valSchema, "double pointer field must not be omitted")
+		assert.Equal(t, TypeArray("integer", "null"), valSchema.Type)
+	})
+
+	t.Run("double pointer to struct", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		type Inner struct {
+			X int `json:"x"`
+		}
+		type Outer struct {
+			Inner **Inner `json:"inner"`
+		}
+		g.Generate(Outer{})
+		schema := g.Schemas()["Outer"]
+		require.NotNil(t, schema)
+		innerSchema := schema.Properties["inner"]
+		require.NotNil(t, innerSchema, "double pointer field must not be omitted")
+		assert.Len(t, innerSchema.AnyOf, 2)
+		assert.Equal(t, "#/components/schemas/Inner", innerSchema.AnyOf[0].Ref)
+	})
 }
 
 type TaggedStruct struct {
@@ -471,6 +501,217 @@ func TestGenerateOpenAPITags(t *testing.T) {
 		schema := g.Schemas()["WithBoolExample"]
 		require.NotNil(t, schema)
 		assert.Equal(t, true, schema.Properties["active"].Example)
+	})
+}
+
+type NamedType struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (NamedType) OpenAPIName() string {
+	return "CustomName"
+}
+
+type EmptyNameType struct {
+	ID string `json:"id"`
+}
+
+func (EmptyNameType) OpenAPIName() string {
+	return ""
+}
+
+type PtrReceiverNamed struct {
+	Value string `json:"value"`
+}
+
+func (*PtrReceiverNamed) OpenAPIName() string {
+	return "PtrCustom"
+}
+
+type invalidNameType struct {
+	ID string `json:"id"`
+}
+
+func (invalidNameType) OpenAPIName() string {
+	return "foo/bar~baz"
+}
+
+type namedString string
+
+func (namedString) OpenAPIName() string {
+	return "CustomString"
+}
+
+type outerWithNonStructEmbed struct {
+	namedString
+	Extra string `json:"extra"`
+}
+
+func TestNamer(t *testing.T) {
+	t.Run("value receiver custom name", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate(NamedType{})
+		assert.Equal(t, "#/components/schemas/CustomName", s.Ref)
+		assert.Contains(t, g.Schemas(), "CustomName")
+	})
+
+	t.Run("pointer receiver custom name", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate(PtrReceiverNamed{})
+		assert.Equal(t, "#/components/schemas/PtrCustom", s.Ref)
+		assert.Contains(t, g.Schemas(), "PtrCustom")
+	})
+
+	t.Run("cached on second call", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s1 := g.Generate(NamedType{})
+		s2 := g.Generate(NamedType{})
+		assert.Equal(t, s1.Ref, s2.Ref)
+		assert.Len(t, g.Schemas(), 1)
+	})
+
+	t.Run("empty name falls through to default", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate(EmptyNameType{})
+		assert.Equal(t, "#/components/schemas/EmptyNameType", s.Ref)
+		assert.Contains(t, g.Schemas(), "EmptyNameType")
+	})
+
+	t.Run("pointer to named type", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		type Wrapper struct {
+			Inner *NamedType `json:"inner"`
+		}
+		g.Generate(Wrapper{})
+		// NamedType should use custom name even when reached via pointer field.
+		assert.Contains(t, g.Schemas(), "CustomName")
+		wrapper := g.Schemas()["Wrapper"]
+		require.NotNil(t, wrapper)
+		innerProp := wrapper.Properties["inner"]
+		require.NotNil(t, innerProp)
+		require.Len(t, innerProp.AnyOf, 2)
+		assert.Equal(t, "#/components/schemas/CustomName", innerProp.AnyOf[0].Ref)
+	})
+
+	t.Run("slice of named type", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate([]NamedType{})
+		assert.Equal(t, TypeString("array"), s.Type)
+		require.NotNil(t, s.Items)
+		assert.Equal(t, "#/components/schemas/CustomName", s.Items.Ref)
+		assert.Contains(t, g.Schemas(), "CustomName")
+	})
+
+	t.Run("map value with named type", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate(map[string]NamedType{})
+		assert.Equal(t, TypeString("object"), s.Type)
+		require.NotNil(t, s.AdditionalProperties)
+		assert.Equal(t, "#/components/schemas/CustomName", s.AdditionalProperties.Ref)
+		assert.Contains(t, g.Schemas(), "CustomName")
+	})
+
+	t.Run("nested field with named type", func(t *testing.T) {
+		type Outer struct {
+			Named NamedType `json:"named"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(Outer{})
+		assert.Contains(t, g.Schemas(), "CustomName")
+		outer := g.Schemas()["Outer"]
+		require.NotNil(t, outer)
+		assert.Equal(t, "#/components/schemas/CustomName", outer.Properties["named"].Ref)
+	})
+
+	t.Run("embedded named type inlines fields not name", func(t *testing.T) {
+		type WithEmbeddedNamed struct {
+			NamedType
+			Extra string `json:"extra"`
+		}
+		g := NewSchemaGenerator()
+		g.Generate(WithEmbeddedNamed{})
+		schema := g.Schemas()["WithEmbeddedNamed"]
+		require.NotNil(t, schema)
+		// Embedded fields are inlined, not referenced.
+		assert.Contains(t, schema.Properties, "id")
+		assert.Contains(t, schema.Properties, "name")
+		assert.Contains(t, schema.Properties, "extra")
+	})
+
+	t.Run("collision with different type same custom name", func(t *testing.T) {
+		g := NewSchemaGenerator()
+
+		// First: NamedType claims "CustomName".
+		s1 := g.Generate(NamedType{})
+		assert.Equal(t, "#/components/schemas/CustomName", s1.Ref)
+
+		// Seed a fake type to occupy the prefixed name, forcing numeric suffix.
+		fakeType := reflect.TypeOf(SimpleStruct{})
+		g.nameTypes["OpenapiCustomName"] = fakeType
+		g.typeNames[fakeType] = "OpenapiCustomName"
+
+		// PtrReceiverNamed has a different custom name "PtrCustom", no collision.
+		s2 := g.Generate(PtrReceiverNamed{})
+		assert.Equal(t, "#/components/schemas/PtrCustom", s2.Ref)
+
+		assert.Contains(t, g.Schemas(), "CustomName")
+		assert.Contains(t, g.Schemas(), "PtrCustom")
+	})
+
+	t.Run("generic type without Namer uses sanitized name", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate(ResponseWrapper[NamedType]{})
+		// ResponseWrapper has no OpenAPIName, so it uses the sanitized generic name.
+		// The type param NamedType is referenced by its custom name.
+		assert.Equal(t, "#/components/schemas/ResponseWrapperNamedType", s.Ref)
+		assert.Contains(t, g.Schemas(), "ResponseWrapperNamedType")
+		assert.Contains(t, g.Schemas(), "CustomName")
+
+		// Result field references NamedType by its custom name.
+		wrapper := g.Schemas()["ResponseWrapperNamedType"]
+		require.NotNil(t, wrapper)
+		assert.Equal(t, "#/components/schemas/CustomName", wrapper.Properties["result"].Ref)
+	})
+
+	t.Run("works with SchemaGenerator.Document export", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(NamedType{})
+		g.Generate(PtrReceiverNamed{})
+
+		doc := g.Document(Info{Title: "Test", Version: "1.0.0"})
+		require.NotNil(t, doc.Components)
+		assert.Contains(t, doc.Components.Schemas, "CustomName")
+		assert.Contains(t, doc.Components.Schemas, "PtrCustom")
+		assert.NotContains(t, doc.Components.Schemas, "NamedType")
+		assert.NotContains(t, doc.Components.Schemas, "PtrReceiverNamed")
+
+		// Verify JSON export uses custom names.
+		data, err := doc.JSON()
+		require.NoError(t, err)
+		parsed, err := DocumentFromJSON(data)
+		require.NoError(t, err)
+		assert.Contains(t, parsed.Components.Schemas, "CustomName")
+		assert.Contains(t, parsed.Components.Schemas, "PtrCustom")
+	})
+
+	t.Run("invalid component name falls through to default", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		s := g.Generate(invalidNameType{})
+		// Name contains "/", which is invalid for component keys.
+		// Should fall through to the default type name.
+		assert.Equal(t, "#/components/schemas/invalidNameType", s.Ref)
+		assert.Contains(t, g.Schemas(), "invalidNameType")
+	})
+
+	t.Run("embedded non-struct Namer detected as promoted", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(outerWithNonStructEmbed{})
+		schema := g.Schemas()["outerWithNonStructEmbed"]
+		require.NotNil(t, schema)
+		// The embedded namedString implements Namer, but the outer type
+		// should use its own default name, not the embedded name.
+		assert.NotContains(t, g.Schemas(), "CustomString")
 	})
 }
 
@@ -587,6 +828,18 @@ func TestSanitizeSchemaName(t *testing.T) {
 		{"generic with package path", "ResponseData[github.com/foo/bar.User]", "ResponseDataUser"},
 		{"generic slice type", "ResponseData[[]User]", "ResponseDataUserList"},
 		{"generic slice with package path", "ResponseData[[]github.com/foo.User]", "ResponseDataUserList"},
+		{"multi-param generic", "Pair[int,string]", "PairIntString"},
+		{"multi-param with types", "Map[string,User]", "MapStringUser"},
+		{"multi-param with package paths", "Pair[github.com/a.Foo,github.com/b.Bar]", "PairFooBar"},
+		{"multi-param with slice", "Result[[]User,Error]", "ResultUserListError"},
+		{"nested slice", "Foo[[][]User]", "FooUserList"},
+		{"triple nested slice", "Foo[[][][]int]", "FooIntList"},
+		{"pointer param", "Foo[*User]", "FooUser"},
+		{"slice of pointer", "Foo[[]*User]", "FooUserList"},
+		{"pointer to slice", "Foo[*[]User]", "FooUserList"},
+		{"nested generic", "Outer[Inner[string]]", "OuterInnerString"},
+		{"nested generic with pkg", "Outer[github.com/a.Inner[github.com/b.User]]", "OuterInnerUser"},
+		{"nested multi-param", "Outer[Map[string,int],Error]", "OuterMapStringIntError"},
 	}
 
 	for _, tt := range tests {
@@ -1031,5 +1284,85 @@ func TestJSONStringTagOverride(t *testing.T) {
 		require.NotNil(t, schema)
 		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
 		assert.Equal(t, "Item count", schema.Properties["count"].Description)
+	})
+}
+
+func TestSchemaGeneratorDocument(t *testing.T) {
+	t.Run("produces valid document with schemas", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(SimpleStruct{})
+		g.Generate(ExampleUser{})
+
+		doc := g.Document(Info{Title: "Test API", Version: "1.0.0"})
+		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, "Test API", doc.Info.Title)
+		assert.Equal(t, "1.0.0", doc.Info.Version)
+		require.NotNil(t, doc.Components)
+		assert.Contains(t, doc.Components.Schemas, "SimpleStruct")
+		assert.Contains(t, doc.Components.Schemas, "ExampleUser")
+	})
+
+	t.Run("no schemas produces nil components", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		doc := g.Document(Info{Title: "Empty", Version: "0.0.1"})
+		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Nil(t, doc.Components)
+	})
+
+	t.Run("exports to JSON", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(SimpleStruct{})
+
+		doc := g.Document(Info{Title: "JSON Export", Version: "1.0.0"})
+		data, err := doc.JSON()
+		require.NoError(t, err)
+
+		parsed, err := DocumentFromJSON(data)
+		require.NoError(t, err)
+		assert.Equal(t, "3.1.0", parsed.OpenAPI)
+		assert.Equal(t, "JSON Export", parsed.Info.Title)
+		require.NotNil(t, parsed.Components)
+		assert.Contains(t, parsed.Components.Schemas, "SimpleStruct")
+	})
+
+	t.Run("exports to YAML", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(SimpleStruct{})
+
+		doc := g.Document(Info{Title: "YAML Export", Version: "1.0.0"})
+		data, err := doc.YAML()
+		require.NoError(t, err)
+
+		parsed, err := DocumentFromYAML(data)
+		require.NoError(t, err)
+		assert.Equal(t, "3.1.0", parsed.OpenAPI)
+		assert.Equal(t, "YAML Export", parsed.Info.Title)
+		require.NotNil(t, parsed.Components)
+		assert.Contains(t, parsed.Components.Schemas, "SimpleStruct")
+	})
+
+	t.Run("primitives only produce no components", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate("")
+		g.Generate(0)
+
+		doc := g.Document(Info{Title: "Primitives", Version: "1.0.0"})
+		assert.Nil(t, doc.Components)
+	})
+
+	t.Run("document is a snapshot of schemas", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(SimpleStruct{})
+
+		doc := g.Document(Info{Title: "Snapshot", Version: "1.0.0"})
+		require.NotNil(t, doc.Components)
+		assert.Len(t, doc.Components.Schemas, 1)
+
+		// Generate more schemas after creating the document.
+		g.Generate(ExampleUser{})
+
+		// The previously returned document must not change.
+		assert.Len(t, doc.Components.Schemas, 1)
+		assert.NotContains(t, doc.Components.Schemas, "ExampleUser")
 	})
 }

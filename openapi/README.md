@@ -465,6 +465,23 @@ func (User) OpenAPIExample() any {
 
 The returned value is serialized as the `example` field on the component schema. This works alongside field-level examples set via struct tags.
 
+## Custom schema names
+
+Implement `openapi.Namer` to override the default component schema name for a type:
+
+```go
+type User struct {
+    ID   string `json:"id"`
+    Name string `json:"name"`
+}
+
+func (User) OpenAPIName() string {
+    return "UserAccount"
+}
+```
+
+The returned string is used as the base name in `#/components/schemas`. Standard collision resolution (package prefix, numeric suffix) still applies. If `OpenAPIName` returns an empty string, the default Go type name is used.
+
 ## Generic response wrappers
 
 Go generics work naturally with the schema generator. Each concrete instantiation produces a distinct component schema with a sanitized name:
@@ -607,15 +624,26 @@ Both `<basePath>` and `<basePath>/` serve the docs UI. The docs UI automatically
 
 ```go
 doc := spec.Build(r)
-
-// Serialize to JSON
-data, _ := json.MarshalIndent(doc, "", "  ")
-
-// Serialize to YAML
-data, _ := yaml.Marshal(doc)
+jsonBytes, _ := doc.JSON()
+yamlBytes, _ := doc.YAML()
 ```
 
 `Build` resolves all registered routes (via `Route` and `Op`), generates JSON schemas for Go types, collects tags, and assembles components. Routes without OpenAPI metadata are skipped.
+
+## Exporting to JSON or YAML
+
+Any `*Document` can be serialized to bytes using `JSON()` (indented) or `YAML()`:
+
+```go
+doc := spec.Build(r)
+jsonBytes, _ := doc.JSON()
+yamlBytes, _ := doc.YAML()
+
+os.WriteFile("openapi.json", jsonBytes, 0644)
+os.WriteFile("openapi.yaml", yamlBytes, 0644)
+```
+
+This works for all document sources: `Build`, `SchemaGenerator.Document`, `DocumentFromJSON`, `DocumentFromYAML`, and `MergeDocuments`.
 
 ## Subrouter integration
 
@@ -642,3 +670,61 @@ doc := spec.Build(r)
 ```
 
 Pass the root router (not the subrouter) to `Build` and `Handle`.
+
+## Schema-only document (no server required)
+
+Use `SchemaGenerator.Document` to produce a complete OpenAPI document from Go types without a mux router. This is useful for schema-only documentation, code generation tooling, or non-HTTP applications:
+
+```go
+gen := openapi.NewSchemaGenerator()
+gen.Generate(User{})
+gen.Generate(Order{})
+gen.Generate(ResponseData[User]{})
+
+doc := gen.Document(openapi.Info{Title: "My Schemas", Version: "1.0.0"})
+jsonBytes, _ := doc.JSON()
+yamlBytes, _ := doc.YAML()
+```
+
+The resulting document contains `openapi`, `info`, and `components.schemas`. Named struct types and their transitive dependencies are included automatically.
+
+## Parsing documents
+
+Use `DocumentFromJSON` or `DocumentFromYAML` to parse existing OpenAPI documents from serialized form:
+
+```go
+jsonDoc, err := openapi.DocumentFromJSON(jsonBytes)
+yamlDoc, err := openapi.DocumentFromYAML(yamlBytes)
+```
+
+Parsed documents can be inspected, modified, re-exported, or passed to `MergeDocuments`.
+
+## Merging documents
+
+`MergeDocuments` combines multiple OpenAPI documents into a single unified document. This is useful in microservice architectures where each service produces its own spec:
+
+```go
+merged, err := openapi.MergeDocuments(
+    openapi.Info{Title: "Platform API", Version: "1.0.0"},
+    usersDoc,
+    billingDoc,
+    notificationsDoc,
+)
+if err != nil {
+    log.Fatal(err) // conflict details in error message
+}
+data, _ := merged.JSON()
+```
+
+Merge behavior:
+
+| Field | Behavior |
+|-------|----------|
+| Paths | Merged; duplicate path with different definition produces conflict error |
+| Webhooks | Merged; duplicate name with different definition produces conflict error |
+| Components | All 10 types merged; identical entries deduplicated, different entries produce conflict error |
+| Tags | Deduplicated by name; first non-empty description wins; sorted alphabetically |
+| Security | Union; deduplicated via JSON serialization |
+| Servers | Dropped (set on the returned document) |
+
+All conflicts are collected and returned in a single error (not fail-fast). Identical entries (compared via JSON serialization) are silently deduplicated.
