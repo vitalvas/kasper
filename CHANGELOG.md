@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/vitalvas/kasper/compare/v0.2.0...v0.3.0) (2026-02-23)
+
+
+### Features
+
+* **mux:** add GetSchemes, GetHostRegexp, GetHeaders, and GetHeadersRegexp route inspection methods ([f5e612f](https://github.com/vitalvas/kasper/commit/f5e612f97964ee5d6821382f21dd07eebf9a469c))
+* **mux:** add HandleJSON and HandleJSONResponse typed handlers ([b7cf03c](https://github.com/vitalvas/kasper/commit/b7cf03c4206289db69b18ed5a0c30422296c5da4))
+* **mux:** add host port handling, input validation, metadata, route middleware, and docs ([6ab5be4](https://github.com/vitalvas/kasper/commit/6ab5be4313178a70b40e1a985de90bda4e9561a3))
+* **mux:** add MetadataMap for setting route metadata from a map ([ddd87ad](https://github.com/vitalvas/kasper/commit/ddd87ad87412624b082e025ca1519993379503ea))
+* **openapi:** add Namer interface, document helpers, and MergeDocuments ([09049c8](https://github.com/vitalvas/kasper/commit/09049c87eb9598cf40f18d3fc738787e72e990f6))
+* **openapi:** add SwaggerUIConfig and make HandleConfig optional ([08df124](https://github.com/vitalvas/kasper/commit/08df12415bfab3b0e6b67c8bd51cf2f3d11df7cd))
+* **openapi:** integrate IsBuildOnly, GetSchemes, and GetHeaders into spec generation ([cc60ab7](https://github.com/vitalvas/kasper/commit/cc60ab78ae16b3d8d49e41bcb294daac7103a206))
+
 ## [0.2.0](https://github.com/vitalvas/kasper/compare/v0.1.0...v0.2.0) (2026-02-22)
 
 
