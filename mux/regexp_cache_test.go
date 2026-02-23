@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,25 @@ func TestCompileRegexp(t *testing.T) {
 	t.Run("invalid pattern returns error", func(t *testing.T) {
 		_, err := compileRegexp(`^([0-9+$`)
 		assert.Error(t, err)
+	})
+}
+
+func TestRegexpCompileFunc(t *testing.T) {
+	t.Run("uses custom compile function", func(t *testing.T) {
+		var called bool
+		original := RegexpCompileFunc
+		t.Cleanup(func() { RegexpCompileFunc = original })
+
+		RegexpCompileFunc = func(expr string) (*regexp.Regexp, error) {
+			called = true
+			return regexp.Compile(expr)
+		}
+
+		// Use a unique pattern to avoid cache hit
+		re, err := compileRegexp(`^custom-compile-test-[a-z]+$`)
+		require.NoError(t, err)
+		assert.True(t, called)
+		assert.True(t, re.MatchString("custom-compile-test-abc"))
 	})
 }
 

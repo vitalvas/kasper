@@ -430,6 +430,82 @@ func TestRouteBuildOnly(t *testing.T) {
 	})
 }
 
+func TestRouteMetadata(t *testing.T) {
+	t.Run("set and get metadata", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("key", "value").
+			Metadata("count", 42)
+
+		md := route.GetMetadata()
+		require.Len(t, md, 2)
+		assert.Equal(t, "value", md["key"])
+		assert.Equal(t, 42, md["count"])
+	})
+
+	t.Run("nil metadata by default", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+		assert.Nil(t, route.GetMetadata())
+	})
+
+	t.Run("MetadataContains", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("key", "value")
+
+		assert.True(t, route.MetadataContains("key"))
+		assert.False(t, route.MetadataContains("missing"))
+	})
+
+	t.Run("GetMetadataValue", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("key", "value")
+
+		val, err := route.GetMetadataValue("key")
+		require.NoError(t, err)
+		assert.Equal(t, "value", val)
+
+		_, err = route.GetMetadataValue("missing")
+		assert.ErrorIs(t, err, ErrMetadataKeyNotFound)
+	})
+
+	t.Run("GetMetadataValueOr", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("key", "value")
+
+		assert.Equal(t, "value", route.GetMetadataValueOr("key", "fallback"))
+		assert.Equal(t, "fallback", route.GetMetadataValueOr("missing", "fallback"))
+	})
+
+	t.Run("metadata accessible via CurrentRoute", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			route := CurrentRoute(r)
+			val, err := route.GetMetadataValue("role")
+			require.NoError(t, err)
+			assert.Equal(t, "admin", val)
+		}).Methods(http.MethodGet).Metadata("role", "admin")
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+	})
+
+	t.Run("overwrite metadata key", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Metadata("key", "first").
+			Metadata("key", "second")
+
+		val, err := route.GetMetadataValue("key")
+		require.NoError(t, err)
+		assert.Equal(t, "second", val)
+	})
+}
+
 func TestRouteMethodMatcher(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -828,6 +904,63 @@ func TestRouteAddRegexpMatcherHostParent(t *testing.T) {
 	})
 }
 
+func TestRouteHostWithPort(t *testing.T) {
+	t.Run("host:port template captures both variables", func(t *testing.T) {
+		router := NewRouter()
+		router.Host("{host:[^:]+}:{port}").
+			Path("/test").
+			HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Host = "example.com:8080"
+		match := &RouteMatch{}
+		require.True(t, router.Match(req, match))
+		assert.Equal(t, "example.com", match.Vars["host"])
+		assert.Equal(t, "8080", match.Vars["port"])
+	})
+
+	t.Run("host template without port matches request with port", func(t *testing.T) {
+		router := NewRouter()
+		router.Host("{sub}.example.com").
+			Path("/test").
+			HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Host = "api.example.com:443"
+		match := &RouteMatch{}
+		require.True(t, router.Match(req, match))
+		assert.Equal(t, "api", match.Vars["sub"])
+	})
+}
+
+func TestRoutePathSlashValidation(t *testing.T) {
+	t.Run("path without leading slash returns error", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("users/{id}", func(_ http.ResponseWriter, _ *http.Request) {})
+		assert.Error(t, route.GetError())
+		assert.Contains(t, route.GetError().Error(), "must start with a slash")
+	})
+
+	t.Run("path prefix without leading slash returns error", func(t *testing.T) {
+		router := NewRouter()
+		route := router.NewRoute().PathPrefix("api")
+		assert.Error(t, route.GetError())
+		assert.Contains(t, route.GetError().Error(), "must start with a slash")
+	})
+
+	t.Run("path with leading slash works", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {})
+		assert.NoError(t, route.GetError())
+	})
+
+	t.Run("path prefix with leading slash works", func(t *testing.T) {
+		router := NewRouter()
+		route := router.NewRoute().PathPrefix("/api")
+		assert.NoError(t, route.GetError())
+	})
+}
+
 func TestRouteInspectionMissingTemplate(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1044,6 +1177,186 @@ func TestRouteDuplicateMethods(t *testing.T) {
 		methods, err := route.GetMethods()
 		require.NoError(t, err)
 		assert.Equal(t, []string{http.MethodPost, http.MethodPut}, methods)
+	})
+}
+
+func TestRouteUse(t *testing.T) {
+	t.Run("applies route middleware", func(t *testing.T) {
+		router := NewRouter()
+		var order []string
+		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+		route.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				order = append(order, "route-mw")
+				next.ServeHTTP(w, r)
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, []string{"route-mw", "handler"}, order)
+	})
+
+	t.Run("route middleware runs inside router middleware", func(t *testing.T) {
+		router := NewRouter()
+		var order []string
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				order = append(order, "router-mw")
+				next.ServeHTTP(w, r)
+			})
+		})
+		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+		route.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				order = append(order, "route-mw")
+				next.ServeHTTP(w, r)
+			})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, []string{"router-mw", "route-mw", "handler"}, order)
+	})
+
+	t.Run("is chainable", func(t *testing.T) {
+		router := NewRouter()
+		var count int
+		mw := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				count++
+				next.ServeHTTP(w, r)
+			})
+		}
+		router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Use(mw).Use(mw)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, 2, count)
+	})
+}
+
+func TestRouteGetHandlerWithMiddlewares(t *testing.T) {
+	t.Run("returns nil when no handler", func(t *testing.T) {
+		router := NewRouter()
+		route := router.NewRoute().Path("/test")
+		assert.Nil(t, route.GetHandlerWithMiddlewares())
+	})
+
+	t.Run("returns handler without middleware", func(t *testing.T) {
+		router := NewRouter()
+		h := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+		route := router.Handle("/test", h)
+		assert.NotNil(t, route.GetHandlerWithMiddlewares())
+	})
+
+	t.Run("wraps handler with route middleware only", func(t *testing.T) {
+		router := NewRouter()
+		var order []string
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				order = append(order, "router-mw")
+				next.ServeHTTP(w, r)
+			})
+		})
+		route := router.HandleFunc("/test", func(_ http.ResponseWriter, _ *http.Request) {
+			order = append(order, "handler")
+		})
+		route.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				order = append(order, "route-mw")
+				next.ServeHTTP(w, r)
+			})
+		})
+
+		h := route.GetHandlerWithMiddlewares()
+		require.NotNil(t, h)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		h.ServeHTTP(w, req)
+		// Should only include route middleware, not router middleware
+		assert.Equal(t, []string{"route-mw", "handler"}, order)
+	})
+}
+
+func TestRouteURLWithQueries(t *testing.T) {
+	t.Run("builds URL with query variables", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/search", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Queries("q", "{query}", "page", "{page:[0-9]+}").
+			Name("search")
+
+		u, err := route.URL("query", "golang", "page", "1")
+		require.NoError(t, err)
+		assert.Equal(t, "/search", u.Path)
+		assert.Equal(t, "q=golang&page=1", u.RawQuery)
+	})
+
+	t.Run("builds URL with path and query", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Queries("tab", "{tab}").
+			Name("user")
+
+		u, err := route.URL("id", "42", "tab", "settings")
+		require.NoError(t, err)
+		assert.Equal(t, "/users/42", u.Path)
+		assert.Equal(t, "tab=settings", u.RawQuery)
+	})
+
+	t.Run("returns error for missing query variable", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/search", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Queries("q", "{query}").
+			Name("search")
+
+		_, err := route.URL()
+		assert.Error(t, err)
+	})
+
+	t.Run("escapes query variable values", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/search", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Queries("q", "{query}").
+			Name("search")
+
+		u, err := route.URL("query", "hello world&foo=bar")
+		require.NoError(t, err)
+		assert.Equal(t, "q=hello+world%26foo%3Dbar", u.RawQuery)
+	})
+}
+
+func TestRouteGetVarNamesWithQueries(t *testing.T) {
+	t.Run("includes query variable names", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/search", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Queries("q", "{query}", "page", "{page:[0-9]+}")
+
+		names, err := route.GetVarNames()
+		require.NoError(t, err)
+		assert.Contains(t, names, "query")
+		assert.Contains(t, names, "page")
+	})
+
+	t.Run("includes host path and query vars", func(t *testing.T) {
+		router := NewRouter()
+		route := router.Host("{sub}.example.com").
+			Path("/users/{id}").
+			Queries("tab", "{tab}")
+
+		names, err := route.GetVarNames()
+		require.NoError(t, err)
+		assert.Contains(t, names, "sub")
+		assert.Contains(t, names, "id")
+		assert.Contains(t, names, "tab")
 	})
 }
 

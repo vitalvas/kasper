@@ -70,9 +70,9 @@ func TestGetHost(t *testing.T) {
 		expected string
 	}{
 		{name: "simple host", host: "example.com", expected: "example.com"},
-		{name: "host with port", host: "example.com:8080", expected: "example.com"},
+		{name: "host with port", host: "example.com:8080", expected: "example.com:8080"},
 		{name: "uppercase host", host: "Example.COM", expected: "example.com"},
-		{name: "host with port uppercase", host: "Example.COM:443", expected: "example.com"},
+		{name: "host with port uppercase", host: "Example.COM:443", expected: "example.com:443"},
 	}
 
 	for _, tt := range tests {
@@ -82,6 +82,82 @@ func TestGetHost(t *testing.T) {
 			assert.Equal(t, tt.expected, getHost(r))
 		})
 	}
+}
+
+func TestGetHostAbsoluteURL(t *testing.T) {
+	t.Run("uses URL host for absolute URL", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "http://url-host.example.com/path", nil)
+		r.Host = "header-host.example.com"
+		assert.Equal(t, "url-host.example.com", getHost(r))
+	})
+
+	t.Run("uses URL host with port for absolute URL", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "http://url-host.example.com:8080/path", nil)
+		r.Host = "header-host.example.com:9090"
+		assert.Equal(t, "url-host.example.com:8080", getHost(r))
+	})
+
+	t.Run("uses Host header for relative URL", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/path", nil)
+		r.Host = "header-host.example.com"
+		assert.Equal(t, "header-host.example.com", getHost(r))
+	})
+}
+
+func TestStripPort(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "host with port", input: "example.com:8080", expected: "example.com"},
+		{name: "host without port", input: "example.com", expected: "example.com"},
+		{name: "empty string", input: "", expected: ""},
+		{name: "IPv6 style host with port", input: "::1:8080", expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, stripPort(tt.input))
+		})
+	}
+}
+
+func TestWildcardHostPort(t *testing.T) {
+	t.Run("host template without port strips port before matching", func(t *testing.T) {
+		rr, err := newRouteRegexp("{sub}.example.com", regexpTypeHost, routeRegexpOptions{})
+		require.NoError(t, err)
+		assert.True(t, rr.wildcardHostPort)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "api.example.com:8080"
+		assert.True(t, rr.Match(req, &RouteMatch{}))
+	})
+
+	t.Run("host template with port captures port variable", func(t *testing.T) {
+		rr, err := newRouteRegexp("{host:[^:]+}:{port}", regexpTypeHost, routeRegexpOptions{})
+		require.NoError(t, err)
+		assert.False(t, rr.wildcardHostPort)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "example.com:8080"
+		assert.True(t, rr.Match(req, &RouteMatch{}))
+
+		vars := rr.getURLVars("example.com:8080")
+		assert.Equal(t, "example.com", vars["host"])
+		assert.Equal(t, "8080", vars["port"])
+	})
+
+	t.Run("host template without port extracts vars correctly", func(t *testing.T) {
+		hostRe, err := newRouteRegexp("{sub}.example.com", regexpTypeHost, routeRegexpOptions{})
+		require.NoError(t, err)
+		group := &routeRegexpGroup{host: hostRe}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "api.example.com:9090"
+		match := &RouteMatch{}
+		group.setMatch(req, match, &Route{})
+		assert.Equal(t, "api", match.Vars["sub"])
+	})
 }
 
 func TestNewRouteRegexp(t *testing.T) {
@@ -171,6 +247,19 @@ func TestNewRouteRegexp(t *testing.T) {
 		_, err := newRouteRegexp("/{id:(}", regexpTypePath, routeRegexpOptions{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid pattern")
+	})
+
+	t.Run("capturing group in pattern returns error", func(t *testing.T) {
+		_, err := newRouteRegexp("/{id:([0-9]+)}", regexpTypePath, routeRegexpOptions{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capture groups")
+	})
+
+	t.Run("non-capturing group in pattern is allowed", func(t *testing.T) {
+		rr, err := newRouteRegexp("/{id:(?:[0-9]+)}", regexpTypePath, routeRegexpOptions{})
+		require.NoError(t, err)
+		assert.True(t, rr.regexp.MatchString("/42"))
+		assert.Equal(t, []string{"id"}, rr.varsN)
 	})
 }
 

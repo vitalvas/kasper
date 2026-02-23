@@ -98,6 +98,40 @@ func TestCurrentRoute(t *testing.T) {
 	})
 }
 
+func TestCurrentRouter(t *testing.T) {
+	t.Run("returns nil for request without router", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		assert.Nil(t, CurrentRouter(r))
+	})
+
+	t.Run("returns router from handler context", func(t *testing.T) {
+		router := NewRouter()
+		var got *Router
+		router.HandleFunc("/test", func(_ http.ResponseWriter, r *http.Request) {
+			got = CurrentRouter(r)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, router, got)
+	})
+
+	t.Run("returns innermost subrouter", func(t *testing.T) {
+		router := NewRouter()
+		sub := router.PathPrefix("/api").Subrouter()
+		var got *Router
+		sub.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			got = CurrentRouter(r)
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, sub, got)
+	})
+}
+
 func TestSetURLVars(t *testing.T) {
 	t.Run("sets vars on request", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)

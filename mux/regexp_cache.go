@@ -5,6 +5,11 @@ import (
 	"sync"
 )
 
+// RegexpCompileFunc is the function used to compile regular expressions.
+// It defaults to regexp.Compile but can be replaced with a custom function
+// (e.g. regexp.CompilePOSIX) for alternative regexp behavior.
+var RegexpCompileFunc func(expr string) (*regexp.Regexp, error) = regexp.Compile
+
 // regexpCache caches compiled regular expressions by pattern string.
 // The number of unique patterns is bounded by the number of registered
 // routes, so the cache grows to a fixed size and stays there.
@@ -17,7 +22,7 @@ func compileRegexp(pattern string) (*regexp.Regexp, error) {
 		return v.(*regexp.Regexp), nil
 	}
 
-	re, err := regexp.Compile(pattern)
+	re, err := RegexpCompileFunc(pattern)
 	if err != nil {
 		return nil, err
 	}

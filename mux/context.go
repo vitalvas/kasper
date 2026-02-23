@@ -13,6 +13,12 @@ type routeContextKey struct{}
 // ctxKey is the single context key used to store both route and vars.
 var ctxKey = routeContextKey{}
 
+// routerCtxKeyType is an unexported type for the router context key.
+type routerCtxKeyType struct{}
+
+// routerCtxKey is the context key used to store the current router.
+var routerCtxKey = routerCtxKeyType{}
+
 // routeContext holds the matched route and extracted variables.
 type routeContext struct {
 	route *Route
@@ -35,6 +41,17 @@ func VarGet(r *http.Request, name string) (string, bool) {
 		return val, exists
 	}
 	return "", false
+}
+
+// CurrentRouter returns the innermost router that handled the current
+// request. For subrouters, this returns the subrouter, not the parent.
+// This only works when called inside the handler of the matched route
+// because the router is stored in the request context during ServeHTTP.
+func CurrentRouter(r *http.Request) *Router {
+	if router, ok := r.Context().Value(routerCtxKey).(*Router); ok {
+		return router
+	}
+	return nil
 }
 
 // CurrentRoute returns the matched route for the current request, if any.
@@ -143,6 +160,10 @@ var ErrMethodMismatch = errors.New("method is not allowed")
 // ErrNotFound is returned when no route match is found. Triggers 404 Not Found
 // per RFC 7231 Section 6.5.4.
 var ErrNotFound = errors.New("no matching route was found")
+
+// ErrMetadataKeyNotFound is returned when the specified metadata key
+// is not present in the route's metadata map.
+var ErrMetadataKeyNotFound = errors.New("key not found in metadata")
 
 // SkipRouter is used as a return value from WalkFunc to indicate that the
 // router that walk is about to descend into should be skipped.

@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -52,6 +53,8 @@ func NewRouter() *Router {
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Normalize the request path per RFC 3986 Section 5.2.4
 	// (removing dot segments) unless SkipClean is enabled.
+	// Sends a 301 Moved Permanently redirect to the cleaned path,
+	// matching gorilla/mux behavior.
 	if !r.skipClean {
 		path := req.URL.Path
 		if r.useEncodedPath {
@@ -61,8 +64,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			u := *req.URL
 			u.Path = cleaned
 			u.RawPath = ""
-			req = req.Clone(req.Context())
-			req.URL = &u
+			http.Redirect(w, req, u.String(), http.StatusMovedPermanently)
+			return
 		}
 	}
 
@@ -92,6 +95,16 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
+
+	// Store the innermost router in context. When the matched route
+	// belongs to a subrouter, use that subrouter; otherwise use this router.
+	matchedRouter := r
+	if match.Route != nil {
+		if router, ok := match.Route.parent.(*Router); ok {
+			matchedRouter = router
+		}
+	}
+	req = req.WithContext(context.WithValue(req.Context(), routerCtxKey, matchedRouter))
 
 	// Apply strict slash redirect if needed.
 	if match.Route != nil && match.Route.strictSlash {
@@ -131,13 +144,17 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 			continue
 		}
 		if route.Match(req, match) {
-			if match.Handler != nil && len(r.middlewares) > 0 {
-				if cached, ok := r.handlerCache.Load(match.Route); ok {
-					match.Handler = cached.(http.Handler)
-				} else {
-					wrapped := r.applyMiddleware(match.Handler)
-					r.handlerCache.Store(match.Route, wrapped)
-					match.Handler = wrapped
+			if match.Handler != nil {
+				needsWrap := len(r.middlewares) > 0 || len(match.Route.middlewares) > 0
+				if needsWrap {
+					if cached, ok := r.handlerCache.Load(match.Route); ok {
+						match.Handler = cached.(http.Handler)
+					} else {
+						wrapped := match.Route.applyMiddleware(match.Handler)
+						wrapped = r.applyMiddleware(wrapped)
+						r.handlerCache.Store(match.Route, wrapped)
+						match.Handler = wrapped
+					}
 				}
 			}
 			return true

@@ -82,7 +82,7 @@ func TestRouterServeHTTP(t *testing.T) {
 		r.ServeHTTP(w, req)
 	})
 
-	t.Run("cleans path by default", func(t *testing.T) {
+	t.Run("cleans path by redirecting", func(t *testing.T) {
 		r := NewRouter()
 		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, "ok")
@@ -91,7 +91,8 @@ func TestRouterServeHTTP(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users/../users", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, "/users", w.Header().Get("Location"))
 	})
 
 	t.Run("method not allowed returns 405", func(t *testing.T) {
@@ -643,7 +644,7 @@ func TestRouterMatchErrMethodMismatchFromMatcher(t *testing.T) {
 }
 
 func TestRouterServeHTTPEncodedPathClean(t *testing.T) {
-	t.Run("cleans encoded path with double slashes", func(t *testing.T) {
+	t.Run("redirects encoded path with dot segments", func(t *testing.T) {
 		r := NewRouter()
 		r.UseEncodedPath()
 		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
@@ -653,7 +654,8 @@ func TestRouterServeHTTPEncodedPathClean(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users/../users", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, "/users", w.Header().Get("Location"))
 	})
 }
 
@@ -1084,6 +1086,46 @@ func TestRouterUse(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Empty(t, w.Body.String())
+	})
+}
+
+func TestRouterCleanPathRedirect(t *testing.T) {
+	t.Run("redirects double slashes", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "//users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, "/users", w.Header().Get("Location"))
+	})
+
+	t.Run("does not redirect clean path", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("preserves query string in redirect", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "ok")
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/users/../users?page=1", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, "/users?page=1", w.Header().Get("Location"))
 	})
 }
 

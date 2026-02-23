@@ -12,6 +12,7 @@ HTTP request multiplexer with URL pattern matching.
 - Custom error handlers (404, 405)
 - Strict slash and path cleaning options
 - Typed JSON handler with generic request/response binding (`HandleJSON`)
+- Route metadata for attaching arbitrary key-value data
 - Walk function for route inspection
 
 ## Installation
@@ -103,6 +104,21 @@ category := vars["category"]
 id := vars["id"]
 ```
 
+Path templates must start with a slash (`/`). Templates without a leading slash will return an error:
+
+```go
+r.HandleFunc("/users/{id}", handler) // OK
+r.HandleFunc("users/{id}", handler)  // Error: path must start with a slash
+```
+
+Variable patterns must not contain capturing groups `(...)`. Capturing groups create extra submatches that misalign variable extraction. Use non-capturing groups `(?:...)` instead:
+
+```go
+r.HandleFunc("/{id:[0-9]+}", handler)        // OK: no groups
+r.HandleFunc("/{id:(?:ab|cd)}", handler)     // OK: non-capturing group
+r.HandleFunc("/{id:([0-9]+)}", handler)      // Error: capturing group
+```
+
 ## Pattern Macros
 
 Instead of writing full regex patterns, use named macros for common types:
@@ -163,6 +179,26 @@ r.HandleFunc("/secure", handler).Schemes("https")
 r.HandleFunc("/custom", handler).MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
     return r.Header.Get("X-Custom") != ""
 })
+```
+
+### Host Matching and Ports
+
+Host templates without a port pattern automatically strip the port from the request before matching. This means `{sub}.example.com` will match requests to `api.example.com:8080`:
+
+```go
+r.Host("{sub}.example.com").Path("/api").HandlerFunc(handler)
+// Matches: api.example.com, api.example.com:8080, api.example.com:443
+```
+
+To capture the port as a variable, include it in the host template:
+
+```go
+r.Host("{host:[^:]+}:{port}").Path("/api").HandlerFunc(handler)
+
+// In handler:
+vars := mux.Vars(r)
+host := vars["host"] // "example.com"
+port := vars["port"] // "8080"
 ```
 
 ## Subrouters
@@ -307,6 +343,27 @@ r.Use(mux.MiddlewareFunc(parentMiddleware))
 sub := r.PathPrefix("/api").Subrouter()
 sub.Use(mux.MiddlewareFunc(subMiddleware))
 // Order: parentMiddleware -> subMiddleware -> handler
+```
+
+### Route-Level Middleware
+
+Middleware can be applied to individual routes using `route.Use()`. Route middleware wraps the handler inside router middleware (innermost layer):
+
+```go
+route := r.HandleFunc("/admin", handler)
+route.Use(func(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // route-specific logic
+        next.ServeHTTP(w, r)
+    })
+})
+// Order: router middleware -> route middleware -> handler
+```
+
+`GetHandlerWithMiddlewares` returns the handler wrapped with route-level middleware only (not router middleware). Returns `nil` if no handler is set:
+
+```go
+h := route.GetHandlerWithMiddlewares()
 ```
 
 ## Named Routes and URL Building
@@ -499,6 +556,51 @@ Routes can be marked as build-only, used only for URL building and not for reque
 ```go
 r.HandleFunc("/old/{id}", handler).Name("old").BuildOnly()
 url, _ := r.Get("old").URL("id", "42")
+```
+
+## Route Metadata
+
+Routes support arbitrary key-value metadata for attaching custom information (e.g. permissions, rate limits, feature flags) that can be read at runtime:
+
+```go
+r.HandleFunc("/admin/users", handler).
+    Methods(http.MethodGet).
+    Metadata("role", "admin").
+    Metadata("rateLimit", 100)
+```
+
+Read metadata inside a handler via `CurrentRoute`:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    route := mux.CurrentRoute(r)
+    role, err := route.GetMetadataValue("role")
+    if err != nil {
+        // key not found: err == mux.ErrMetadataKeyNotFound
+    }
+}
+```
+
+Use `GetMetadataValueOr` for a fallback when the key may not exist:
+
+```go
+limit := route.GetMetadataValueOr("rateLimit", 60)
+```
+
+| Method | Description |
+|--------|-------------|
+| `Metadata(key, value any)` | Set a key-value pair (fluent, chainable) |
+| `GetMetadata()` | Return the full metadata map (`nil` if unset) |
+| `MetadataContains(key any)` | Check whether a key exists |
+| `GetMetadataValue(key any)` | Get value or `ErrMetadataKeyNotFound` |
+| `GetMetadataValueOr(key, fallback any)` | Get value with fallback default |
+
+## Custom Regexp Compiler
+
+By default, route patterns are compiled with `regexp.Compile`. Override `RegexpCompileFunc` to use a different compiler:
+
+```go
+mux.RegexpCompileFunc = regexp.CompilePOSIX
 ```
 
 ## Walk

@@ -315,6 +315,22 @@
 //	r.HandleFunc("/old/{id}", handler).Name("old").BuildOnly()
 //	url, _ := r.Get("old").URL("id", "42")
 //
+// # Route Metadata
+//
+// Routes support arbitrary key-value metadata for attaching custom
+// information that can be read at runtime:
+//
+//	r.HandleFunc("/admin/users", handler).
+//	    Methods(http.MethodGet).
+//	    Metadata("role", "admin").
+//	    Metadata("rateLimit", 100)
+//
+// Read metadata inside a handler via CurrentRoute:
+//
+//	route := mux.CurrentRoute(r)
+//	role, err := route.GetMetadataValue("role")
+//	limit := route.GetMetadataValueOr("rateLimit", 60)
+//
 // # Walking Routes
 //
 // Walk traverses the router and all its subrouters, calling a function for

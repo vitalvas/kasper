@@ -1,7 +1,6 @@
 package mux
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -43,6 +42,9 @@ type routeRegexp struct {
 	// beyond regex (e.g. length limits), requiring per-variable validation
 	// during route matching.
 	needsVarValidation bool
+	// wildcardHostPort indicates that the host template has no port
+	// pattern, so the port should be stripped before matching.
+	wildcardHostPort bool
 	// wildcard indicates a prefix match (no $ anchor).
 	wildcard bool
 	// queryKey is the query parameter key (only for query type).
@@ -89,8 +91,8 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 	}
 
 	var (
-		pattern  bytes.Buffer
-		reverse  bytes.Buffer
+		pattern  strings.Builder
+		reverse  strings.Builder
 		varsN    []string
 		varsR    []varMatcher
 		end      int
@@ -166,6 +168,17 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		return nil, err
 	}
 
+	// Reject capturing groups in variable patterns. They misalign
+	// submatch indices with variable names. Non-capturing groups
+	// (?:...) are fine.
+	if reg.NumSubexp() != len(varsN) {
+		return nil, fmt.Errorf(
+			"mux: route %q contains capture groups in its regexp; "+
+				"use non-capturing groups instead: e.g. (?:pattern) instead of (pattern)",
+			tpl,
+		)
+	}
+
 	// Check if any variable matcher requires validation beyond regex
 	// (e.g. length constraints).
 	needsValidation := false
@@ -175,6 +188,10 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 			break
 		}
 	}
+
+	// Host templates without a colon literal have no port pattern,
+	// so the port must be stripped from the request host before matching.
+	isWildcardHostPort := typ == regexpTypeHost && !strings.Contains(pattern.String(), ":")
 
 	return &routeRegexp{
 		template:           template,
@@ -187,6 +204,7 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 		varsN:              varsN,
 		varsR:              varsR,
 		needsVarValidation: needsValidation,
+		wildcardHostPort:   isWildcardHostPort,
 		wildcard:           wildcard,
 		queryKey:           queryKey,
 	}, nil
@@ -202,6 +220,9 @@ func (r *routeRegexp) Match(req *http.Request, m *RouteMatch) bool {
 	}
 	if r.matchHost {
 		host := getHost(req)
+		if r.wildcardHostPort {
+			host = stripPort(host)
+		}
 		return r.matchAndValidate(host)
 	}
 
@@ -237,6 +258,8 @@ func (r *routeRegexp) matchAndValidate(input string) bool {
 }
 
 // url builds a URL part from the template and the given variable values.
+// For query-type regexps, variable values are percent-encoded per
+// RFC 3986 Section 3.4.
 func (r *routeRegexp) url(values map[string]string) (string, error) {
 	urlValues := make([]interface{}, len(r.varsN))
 	for i, name := range r.varsN {
@@ -246,6 +269,9 @@ func (r *routeRegexp) url(values map[string]string) (string, error) {
 		}
 		if !r.varsR[i].MatchString(v) {
 			return "", fmt.Errorf("mux: variable %q doesn't match, expected %q", name, r.varsR[i].String())
+		}
+		if r.matchQuery {
+			v = url.QueryEscape(v)
 		}
 		urlValues[i] = v
 	}
@@ -327,14 +353,24 @@ func checkDuplicateVars(vars []string) error {
 	return nil
 }
 
-// getHost returns the lowercased hostname without port per
+// getHost returns the lowercased host (including port if present) per
 // RFC 7230 Section 5.4 (Host header field, host:port format).
+// For absolute-form requests (RFC 7230 Section 5.3.2), the host
+// is read from the request URL instead of the Host header.
 func getHost(r *http.Request) string {
 	host := r.Host
-	if i := strings.Index(host, ":"); i != -1 {
-		host = host[:i]
+	if r.URL.IsAbs() {
+		host = r.URL.Host
 	}
 	return strings.ToLower(host)
+}
+
+// stripPort removes the port portion from a host:port string.
+func stripPort(host string) string {
+	if i := strings.Index(host, ":"); i != -1 {
+		return host[:i]
+	}
+	return host
 }
 
 // routeRegexpGroup groups host, path, and query regexps for a route.
@@ -367,6 +403,9 @@ func (v *routeRegexpGroup) setMatch(req *http.Request, m *RouteMatch, _ *Route) 
 
 	if v.host != nil && len(v.host.varsN) > 0 {
 		host := getHost(req)
+		if v.host.wildcardHostPort {
+			host = stripPort(host)
+		}
 		v.host.setVars(host, m.Vars)
 	}
 

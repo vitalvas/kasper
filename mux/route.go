@@ -28,9 +28,11 @@ type Route struct {
 	parent      parentRoute
 	handler     http.Handler
 	matchers    []matcher
+	middlewares []MiddlewareFunc
 	regexp      routeRegexpGroup
 	name        string
 	err         error
+	metadata    map[any]any
 	namedRoutes map[string]*Route
 	buildOnly   bool
 
@@ -145,6 +147,13 @@ func (r *Route) addMatcher(m matcher) *Route {
 func (r *Route) addRegexpMatcher(tpl string, typ regexpType) error {
 	if r.err != nil {
 		return r.err
+	}
+
+	// Path and prefix templates must start with a slash.
+	if typ == regexpTypePath || typ == regexpTypePrefix {
+		if len(tpl) > 0 && tpl[0] != '/' {
+			return fmt.Errorf("mux: path must start with a slash, got %q", tpl)
+		}
 	}
 
 	// For path/prefix, prepend parent's path template if exists.
@@ -352,6 +361,46 @@ func (r *Route) IsBuildOnly() bool {
 	return r.buildOnly
 }
 
+// Metadata sets a key-value pair on the route's metadata map.
+func (r *Route) Metadata(key any, value any) *Route {
+	if r.metadata == nil {
+		r.metadata = make(map[any]any)
+	}
+	r.metadata[key] = value
+	return r
+}
+
+// GetMetadata returns the metadata map for the route.
+func (r *Route) GetMetadata() map[any]any {
+	return r.metadata
+}
+
+// MetadataContains reports whether the key is present in the metadata map.
+func (r *Route) MetadataContains(key any) bool {
+	_, ok := r.metadata[key]
+	return ok
+}
+
+// GetMetadataValue returns the value of a specific key in the metadata map.
+// If the key is not present, ErrMetadataKeyNotFound is returned.
+func (r *Route) GetMetadataValue(key any) (any, error) {
+	value, ok := r.metadata[key]
+	if !ok {
+		return nil, ErrMetadataKeyNotFound
+	}
+	return value, nil
+}
+
+// GetMetadataValueOr returns the value of a specific key in the metadata map.
+// If the key is not present, the fallback value is returned.
+func (r *Route) GetMetadataValueOr(key any, fallback any) any {
+	value, ok := r.metadata[key]
+	if !ok {
+		return fallback
+	}
+	return value
+}
+
 // Subrouter creates a new Router for the route.
 func (r *Route) Subrouter() *Router {
 	router := &Router{
@@ -388,6 +437,31 @@ func (r *Route) BuildVarsFunc(f BuildVarsFunc) *Route {
 	return r
 }
 
+// Use appends MiddlewareFuncs to the route's middleware chain.
+// Route middleware wraps the handler before router middleware (innermost).
+// Unlike Router.Use, this method returns the route for chaining.
+func (r *Route) Use(mwf ...MiddlewareFunc) *Route {
+	r.middlewares = append(r.middlewares, mwf...)
+	return r
+}
+
+// applyMiddleware wraps the handler with all route-level middleware.
+func (r *Route) applyMiddleware(handler http.Handler) http.Handler {
+	for i := len(r.middlewares) - 1; i >= 0; i-- {
+		handler = r.middlewares[i].Middleware(handler)
+	}
+	return handler
+}
+
+// GetHandlerWithMiddlewares returns the handler wrapped with route-level
+// middleware only (not router middleware). Returns nil if no handler is set.
+func (r *Route) GetHandlerWithMiddlewares() http.Handler {
+	if r.handler == nil {
+		return nil
+	}
+	return r.applyMiddleware(r.handler)
+}
+
 // --- URL Building ---
 
 // URL builds a URL for the route per RFC 3986 Section 5.3 (component
@@ -417,10 +491,23 @@ func (r *Route) URL(pairs ...string) (*url.URL, error) {
 			return nil, err
 		}
 	}
+	var rawQuery string
+	if len(r.regexp.queries) > 0 {
+		queryParts := make([]string, 0, len(r.regexp.queries))
+		for _, q := range r.regexp.queries {
+			qv, qErr := q.url(values)
+			if qErr != nil {
+				return nil, qErr
+			}
+			queryParts = append(queryParts, q.queryKey+"="+qv)
+		}
+		rawQuery = strings.Join(queryParts, "&")
+	}
 	return &url.URL{
-		Scheme: scheme,
-		Host:   host,
-		Path:   path,
+		Scheme:   scheme,
+		Host:     host,
+		Path:     path,
+		RawQuery: rawQuery,
 	}, nil
 }
 
@@ -622,7 +709,8 @@ func (r *Route) GetSchemes() ([]string, error) {
 	return nil, errors.New("mux: route doesn't have schemes")
 }
 
-// GetVarNames returns the variable names for the route.
+// GetVarNames returns the variable names for the route, including
+// host, path, and query variable names.
 func (r *Route) GetVarNames() ([]string, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -633,6 +721,9 @@ func (r *Route) GetVarNames() ([]string, error) {
 	}
 	if r.regexp.path != nil {
 		varNames = append(varNames, r.regexp.path.varsN...)
+	}
+	for _, q := range r.regexp.queries {
+		varNames = append(varNames, q.varsN...)
 	}
 	return varNames, nil
 }
