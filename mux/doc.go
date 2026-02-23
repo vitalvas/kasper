@@ -247,6 +247,55 @@
 //	    mux.ResponseXML(w, http.StatusOK, data)
 //	}
 //
+// # Typed JSON Handlers
+//
+// HandleJSON combines [BindJSON] and [ResponseJSON] into a single generic
+// handler that decodes the request body, calls a typed function, and encodes
+// the result as JSON:
+//
+//	type CreateReq struct {
+//	    Name string `json:"name"`
+//	}
+//
+//	type CreateResp struct {
+//	    ID   string `json:"id"`
+//	    Name string `json:"name"`
+//	}
+//
+//	h := mux.HandleJSON(
+//	    func(w http.ResponseWriter, r *http.Request, in CreateReq) (CreateResp, error) {
+//	        id := uuid.New().String()
+//	        return CreateResp{ID: id, Name: in.Name}, nil
+//	    },
+//	    func(w http.ResponseWriter, r *http.Request, err error) {
+//	        http.Error(w, err.Error(), http.StatusBadRequest)
+//	    },
+//	)
+//	r.Handle("/users", h).Methods(http.MethodPost)
+//
+// The first argument is the handler function that receives the decoded
+// request body and returns a response value. The second argument is an
+// error callback invoked when JSON decoding fails or the handler returns
+// an error. On success the response is written as JSON with status 200.
+//
+// HandleJSONResponse is the same but without request body decoding,
+// suitable for GET or DELETE endpoints that only return JSON:
+//
+//	h := mux.HandleJSONResponse(
+//	    func(w http.ResponseWriter, r *http.Request) (UserResp, error) {
+//	        id, _ := mux.VarGet(r, "id")
+//	        user, err := db.GetUser(id)
+//	        if err != nil {
+//	            return UserResp{}, err
+//	        }
+//	        return UserResp{ID: user.ID, Name: user.Name}, nil
+//	    },
+//	    func(w http.ResponseWriter, r *http.Request, err error) {
+//	        http.Error(w, err.Error(), http.StatusNotFound)
+//	    },
+//	)
+//	r.Handle("/users/{id:uuid}", h).Methods(http.MethodGet)
+//
 // # Build-Only Routes
 //
 // Routes can be marked as build-only, meaning they are used only for URL

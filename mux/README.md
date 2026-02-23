@@ -11,6 +11,7 @@ HTTP request multiplexer with URL pattern matching.
 - Named routes with URL building
 - Custom error handlers (404, 405)
 - Strict slash and path cleaning options
+- Typed JSON handler with generic request/response binding (`HandleJSON`)
 - Walk function for route inspection
 
 ## Installation
@@ -430,6 +431,53 @@ r.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 |----------|--------------|
 | `ResponseJSON` | `application/json` |
 | `ResponseXML` | `application/xml` |
+
+## Typed JSON Handlers
+
+`HandleJSON` combines `BindJSON` and `ResponseJSON` into a single generic handler that decodes the request body, calls a typed function, and encodes the result as JSON with status 200. The caller provides an error callback to control how errors are mapped to HTTP responses.
+
+```go
+type CreateReq struct {
+    Name string `json:"name"`
+}
+
+type CreateResp struct {
+    ID   string `json:"id"`
+    Name string `json:"name"`
+}
+
+h := mux.HandleJSON(
+    func(w http.ResponseWriter, r *http.Request, in CreateReq) (CreateResp, error) {
+        id := uuid.New().String()
+        return CreateResp{ID: id, Name: in.Name}, nil
+    },
+    func(w http.ResponseWriter, r *http.Request, err error) {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+    },
+)
+r.Handle("/users", h).Methods(http.MethodPost)
+```
+
+The handler function receives `http.ResponseWriter` and `*http.Request` so it can access route variables, headers, and set response headers. The error callback is invoked when JSON decoding fails or the handler returns a non-nil error.
+
+`HandleJSONResponse` is the same but without request body decoding, suitable for GET or DELETE endpoints that only return JSON:
+
+```go
+h := mux.HandleJSONResponse(
+    func(w http.ResponseWriter, r *http.Request) (UserResp, error) {
+        id, _ := mux.VarGet(r, "id")
+        user, err := db.GetUser(id)
+        if err != nil {
+            return UserResp{}, err
+        }
+        return UserResp{ID: user.ID, Name: user.Name}, nil
+    },
+    func(w http.ResponseWriter, r *http.Request, err error) {
+        http.Error(w, err.Error(), http.StatusNotFound)
+    },
+)
+r.Handle("/users/{id:uuid}", h).Methods(http.MethodGet)
+```
 
 ## Build-Only Routes
 
