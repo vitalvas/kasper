@@ -342,7 +342,11 @@ Routes expose methods to inspect their configuration:
 tpl, _ := route.GetPathTemplate()         // e.g. "/articles/{category}/{id}"
 re, _ := route.GetPathRegexp()            // compiled path regexp string
 host, _ := route.GetHostTemplate()        // e.g. "{subdomain}.example.com"
+hostRe, _ := route.GetHostRegexp()        // compiled host regexp string
 methods, _ := route.GetMethods()          // e.g. ["GET", "POST"]
+schemes, _ := route.GetSchemes()          // e.g. ["https"]
+headers, _ := route.GetHeaders()          // e.g. {"Content-Type": "application/json"}
+hre, _ := route.GetHeadersRegexp()        // compiled header regexp map
 queries, _ := route.GetQueriesTemplates() // e.g. ["q={query}"]
 qre, _ := route.GetQueriesRegexp()        // compiled query regexp strings
 vars, _ := route.GetVarNames()            // e.g. ["category", "id"]

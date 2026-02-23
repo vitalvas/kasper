@@ -520,6 +520,17 @@ func (r *Route) GetHostTemplate() (string, error) {
 	return r.regexp.host.template, nil
 }
 
+// GetHostRegexp returns the compiled regexp for the route host, if defined.
+func (r *Route) GetHostRegexp() (string, error) {
+	if r.err != nil {
+		return "", r.err
+	}
+	if r.regexp.host == nil {
+		return "", errors.New("mux: route doesn't have a host")
+	}
+	return r.regexp.host.regexp.String(), nil
+}
+
 // GetMethods returns the methods the route matches against.
 func (r *Route) GetMethods() ([]string, error) {
 	if r.err != nil {
@@ -561,6 +572,48 @@ func (r *Route) GetQueriesRegexp() ([]string, error) {
 		regexps[i] = q.regexp.String()
 	}
 	return regexps, nil
+}
+
+// GetHeaders returns the header matchers for the route as a map of
+// header names to expected values. Header names are in canonical form.
+func (r *Route) GetHeaders() (map[string]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, m := range r.matchers {
+		if headers, ok := m.(headerMatcher); ok {
+			return map[string]string(headers), nil
+		}
+	}
+	return nil, errors.New("mux: route doesn't have headers")
+}
+
+// GetHeadersRegexp returns the header regex matchers for the route as a map
+// of header names to compiled regular expressions. Header names are in
+// canonical form.
+func (r *Route) GetHeadersRegexp() (map[string]*regexp.Regexp, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, m := range r.matchers {
+		if headers, ok := m.(headerRegexMatcher); ok {
+			return map[string]*regexp.Regexp(headers), nil
+		}
+	}
+	return nil, errors.New("mux: route doesn't have header regexps")
+}
+
+// GetSchemes returns the schemes the route matches against.
+func (r *Route) GetSchemes() ([]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, m := range r.matchers {
+		if schemes, ok := m.(schemeMatcher); ok {
+			return []string(schemes), nil
+		}
+	}
+	return nil, errors.New("mux: route doesn't have schemes")
 }
 
 // GetVarNames returns the variable names for the route.

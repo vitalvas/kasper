@@ -221,6 +221,16 @@ func TestRouteInspection(t *testing.T) {
 		assert.Equal(t, "{sub}.example.com", tpl)
 	})
 
+	t.Run("GetHostRegexp", func(t *testing.T) {
+		router := NewRouter()
+		route := router.Host("{sub}.example.com")
+
+		re, err := route.GetHostRegexp()
+		require.NoError(t, err)
+		assert.NotEmpty(t, re)
+		assert.Contains(t, re, "example")
+	})
+
 	t.Run("GetMethods", func(t *testing.T) {
 		router := NewRouter()
 		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
@@ -236,6 +246,61 @@ func TestRouteInspection(t *testing.T) {
 		router := NewRouter()
 		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
 		_, err := route.GetMethods()
+		assert.Error(t, err)
+	})
+
+	t.Run("GetHeaders", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/api", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Headers("Content-Type", "application/json", "Accept", "text/html")
+
+		headers, err := route.GetHeaders()
+		require.NoError(t, err)
+		assert.Equal(t, "application/json", headers["Content-Type"])
+		assert.Equal(t, "text/html", headers["Accept"])
+	})
+
+	t.Run("GetHeaders errors when no headers", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+		_, err := route.GetHeaders()
+		assert.Error(t, err)
+	})
+
+	t.Run("GetHeadersRegexp", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/api", func(_ http.ResponseWriter, _ *http.Request) {}).
+			HeadersRegexp("Content-Type", "application/.*")
+
+		headers, err := route.GetHeadersRegexp()
+		require.NoError(t, err)
+		re, ok := headers["Content-Type"]
+		require.True(t, ok)
+		assert.True(t, re.MatchString("application/json"))
+		assert.False(t, re.MatchString("text/html"))
+	})
+
+	t.Run("GetHeadersRegexp errors when no header regexps", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+		_, err := route.GetHeadersRegexp()
+		assert.Error(t, err)
+	})
+
+	t.Run("GetSchemes", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/secure", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Schemes("https", "wss")
+
+		schemes, err := route.GetSchemes()
+		require.NoError(t, err)
+		assert.Equal(t, []string{"https", "wss"}, schemes)
+	})
+
+	t.Run("GetSchemes errors when no schemes", func(t *testing.T) {
+		router := NewRouter()
+		route := router.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+		_, err := route.GetSchemes()
 		assert.Error(t, err)
 	})
 
@@ -546,8 +611,20 @@ func TestRouteInspectionWithErrors(t *testing.T) {
 			fn:   func(r *Route) (any, error) { return r.GetHostTemplate() },
 		},
 		{
+			name: "GetHostRegexp with route error",
+			fn:   func(r *Route) (any, error) { return r.GetHostRegexp() },
+		},
+		{
 			name: "GetMethods with route error",
 			fn:   func(r *Route) (any, error) { return r.GetMethods() },
+		},
+		{
+			name: "GetHeaders with route error",
+			fn:   func(r *Route) (any, error) { return r.GetHeaders() },
+		},
+		{
+			name: "GetHeadersRegexp with route error",
+			fn:   func(r *Route) (any, error) { return r.GetHeadersRegexp() },
 		},
 		{
 			name: "GetQueriesTemplates with route error",
@@ -556,6 +633,10 @@ func TestRouteInspectionWithErrors(t *testing.T) {
 		{
 			name: "GetQueriesRegexp with route error",
 			fn:   func(r *Route) (any, error) { return r.GetQueriesRegexp() },
+		},
+		{
+			name: "GetSchemes with route error",
+			fn:   func(r *Route) (any, error) { return r.GetSchemes() },
 		},
 		{
 			name: "GetVarNames with route error",
@@ -756,6 +837,13 @@ func TestRouteInspectionMissingTemplate(t *testing.T) {
 				return r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
 			},
 			fn: func(r *Route) (any, error) { return r.GetHostTemplate() },
+		},
+		{
+			name: "GetHostRegexp without host",
+			setup: func(r *Router) *Route {
+				return r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {})
+			},
+			fn: func(r *Route) (any, error) { return r.GetHostRegexp() },
 		},
 		{
 			name: "GetQueriesTemplates without queries",
