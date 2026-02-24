@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/vitalvas/kasper/compare/v0.3.0...v0.4.0) (2026-02-24)
+
+
+### Features
+
+* **mux:** add Route() and Group() for inline subrouter definitions ([f020a1e](https://github.com/vitalvas/kasper/commit/f020a1eaf297328edb5489c2b89f3b798d765632))
+* **mux:** add With() for inline middleware declaration ([1e235c1](https://github.com/vitalvas/kasper/commit/1e235c100e33223b5cef196614a613950745c40b))
+
+
+### Bug Fixes
+
+* linter warnings ([c70d7b3](https://github.com/vitalvas/kasper/commit/c70d7b3e36d30e31f06187d3dd45c26ee354a271))
+
 ## [0.3.0](https://github.com/vitalvas/kasper/compare/v0.2.0...v0.3.0) (2026-02-23)
 
 
