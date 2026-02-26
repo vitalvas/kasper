@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/vitalvas/kasper/compare/v0.4.0...v0.4.1) (2026-02-26)
+
+
+### Bug Fixes
+
+* **websocket:** address 24 bugs across the websocket package ([3390e6b](https://github.com/vitalvas/kasper/commit/3390e6b38cf87e34b1886e2458efab7428ae8c75))
+* **websocket:** reject unrequested extensions and improve test coverage to 99.2% ([b7a023c](https://github.com/vitalvas/kasper/commit/b7a023c4b4e3c14e6ada89d7e28031d548844977))
+
 ## [0.4.0](https://github.com/vitalvas/kasper/compare/v0.3.0...v0.4.0) (2026-02-24)
 
 
