@@ -15,10 +15,7 @@ const (
 	defaultCompressionLevel = 1
 )
 
-var (
-	flateReaderPool sync.Pool
-	flateWriterPool sync.Pool
-)
+var flateReaderPool sync.Pool
 
 type flateReadWrapper struct {
 	fr io.ReadCloser
@@ -60,18 +57,8 @@ func putFlateReader(fr io.ReadCloser) {
 	flateReaderPool.Put(fr)
 }
 
-func getFlateWriter(w io.Writer, level int) *flate.Writer {
-	fw, ok := flateWriterPool.Get().(*flate.Writer)
-	if ok && fw != nil {
-		fw.Reset(w)
-		return fw
-	}
-	fw, _ = flate.NewWriter(w, level)
-	return fw
-}
-
-func putFlateWriter(fw *flate.Writer) {
-	flateWriterPool.Put(fw)
+func getFlateWriter(w io.Writer, level int) (*flate.Writer, error) {
+	return flate.NewWriter(w, level)
 }
 
 type compressedReader struct {
@@ -81,7 +68,7 @@ type compressedReader struct {
 
 func newCompressedReader(r io.Reader) *compressedReader {
 	return &compressedReader{
-		r: io.MultiReader(r, suffixReader{}),
+		r: io.MultiReader(r, newSuffixReader()),
 	}
 }
 
@@ -102,18 +89,28 @@ func (cr *compressedReader) Close() error {
 
 // suffixReader appends the DEFLATE empty block suffix (0x00 0x00 0xff 0xff)
 // required by RFC 7692, section 7.2.2 for decompression.
-type suffixReader struct{}
+// It handles reads of any buffer size, including 1 byte.
+type suffixReader struct {
+	pos    int
+	suffix [4]byte
+}
 
-func (suffixReader) Read(p []byte) (int, error) {
-	if len(p) < 4 {
-		return 0, io.ErrShortBuffer
+func newSuffixReader() *suffixReader {
+	return &suffixReader{
+		suffix: [4]byte{0x00, 0x00, 0xff, 0xff},
 	}
-	// Append 0x00 0x00 0xff 0xff per RFC 7692, section 7.2.2.
-	p[0] = 0x00
-	p[1] = 0x00
-	p[2] = 0xff
-	p[3] = 0xff
-	return 4, io.EOF
+}
+
+func (s *suffixReader) Read(p []byte) (int, error) {
+	if s.pos >= len(s.suffix) {
+		return 0, io.EOF
+	}
+	n := copy(p, s.suffix[s.pos:])
+	s.pos += n
+	if s.pos >= len(s.suffix) {
+		return n, io.EOF
+	}
+	return n, nil
 }
 
 type compressedWriter struct {
@@ -132,7 +129,11 @@ func newCompressedWriter(c *Conn, level int) *compressedWriter {
 
 func (cw *compressedWriter) Write(p []byte) (int, error) {
 	if cw.fw == nil {
-		cw.fw = getFlateWriter(&bufferWriter{cw: cw}, cw.level)
+		fw, err := getFlateWriter(&bufferWriter{cw: cw}, cw.level)
+		if err != nil {
+			return 0, err
+		}
+		cw.fw = fw
 	}
 	return cw.fw.Write(p)
 }
@@ -142,7 +143,6 @@ func (cw *compressedWriter) Close() error {
 		if err := cw.fw.Close(); err != nil {
 			return err
 		}
-		putFlateWriter(cw.fw)
 		cw.fw = nil
 	}
 

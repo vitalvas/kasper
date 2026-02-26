@@ -5,9 +5,11 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -187,9 +189,40 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	return conn, nil
 }
 
+// http2ConnAdapter adapts an HTTP/2 stream into an io.ReadWriteCloser
+// for use with WebSocket connections. It reads from the request body
+// and writes to the response writer with automatic flushing.
+type http2ConnAdapter struct {
+	body io.ReadCloser
+	w    http.ResponseWriter
+	rc   *http.ResponseController
+}
+
+func (a *http2ConnAdapter) Read(p []byte) (int, error) {
+	return a.body.Read(p)
+}
+
+func (a *http2ConnAdapter) Write(p []byte) (int, error) {
+	n, err := a.w.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	if fErr := a.rc.Flush(); fErr != nil {
+		return n, fErr
+	}
+
+	return n, nil
+}
+
+func (a *http2ConnAdapter) Close() error {
+	return a.body.Close()
+}
+
 // upgradeHTTP2 handles WebSocket upgrade over HTTP/2 per RFC 8441.
+// Uses an adapter wrapping r.Body and w instead of Hijack, since
+// HTTP/2 connections do not support hijacking.
 func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
-	// RFC 8441: The :protocol pseudo-header must be "websocket".
 	if r.Proto != "websocket" {
 		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: invalid :protocol for HTTP/2"))
 		return nil, ErrBadHandshake
@@ -208,16 +241,17 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 
 	// Negotiate permessage-deflate extension per RFC 7692.
 	var compress bool
+	var compressionParams string
 	if u.EnableCompression {
 		for _, ext := range parseExtensions(r.Header) {
 			if ext.name == "permessage-deflate" {
 				compress = true
+				compressionParams = negotiateCompressionParams(ext.params)
 				break
 			}
 		}
 	}
 
-	// Set response headers.
 	for k, vs := range responseHeader {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -229,20 +263,24 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 	}
 
 	if compress {
-		w.Header().Set("Sec-WebSocket-Extensions", "permessage-deflate; server_no_context_takeover; client_no_context_takeover")
+		w.Header().Set("Sec-WebSocket-Extensions", "permessage-deflate"+compressionParams)
 	}
 
 	// RFC 8441: Response is 200 OK, not 101 Switching Protocols.
 	w.WriteHeader(http.StatusOK)
 
-	// Get the underlying connection via http.ResponseController.
 	rc := http.NewResponseController(w)
-	netConn, brw, err := rc.Hijack()
-	if err != nil {
+	if err := rc.Flush(); err != nil {
 		return nil, err
 	}
 
-	conn := newConnFromBufio(netConn, brw, true, u.ReadBufferSize, u.WriteBufferSize, u.WriteBufferPool)
+	rwc := &http2ConnAdapter{
+		body: r.Body,
+		w:    w,
+		rc:   rc,
+	}
+
+	conn := newConnFromRWC(rwc, nil, true, u.ReadBufferSize, u.WriteBufferSize, u.WriteBufferPool)
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
 
@@ -388,7 +426,19 @@ func negotiateCompressionParams(clientParams map[string]string) string {
 		params = append(params, "client_max_window_bits=15")
 	}
 
-	// Build the response string.
+	// Handle server_max_window_bits per RFC 7692, section 7.1.2.1.
+	// Valid values are 8-15. If no value is specified, use the default (15).
+	if v, ok := clientParams["server_max_window_bits"]; ok {
+		if v == "" {
+			params = append(params, "server_max_window_bits=15")
+		} else {
+			bits, err := strconv.Atoi(v)
+			if err == nil && bits >= 8 && bits <= 15 {
+				params = append(params, "server_max_window_bits="+v)
+			}
+		}
+	}
+
 	if len(params) == 0 {
 		return ""
 	}

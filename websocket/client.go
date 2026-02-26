@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -143,14 +144,14 @@ func (d *Dialer) hasCustomDial(client *http.Client) bool {
 
 // dialHTTP1 establishes a WebSocket connection over HTTP/1.1 per RFC 6455.
 // Uses http.Client for simple cases without proxy or custom dial.
+// Note: this relies on resp.Body implementing io.ReadWriteCloser for 101 responses,
+// which is standard Go http.Client behavior but not formally guaranteed.
 func (d *Dialer) dialHTTP1(ctx context.Context, client *http.Client, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
-	// Generate 16-byte random challenge key per RFC 6455, section 4.1.
 	challengeKey, err := generateChallengeKey()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Build handshake request per RFC 6455, section 4.1.
 	req := &http.Request{
 		Method: http.MethodGet,
 		URL:    u,
@@ -159,27 +160,7 @@ func (d *Dialer) dialHTTP1(ctx context.Context, client *http.Client, u *url.URL,
 	}
 	req = req.WithContext(ctx)
 
-	// Copy request headers.
-	for k, vs := range requestHeader {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-
-	// Set required headers per RFC 6455, section 4.1.
-	req.Header.Set("Upgrade", "websocket")
-	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Sec-WebSocket-Key", challengeKey)
-	req.Header.Set("Sec-WebSocket-Version", websocketVersion)
-
-	if len(d.Subprotocols) > 0 {
-		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(d.Subprotocols, ", "))
-	}
-
-	// Request permessage-deflate extension per RFC 7692.
-	if d.EnableCompression {
-		req.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
-	}
+	d.buildHandshakeHeaders(req, requestHeader, challengeKey)
 
 	if d.Jar != nil {
 		for _, cookie := range d.Jar.Cookies(u) {
@@ -187,7 +168,13 @@ func (d *Dialer) dialHTTP1(ctx context.Context, client *http.Client, u *url.URL,
 		}
 	}
 
-	// Send the request.
+	// Apply HandshakeTimeout via context if configured.
+	if d.HandshakeTimeout > 0 {
+		timeoutCtx, cancel := context.WithTimeout(ctx, d.HandshakeTimeout)
+		defer cancel()
+		req = req.WithContext(timeoutCtx)
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -199,7 +186,6 @@ func (d *Dialer) dialHTTP1(ctx context.Context, client *http.Client, u *url.URL,
 		}
 	}
 
-	// Validate and create connection.
 	return d.finishHTTP1Handshake(resp, challengeKey)
 }
 
@@ -411,14 +397,13 @@ func (d *Dialer) dialNet(ctx context.Context, transport *http.Transport, isTLS b
 }
 
 // doHandshake performs the client-side opening handshake per RFC 6455, section 4.1.
+// Used for connections established via raw net.Conn (proxy/custom dial paths).
 func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, requestHeader http.Header, _ *tls.Config) (*Conn, *http.Response, error) {
-	// Generate 16-byte random challenge key per RFC 6455, section 4.1.
 	challengeKey, err := generateChallengeKey()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Build handshake request per RFC 6455, section 4.1.
 	req := &http.Request{
 		Method:     http.MethodGet,
 		URL:        u,
@@ -429,26 +414,7 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 		Host:       u.Host,
 	}
 
-	for k, vs := range requestHeader {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-
-	// Set required headers per RFC 6455, section 4.1.
-	req.Header.Set("Upgrade", "websocket")
-	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Sec-WebSocket-Key", challengeKey)
-	req.Header.Set("Sec-WebSocket-Version", websocketVersion)
-
-	if len(d.Subprotocols) > 0 {
-		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(d.Subprotocols, ", "))
-	}
-
-	// Request permessage-deflate extension per RFC 7692.
-	if d.EnableCompression {
-		req.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
-	}
+	d.buildHandshakeHeaders(req, requestHeader, challengeKey)
 
 	if d.Jar != nil {
 		for _, cookie := range d.Jar.Cookies(u) {
@@ -472,51 +438,10 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 		}
 	}
 
-	// Validate server response per RFC 6455, section 4.1.
-	if resp.StatusCode != http.StatusSwitchingProtocols {
+	subprotocol, compress, err := d.validateHTTP1Response(resp, challengeKey)
+	if err != nil {
 		defer resp.Body.Close()
-		return nil, resp, ErrBadHandshake
-	}
-
-	// Validate Upgrade header per RFC 6455, section 4.2.2.
-	if !strings.EqualFold(resp.Header.Get("Upgrade"), "websocket") {
-		return nil, resp, ErrBadHandshake
-	}
-
-	// Validate Connection header per RFC 6455, section 4.2.2.
-	if !strings.EqualFold(resp.Header.Get("Connection"), "upgrade") {
-		return nil, resp, ErrBadHandshake
-	}
-
-	// Validate Sec-WebSocket-Accept per RFC 6455, section 4.2.2, item 5.4.
-	expectedAccept := computeAcceptKey(challengeKey)
-	if resp.Header.Get("Sec-WebSocket-Accept") != expectedAccept {
-		return nil, resp, ErrBadHandshake
-	}
-
-	// Validate subprotocol per RFC 6455, section 4.2.2.
-	// Server must return a subprotocol that was requested by the client.
-	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
-	if subprotocol != "" && len(d.Subprotocols) > 0 {
-		found := false
-		for _, p := range d.Subprotocols {
-			if p == subprotocol {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, resp, ErrBadHandshake
-		}
-	}
-
-	// Check for permessage-deflate extension per RFC 7692.
-	var compress bool
-	for _, ext := range parseExtensions(resp.Header) {
-		if ext.name == "permessage-deflate" {
-			compress = true
-			break
-		}
+		return nil, resp, err
 	}
 
 	conn := newConnWithPool(netConn, false, d.ReadBufferSize, d.WriteBufferSize, d.WriteBufferPool)
@@ -526,53 +451,56 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 	return conn, resp, nil
 }
 
-// finishHTTP1Handshake validates the server response per RFC 6455, section 4.2.2
-// and creates the WebSocket connection.
-func (d *Dialer) finishHTTP1Handshake(resp *http.Response, challengeKey string) (*Conn, *http.Response, error) {
-	// Validate status code per RFC 6455, section 4.2.2.
+// buildHandshakeHeaders sets the required WebSocket handshake headers on the request
+// per RFC 6455, section 4.1.
+func (d *Dialer) buildHandshakeHeaders(req *http.Request, requestHeader http.Header, challengeKey string) {
+	for k, vs := range requestHeader {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Key", challengeKey)
+	req.Header.Set("Sec-WebSocket-Version", websocketVersion)
+
+	if len(d.Subprotocols) > 0 {
+		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(d.Subprotocols, ", "))
+	}
+
+	if d.EnableCompression {
+		req.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+	}
+}
+
+// validateHTTP1Response validates the server handshake response per RFC 6455, section 4.2.2.
+// Returns the negotiated subprotocol and compression status.
+func (d *Dialer) validateHTTP1Response(resp *http.Response, challengeKey string) (subprotocol string, compress bool, err error) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		resp.Body.Close()
-		return nil, resp, ErrBadHandshake
+		return "", false, ErrBadHandshake
 	}
 
-	// Validate Upgrade header per RFC 6455, section 4.2.2.
 	if !strings.EqualFold(resp.Header.Get("Upgrade"), "websocket") {
-		resp.Body.Close()
-		return nil, resp, ErrBadHandshake
+		return "", false, ErrBadHandshake
 	}
 
-	// Validate Connection header per RFC 6455, section 4.2.2.
 	if !strings.EqualFold(resp.Header.Get("Connection"), "upgrade") {
-		resp.Body.Close()
-		return nil, resp, ErrBadHandshake
+		return "", false, ErrBadHandshake
 	}
 
-	// Validate Sec-WebSocket-Accept per RFC 6455, section 4.2.2, item 5.4.
 	expectedAccept := computeAcceptKey(challengeKey)
 	if resp.Header.Get("Sec-WebSocket-Accept") != expectedAccept {
-		resp.Body.Close()
-		return nil, resp, ErrBadHandshake
+		return "", false, ErrBadHandshake
 	}
 
-	// Validate subprotocol per RFC 6455, section 4.2.2.
-	// Server must return a subprotocol that was requested by the client.
-	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
+	subprotocol = resp.Header.Get("Sec-WebSocket-Protocol")
 	if subprotocol != "" && len(d.Subprotocols) > 0 {
-		found := false
-		for _, p := range d.Subprotocols {
-			if p == subprotocol {
-				found = true
-				break
-			}
-		}
-		if !found {
-			resp.Body.Close()
-			return nil, resp, ErrBadHandshake
+		if !slices.Contains(d.Subprotocols, subprotocol) {
+			return "", false, ErrBadHandshake
 		}
 	}
 
-	// Check for permessage-deflate extension per RFC 7692.
-	var compress bool
 	for _, ext := range parseExtensions(resp.Header) {
 		if ext.name == "permessage-deflate" {
 			compress = true
@@ -580,7 +508,19 @@ func (d *Dialer) finishHTTP1Handshake(resp *http.Response, challengeKey string) 
 		}
 	}
 
-	// For 101 responses, resp.Body is an io.ReadWriteCloser.
+	return subprotocol, compress, nil
+}
+
+// finishHTTP1Handshake validates the server response and creates the WebSocket connection.
+// For 101 responses, resp.Body must implement io.ReadWriteCloser, which is standard
+// Go http.Client behavior for upgraded connections.
+func (d *Dialer) finishHTTP1Handshake(resp *http.Response, challengeKey string) (*Conn, *http.Response, error) {
+	subprotocol, compress, err := d.validateHTTP1Response(resp, challengeKey)
+	if err != nil {
+		resp.Body.Close()
+		return nil, resp, err
+	}
+
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok {
 		resp.Body.Close()
@@ -649,17 +589,9 @@ func (d *Dialer) dialHTTP2(ctx context.Context, client *http.Client, u *url.URL,
 	}
 
 	// Validate subprotocol per RFC 6455, section 4.2.2.
-	// Server must return a subprotocol that was requested by the client.
 	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
 	if subprotocol != "" && len(d.Subprotocols) > 0 {
-		found := false
-		for _, p := range d.Subprotocols {
-			if p == subprotocol {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(d.Subprotocols, subprotocol) {
 			resp.Body.Close()
 			return nil, resp, ErrBadHandshake
 		}

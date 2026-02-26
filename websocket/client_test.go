@@ -120,6 +120,29 @@ func TestDefaultDialer(t *testing.T) {
 }
 
 func TestDialerHandshakeTimeout(t *testing.T) {
+	t.Run("Timeout on dialHTTP1 path", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer listener.Close()
+
+		go func() {
+			conn, _ := listener.Accept()
+			if conn != nil {
+				time.Sleep(200 * time.Millisecond)
+				conn.Close()
+			}
+		}()
+
+		// Use default http.Client (no custom transport) to hit dialHTTP1 path.
+		d := &Dialer{
+			HandshakeTimeout: 50 * time.Millisecond,
+		}
+
+		addr := listener.Addr().String()
+		_, _, err = d.Dial("ws://"+addr, nil)
+		require.Error(t, err)
+	})
+
 	t.Run("Timeout on connection", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
@@ -1006,6 +1029,139 @@ func TestDialerDialHTTP2(t *testing.T) {
 		defer client.Close()
 
 		assert.True(t, conn.compressionEnabled)
+	})
+}
+
+func TestDialerBuildHandshakeHeaders(t *testing.T) {
+	t.Run("Sets required headers", func(t *testing.T) {
+		d := &Dialer{
+			Subprotocols:      []string{"chat", "superchat"},
+			EnableCompression: true,
+		}
+
+		req := &http.Request{Header: make(http.Header)}
+		customHeaders := http.Header{}
+		customHeaders.Set("X-Custom", "value")
+
+		d.buildHandshakeHeaders(req, customHeaders, "test-key")
+
+		assert.Equal(t, "websocket", req.Header.Get("Upgrade"))
+		assert.Equal(t, "Upgrade", req.Header.Get("Connection"))
+		assert.Equal(t, "test-key", req.Header.Get("Sec-WebSocket-Key"))
+		assert.Equal(t, websocketVersion, req.Header.Get("Sec-WebSocket-Version"))
+		assert.Equal(t, "chat, superchat", req.Header.Get("Sec-WebSocket-Protocol"))
+		assert.Contains(t, req.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
+		assert.Equal(t, "value", req.Header.Get("X-Custom"))
+	})
+
+	t.Run("No optional headers when not configured", func(t *testing.T) {
+		d := &Dialer{}
+
+		req := &http.Request{Header: make(http.Header)}
+		d.buildHandshakeHeaders(req, nil, "key")
+
+		assert.Equal(t, "websocket", req.Header.Get("Upgrade"))
+		assert.Empty(t, req.Header.Get("Sec-WebSocket-Protocol"))
+		assert.Empty(t, req.Header.Get("Sec-WebSocket-Extensions"))
+	})
+}
+
+func TestDialerValidateHTTP1Response(t *testing.T) {
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	acceptKey := computeAcceptKey(challengeKey)
+
+	t.Run("Valid response", func(t *testing.T) {
+		d := &Dialer{Subprotocols: []string{"chat"}}
+
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Protocol", "chat")
+		resp.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+
+		subproto, compress, err := d.validateHTTP1Response(resp, challengeKey)
+		require.NoError(t, err)
+		assert.Equal(t, "chat", subproto)
+		assert.True(t, compress)
+	})
+
+	t.Run("Wrong status code", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     make(http.Header),
+		}
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("Wrong upgrade header", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "http/2.0")
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("Wrong connection header", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "close")
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("Wrong accept key", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", "wrong-key")
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("Wrong subprotocol", func(t *testing.T) {
+		d := &Dialer{Subprotocols: []string{"expected"}}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Protocol", "wrong")
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("No compression when not offered", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+
+		_, compress, err := d.validateHTTP1Response(resp, challengeKey)
+		require.NoError(t, err)
+		assert.False(t, compress)
 	})
 }
 

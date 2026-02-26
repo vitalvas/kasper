@@ -1,11 +1,24 @@
 package websocket
 
 import (
+	"bufio"
+	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
+)
+
+// Connection state constants for atomic state tracking.
+const (
+	stateOpen    int32 = 0
+	stateClosing int32 = 1
+	stateClosed  int32 = 2
 )
 
 // Message types defined in RFC 6455, section 11.8.
@@ -52,6 +65,9 @@ var (
 	ErrExpectedContinuation      = errors.New("websocket: expected continuation frame")
 	ErrMaskViolation             = errors.New("websocket: mask bit violation")
 	ErrInvalidClosePayload       = errors.New("websocket: invalid close frame payload length")
+	ErrPayloadLengthOverflow     = errors.New("websocket: payload length overflow")
+	ErrInvalidUTF8               = errors.New("websocket: invalid UTF-8 in text message")
+	ErrDeadlineNotSupported      = errors.New("websocket: deadline not supported on this connection")
 )
 
 // CloseError represents a WebSocket close error.
@@ -95,7 +111,23 @@ func closeCodeString(code int) string {
 	case CloseTLSHandshake:
 		return "1015 (TLS handshake)"
 	default:
-		return string(rune('0'+code/1000)) + string(rune('0'+(code/100)%10)) + string(rune('0'+(code/10)%10)) + string(rune('0'+code%10))
+		return strconv.Itoa(code)
+	}
+}
+
+// isValidCloseCode reports whether the close code is valid on the wire
+// per RFC 6455, section 7.4.1. Codes 1004, 1005, 1006, and 1015 must
+// never appear in a close frame sent by an endpoint.
+func isValidCloseCode(code int) bool {
+	switch {
+	case code >= 1000 && code <= 1003:
+		return true
+	case code >= 1007 && code <= 1014:
+		return true
+	case code >= 3000 && code <= 4999:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -132,9 +164,11 @@ type Conn struct {
 	br          io.Reader          // buffered reader for reading frames
 	isServer    bool
 	subprotocol string
+	state       int32 // atomic: stateOpen, stateClosing, stateClosed
 
 	readMu       sync.Mutex
 	readLimit    int64
+	readMsgSize  int64 // accumulated message size across fragments
 	readErr      error
 	reader       io.Reader
 	readBuf      []byte
@@ -188,6 +222,12 @@ func newConnFromRWC(rwc io.ReadWriteCloser, netConn net.Conn, isServer bool, rea
 		br = netConn
 	}
 
+	// Wrap with a buffered reader if not already buffered.
+	// This reduces system call overhead for small reads during frame parsing.
+	if _, ok := br.(*bufio.Reader); !ok {
+		br = bufio.NewReaderSize(br, readBufferSize)
+	}
+
 	c := &Conn{
 		rwc:              rwc,
 		netConn:          netConn,
@@ -218,14 +258,38 @@ func (c *Conn) Subprotocol() string {
 	return c.subprotocol
 }
 
-// Close closes the underlying connection.
+// Close closes the underlying connection with a normal close handshake.
 func (c *Conn) Close() error {
-	// Return write buffer to pool if available.
+	return c.CloseWithMessage(CloseNormalClosure, "")
+}
+
+// CloseWithMessage sends a close frame with the given code and text,
+// then closes the underlying connection. It is safe to call concurrently.
+func (c *Conn) CloseWithMessage(code int, text string) error {
+	if !atomic.CompareAndSwapInt32(&c.state, stateOpen, stateClosing) {
+		// Already closing or closed.
+		return nil
+	}
+
+	// Best-effort send close frame.
+	msg := FormatCloseMessage(code, text)
+	_ = c.WriteControl(CloseMessage, msg, time.Now().Add(5*time.Second))
+
+	// Return write buffer to pool under lock.
+	c.writeMu.Lock()
 	if c.writeBufferPool != nil && c.writeBuf != nil {
 		c.writeBufferPool.Put(c.writeBuf)
 		c.writeBuf = nil
 	}
+	c.writeMu.Unlock()
+
+	atomic.StoreInt32(&c.state, stateClosed)
 	return c.rwc.Close()
+}
+
+// IsClosed reports whether the connection has been closed.
+func (c *Conn) IsClosed() bool {
+	return atomic.LoadInt32(&c.state) == stateClosed
 }
 
 // LocalAddr returns the local network address, or nil if not available.
@@ -250,26 +314,58 @@ func (c *Conn) UnderlyingConn() net.Conn {
 }
 
 // SetReadDeadline sets the read deadline on the underlying network connection.
-// Returns nil if the underlying connection does not support deadlines.
+// Returns ErrDeadlineNotSupported if the underlying connection does not support deadlines (e.g., HTTP/2).
 func (c *Conn) SetReadDeadline(t time.Time) error {
 	if c.netConn != nil {
 		return c.netConn.SetReadDeadline(t)
 	}
-	return nil
+	return ErrDeadlineNotSupported
 }
 
 // SetWriteDeadline sets the write deadline on the underlying network connection.
-// Returns nil if the underlying connection does not support deadlines.
+// Returns ErrDeadlineNotSupported if the underlying connection does not support deadlines (e.g., HTTP/2).
 func (c *Conn) SetWriteDeadline(t time.Time) error {
 	if c.netConn != nil {
 		return c.netConn.SetWriteDeadline(t)
 	}
-	return nil
+	return ErrDeadlineNotSupported
 }
 
 // SetReadLimit sets the maximum size in bytes for a message read from the peer.
 func (c *Conn) SetReadLimit(limit int64) {
 	c.readLimit = limit
+}
+
+// StartKeepalive sends periodic ping frames to detect dead connections.
+// The interval specifies how often pings are sent. The pongTimeout specifies
+// how long to wait for a pong response before considering the connection dead.
+// The goroutine stops when the connection is closed.
+func (c *Conn) StartKeepalive(interval, pongTimeout time.Duration) {
+	lastPong := time.Now()
+	c.SetPongHandler(func(_ string) error {
+		lastPong = time.Now()
+		return nil
+	})
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if c.IsClosed() {
+				return
+			}
+
+			if time.Since(lastPong) > interval+pongTimeout {
+				_ = c.Close()
+				return
+			}
+
+			if err := c.WriteControl(PingMessage, nil, time.Now().Add(pongTimeout)); err != nil {
+				return
+			}
+		}
+	}()
 }
 
 // SetPingHandler sets the handler for ping messages received from the peer.
@@ -345,7 +441,9 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	if !c.isServer {
 		frame[1] |= maskBit
 		mask := make([]byte, 4)
-		_, _ = io.ReadFull(randReader, mask)
+		if _, err := io.ReadFull(randReader, mask); err != nil {
+			return err
+		}
 		frame = append(frame[:2], mask...)
 		frame = append(frame, data...)
 		maskBytes(mask, 0, frame[6:])
@@ -397,6 +495,7 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 }
 
 // ReadMessage reads the next message from the connection.
+// For text messages, validates UTF-8 encoding per RFC 6455, section 5.6.
 func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
 	var r io.Reader
 	messageType, r, err = c.NextReader()
@@ -404,6 +503,35 @@ func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
 		return 0, nil, err
 	}
 	p, err = io.ReadAll(r)
+	if err != nil {
+		return messageType, p, err
+	}
+	if messageType == TextMessage && !utf8.Valid(p) {
+		return 0, nil, ErrInvalidUTF8
+	}
+	return messageType, p, err
+}
+
+// ReadMessageContext reads a message with context cancellation support.
+// When the context is cancelled, the read deadline is set to the current time
+// to unblock any pending read operation.
+func (c *Conn) ReadMessageContext(ctx context.Context) (messageType int, p []byte, err error) {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = c.SetReadDeadline(time.Now())
+		case <-done:
+		}
+	}()
+
+	messageType, p, err = c.ReadMessage()
+	close(done)
+
+	if ctx.Err() != nil && err != nil {
+		return 0, nil, ctx.Err()
+	}
+
 	return messageType, p, err
 }
 
@@ -440,6 +568,10 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 			if len(payload) >= 2 {
 				code = int(payload[0])<<8 | int(payload[1])
 				text = string(payload[2:])
+				if !isValidCloseCode(code) {
+					c.readErr = ErrInvalidCloseCode
+					return 0, nil, ErrInvalidCloseCode
+				}
 			}
 			if err := c.closeHandler(code, text); err != nil {
 				return 0, nil, err
@@ -450,6 +582,7 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 			c.readMsgType = frameType
 			c.readFinal = final
 			c.readCompress = compressed
+			c.readMsgSize = int64(len(payload))
 
 			// Per RFC 7692, compression applies to the entire message.
 			// For fragmented compressed messages, we must read all frames,
@@ -464,8 +597,39 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 						c.readErr = readErr
 						return 0, nil, readErr
 					}
-					if ft != continuationFrame {
+					// Handle control frames inline per RFC 6455, section 5.4.
+					switch ft {
+					case PingMessage:
+						if err := c.pingHandler(string(p)); err != nil {
+							return 0, nil, err
+						}
+						continue
+					case PongMessage:
+						if err := c.pongHandler(string(p)); err != nil {
+							return 0, nil, err
+						}
+						continue
+					case CloseMessage:
+						code := CloseNoStatusReceived
+						text := ""
+						if len(p) >= 2 {
+							code = int(p[0])<<8 | int(p[1])
+							text = string(p[2:])
+						}
+						if err := c.closeHandler(code, text); err != nil {
+							return 0, nil, err
+						}
+						c.readErr = &CloseError{Code: code, Text: text}
+						return 0, nil, c.readErr
+					case continuationFrame:
+						// Expected continuation frame.
+					default:
 						return 0, nil, ErrExpectedContinuation
+					}
+					c.readMsgSize += int64(len(p))
+					if c.readLimit > 0 && c.readMsgSize > c.readLimit {
+						c.readErr = ErrReadLimit
+						return 0, nil, ErrReadLimit
 					}
 					compressedData = append(compressedData, p...)
 					final = f
@@ -556,6 +720,10 @@ func (c *Conn) readFrame() (frameType int, payload []byte, final bool, compresse
 		if _, err := io.ReadFull(c.br, c.readBuf[2:10]); err != nil {
 			return 0, nil, false, false, err
 		}
+		// RFC 6455, section 5.2: the most significant bit MUST be 0.
+		if c.readBuf[2]&0x80 != 0 {
+			return 0, nil, false, false, ErrPayloadLengthOverflow
+		}
 		payloadLen = int64(c.readBuf[2])<<56 | int64(c.readBuf[3])<<48 |
 			int64(c.readBuf[4])<<40 | int64(c.readBuf[5])<<32 |
 			int64(c.readBuf[6])<<24 | int64(c.readBuf[7])<<16 |
@@ -603,11 +771,42 @@ func (c *Conn) readFrame() (frameType int, payload []byte, final bool, compresse
 // maskBytes applies XOR masking to data per RFC 6455, section 5.3.
 // Client-to-server frames must be masked; server-to-client frames must not.
 // The mask is a 4-byte value, applied cyclically to each byte of the payload.
+// maskBytes applies the XOR mask to data per RFC 6455, section 5.3.
+// Uses word-at-a-time XOR for performance on larger payloads.
 func maskBytes(mask []byte, pos int, data []byte) int {
-	for i := range data {
-		data[i] ^= mask[(pos+i)%4]
+	n := len(data)
+	if n == 0 {
+		return pos % 4
 	}
-	return (pos + len(data)) % 4
+
+	i := 0
+
+	// Handle alignment: XOR byte-by-byte until pos is aligned to mask boundary.
+	for i < n && pos%4 != 0 {
+		data[i] ^= mask[pos%4]
+		pos++
+		i++
+	}
+
+	// XOR 4 bytes at a time using uint32 operations.
+	if n-i >= 4 {
+		maskWord := binary.BigEndian.Uint32(mask)
+		for i+4 <= n {
+			v := binary.BigEndian.Uint32(data[i:])
+			binary.BigEndian.PutUint32(data[i:], v^maskWord)
+			i += 4
+			pos += 4
+		}
+	}
+
+	// Handle remaining bytes.
+	for i < n {
+		data[i] ^= mask[pos%4]
+		pos++
+		i++
+	}
+
+	return pos % 4
 }
 
 type messageWriter struct {
@@ -708,7 +907,9 @@ func (c *Conn) writeFrameWithCompress(frameType int, data []byte, final bool, co
 
 	if !c.isServer {
 		c.writeBuf[1] |= maskBit
-		_, _ = io.ReadFull(randReader, c.writeBuf[headerLen:headerLen+4])
+		if _, err := io.ReadFull(randReader, c.writeBuf[headerLen:headerLen+4]); err != nil {
+			return 0, err
+		}
 		mask := c.writeBuf[headerLen : headerLen+4]
 		headerLen += 4
 
@@ -742,7 +943,7 @@ type messageReader struct {
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.buf) {
+	for r.pos >= len(r.buf) {
 		if r.final {
 			return 0, io.EOF
 		}
@@ -752,8 +953,39 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		if frameType != continuationFrame {
+		// Handle control frames inline per RFC 6455, section 5.4.
+		switch frameType {
+		case PingMessage:
+			if err := r.c.pingHandler(string(payload)); err != nil {
+				return 0, err
+			}
+			continue
+		case PongMessage:
+			if err := r.c.pongHandler(string(payload)); err != nil {
+				return 0, err
+			}
+			continue
+		case CloseMessage:
+			code := CloseNoStatusReceived
+			text := ""
+			if len(payload) >= 2 {
+				code = int(payload[0])<<8 | int(payload[1])
+				text = string(payload[2:])
+			}
+			if err := r.c.closeHandler(code, text); err != nil {
+				return 0, err
+			}
+			closeErr := &CloseError{Code: code, Text: text}
+			r.c.readErr = closeErr
+			return 0, closeErr
+		case continuationFrame:
+			// Expected continuation frame.
+		default:
 			return 0, ErrExpectedContinuation
+		}
+		r.c.readMsgSize += int64(len(payload))
+		if r.c.readLimit > 0 && r.c.readMsgSize > r.c.readLimit {
+			return 0, ErrReadLimit
 		}
 		r.buf = payload
 		r.pos = 0

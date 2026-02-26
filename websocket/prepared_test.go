@@ -71,7 +71,8 @@ func TestNewPreparedMessage(t *testing.T) {
 
 func TestBuildFrame(t *testing.T) {
 	t.Run("Server frame not masked", func(t *testing.T) {
-		frame := buildFrame(TextMessage, []byte("hello"), false, false)
+		frame, err := buildFrame(TextMessage, []byte("hello"), false, false)
+		require.NoError(t, err)
 
 		assert.True(t, len(frame) >= 2)
 		assert.Equal(t, byte(TextMessage)|finalBit, frame[0])
@@ -80,7 +81,8 @@ func TestBuildFrame(t *testing.T) {
 	})
 
 	t.Run("Client frame masked", func(t *testing.T) {
-		frame := buildFrame(TextMessage, []byte("hello"), true, false)
+		frame, err := buildFrame(TextMessage, []byte("hello"), true, false)
+		require.NoError(t, err)
 
 		assert.True(t, len(frame) >= 7)
 		assert.Equal(t, byte(TextMessage)|finalBit, frame[0])
@@ -88,14 +90,16 @@ func TestBuildFrame(t *testing.T) {
 	})
 
 	t.Run("Compressed frame", func(t *testing.T) {
-		frame := buildFrame(TextMessage, []byte("hello"), false, true)
+		frame, err := buildFrame(TextMessage, []byte("hello"), false, true)
+		require.NoError(t, err)
 
 		assert.Equal(t, byte(TextMessage)|finalBit|rsv1Bit, frame[0])
 	})
 
 	t.Run("16-bit length", func(t *testing.T) {
 		data := make([]byte, 200)
-		frame := buildFrame(BinaryMessage, data, false, false)
+		frame, err := buildFrame(BinaryMessage, data, false, false)
+		require.NoError(t, err)
 
 		assert.Equal(t, byte(payloadLen16), frame[1])
 		assert.Equal(t, byte(0), frame[2])
@@ -104,7 +108,8 @@ func TestBuildFrame(t *testing.T) {
 
 	t.Run("64-bit length", func(t *testing.T) {
 		data := make([]byte, 70000)
-		frame := buildFrame(BinaryMessage, data, false, false)
+		frame, err := buildFrame(BinaryMessage, data, false, false)
+		require.NoError(t, err)
 
 		assert.Equal(t, byte(payloadLen64), frame[1])
 	})

@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"io"
 	"sync"
 )
 
@@ -55,13 +56,16 @@ func (pm *PreparedMessage) frame(key prepareKey) ([]byte, error) {
 		data = compressed
 	}
 
-	frameData := buildFrame(pm.messageType, data, !key.isServer, key.compress && !key.compressNo)
+	frameData, err := buildFrame(pm.messageType, data, !key.isServer, key.compress && !key.compressNo)
+	if err != nil {
+		return nil, err
+	}
 
 	pm.frames[key] = &preparedFrame{data: frameData}
 	return frameData, nil
 }
 
-func buildFrame(messageType int, data []byte, masked bool, compressed bool) []byte {
+func buildFrame(messageType int, data []byte, masked bool, compressed bool) ([]byte, error) {
 	header := make([]byte, maxFrameHeaderSize)
 	headerLen := 2
 
@@ -96,7 +100,9 @@ func buildFrame(messageType int, data []byte, masked bool, compressed bool) []by
 	if masked {
 		header[1] |= maskBit
 		mask := make([]byte, 4)
-		_, _ = randReader.Read(mask)
+		if _, err := io.ReadFull(randReader, mask); err != nil {
+			return nil, err
+		}
 		copy(header[headerLen:], mask)
 		headerLen += 4
 
@@ -109,7 +115,7 @@ func buildFrame(messageType int, data []byte, masked bool, compressed bool) []by
 	frame := make([]byte, headerLen+len(data))
 	copy(frame, header[:headerLen])
 	copy(frame[headerLen:], data)
-	return frame
+	return frame, nil
 }
 
 // WritePreparedMessage writes pm to the connection.

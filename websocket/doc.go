@@ -70,4 +70,11 @@
 // EnableCompression is set to true on the Upgrader or Dialer. When compression
 // is enabled, messages are compressed using the permessage-deflate extension
 // (RFC 7692) with stateless compression (no context takeover).
+//
+// Extensions:
+//
+// This package supports the permessage-deflate extension (RFC 7692) for
+// per-message compression. Custom WebSocket extensions are not supported.
+// The permessage-deflate extension is the only widely deployed WebSocket
+// extension and covers the primary use case for data compression.
 package websocket

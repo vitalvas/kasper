@@ -168,27 +168,29 @@ func TestFlateReaderPool(t *testing.T) {
 	})
 }
 
-func TestFlateWriterPool(t *testing.T) {
-	t.Run("Reuse writer from pool", func(t *testing.T) {
-		for i := 0; i < 3; i++ {
-			buf := new(bytes.Buffer)
-			fw := getFlateWriter(buf, defaultCompressionLevel)
-			require.NotNil(t, fw)
+func TestGetFlateWriter(t *testing.T) {
+	t.Run("Create writer", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		fw, err := getFlateWriter(buf, defaultCompressionLevel)
+		require.NoError(t, err)
+		require.NotNil(t, fw)
 
-			_, err := fw.Write([]byte("test"))
-			require.NoError(t, err)
-			err = fw.Close()
-			require.NoError(t, err)
+		_, err = fw.Write([]byte("test"))
+		require.NoError(t, err)
+		err = fw.Close()
+		require.NoError(t, err)
+	})
 
-			putFlateWriter(fw)
-		}
+	t.Run("Invalid level returns error", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		_, err := getFlateWriter(buf, 100)
+		assert.Error(t, err)
 	})
 }
 
 func TestSuffixReader(t *testing.T) {
-	sr := suffixReader{}
-
-	t.Run("Read suffix bytes", func(t *testing.T) {
+	t.Run("Read suffix bytes full", func(t *testing.T) {
+		sr := newSuffixReader()
 		buf := make([]byte, 10)
 		n, err := sr.Read(buf)
 		assert.Equal(t, 4, n)
@@ -196,10 +198,60 @@ func TestSuffixReader(t *testing.T) {
 		assert.Equal(t, []byte{0x00, 0x00, 0xff, 0xff}, buf[:4])
 	})
 
-	t.Run("Buffer too small", func(t *testing.T) {
+	t.Run("Read 1 byte at a time", func(t *testing.T) {
+		sr := newSuffixReader()
+		expected := []byte{0x00, 0x00, 0xff, 0xff}
+		for i := 0; i < 4; i++ {
+			buf := make([]byte, 1)
+			n, err := sr.Read(buf)
+			assert.Equal(t, 1, n)
+			assert.Equal(t, expected[i], buf[0])
+			if i == 3 {
+				assert.Equal(t, io.EOF, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		}
+	})
+
+	t.Run("Read 2 bytes at a time", func(t *testing.T) {
+		sr := newSuffixReader()
 		buf := make([]byte, 2)
-		_, err := sr.Read(buf)
-		assert.Equal(t, io.ErrShortBuffer, err)
+
+		n, err := sr.Read(buf)
+		assert.Equal(t, 2, n)
+		assert.NoError(t, err)
+		assert.Equal(t, []byte{0x00, 0x00}, buf)
+
+		n, err = sr.Read(buf)
+		assert.Equal(t, 2, n)
+		assert.Equal(t, io.EOF, err)
+		assert.Equal(t, []byte{0xff, 0xff}, buf)
+	})
+
+	t.Run("Read 3 bytes at a time", func(t *testing.T) {
+		sr := newSuffixReader()
+		buf := make([]byte, 3)
+
+		n, err := sr.Read(buf)
+		assert.Equal(t, 3, n)
+		assert.NoError(t, err)
+		assert.Equal(t, []byte{0x00, 0x00, 0xff}, buf)
+
+		n, err = sr.Read(buf)
+		assert.Equal(t, 1, n)
+		assert.Equal(t, io.EOF, err)
+		assert.Equal(t, byte(0xff), buf[0])
+	})
+
+	t.Run("Read after exhausted", func(t *testing.T) {
+		sr := newSuffixReader()
+		buf := make([]byte, 10)
+		_, _ = sr.Read(buf)
+
+		n, err := sr.Read(buf)
+		assert.Equal(t, 0, n)
+		assert.Equal(t, io.EOF, err)
 	})
 }
 
@@ -222,7 +274,7 @@ func TestFlateReadWrapper(t *testing.T) {
 		require.NoError(t, err)
 
 		br := &byteReader{data: compressed}
-		suffixed := io.MultiReader(br, suffixReader{})
+		suffixed := io.MultiReader(br, newSuffixReader())
 		fr := getFlateReader(suffixed)
 		w := &flateReadWrapper{fr: fr}
 
@@ -238,7 +290,7 @@ func TestFlateReadWrapper(t *testing.T) {
 		require.NoError(t, err)
 
 		br := &byteReader{data: compressed}
-		suffixed := io.MultiReader(br, suffixReader{})
+		suffixed := io.MultiReader(br, newSuffixReader())
 		fr := getFlateReader(suffixed)
 		w := &flateReadWrapper{fr: fr}
 

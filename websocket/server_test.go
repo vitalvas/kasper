@@ -3,6 +3,7 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -377,7 +378,6 @@ func TestUpgraderUpgrade(t *testing.T) {
 		}
 
 		server, client := net.Pipe()
-		defer client.Close()
 
 		writeBuf := new(bytes.Buffer)
 		readBuf := bufio.NewReader(strings.NewReader(""))
@@ -399,10 +399,12 @@ func TestUpgraderUpgrade(t *testing.T) {
 		conn, err := u.Upgrade(hijacker, r, nil)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
-		defer conn.Close()
 
 		assert.Equal(t, "graphql-ws", conn.Subprotocol())
 		assert.True(t, conn.isServer)
+
+		client.Close()
+		conn.Close()
 	})
 
 	t.Run("With compression", func(t *testing.T) {
@@ -411,7 +413,6 @@ func TestUpgraderUpgrade(t *testing.T) {
 		}
 
 		server, client := net.Pipe()
-		defer client.Close()
 
 		writeBuf := new(bytes.Buffer)
 		readBuf := bufio.NewReader(strings.NewReader(""))
@@ -433,16 +434,17 @@ func TestUpgraderUpgrade(t *testing.T) {
 		conn, err := u.Upgrade(hijacker, r, nil)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
-		defer conn.Close()
 
 		assert.True(t, conn.compressionEnabled)
+
+		client.Close()
+		conn.Close()
 	})
 
 	t.Run("With response headers", func(t *testing.T) {
 		u := &Upgrader{}
 
 		server, client := net.Pipe()
-		defer client.Close()
 
 		writeBuf := new(bytes.Buffer)
 		readBuf := bufio.NewReader(strings.NewReader(""))
@@ -466,9 +468,24 @@ func TestUpgraderUpgrade(t *testing.T) {
 		conn, err := u.Upgrade(hijacker, r, responseHeader)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
-		defer conn.Close()
+
+		client.Close()
+		conn.Close()
 	})
 }
+
+// mockHTTP2Writer implements http.ResponseWriter and http.Flusher
+// for testing HTTP/2 WebSocket upgrades without Hijack.
+type mockHTTP2Writer struct {
+	headers http.Header
+	writer  io.Writer
+	code    int
+}
+
+func (w *mockHTTP2Writer) Header() http.Header         { return w.headers }
+func (w *mockHTTP2Writer) Write(p []byte) (int, error) { return w.writer.Write(p) }
+func (w *mockHTTP2Writer) WriteHeader(code int)        { w.code = code }
+func (w *mockHTTP2Writer) Flush()                      {}
 
 func TestUpgraderUpgradeHTTP2(t *testing.T) {
 	t.Run("Invalid protocol pseudo-header", func(t *testing.T) {
@@ -507,22 +524,21 @@ func TestUpgraderUpgradeHTTP2(t *testing.T) {
 
 		server, client := net.Pipe()
 
-		hijacker := &mockHijacker{
-			ResponseWriter: httptest.NewRecorder(),
-			conn:           server,
-			reader:         bufio.NewReader(strings.NewReader("")),
-			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		w := &mockHTTP2Writer{
+			headers: make(http.Header),
+			writer:  server,
 		}
 
 		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
 		r.ProtoMajor = 2
 		r.Proto = "websocket"
 		r.Header.Set("Sec-WebSocket-Protocol", "chat")
+		r.Body = io.NopCloser(server)
 
 		responseHeader := make(http.Header)
 		responseHeader.Set("X-Custom", "value")
 
-		conn, err := u.Upgrade(hijacker, r, responseHeader)
+		conn, err := u.Upgrade(w, r, responseHeader)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
 		defer conn.Close()
@@ -530,9 +546,7 @@ func TestUpgraderUpgradeHTTP2(t *testing.T) {
 
 		assert.Equal(t, "chat", conn.Subprotocol())
 		assert.True(t, conn.isServer)
-
-		recorder := hijacker.ResponseWriter.(*httptest.ResponseRecorder)
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusOK, w.code)
 	})
 
 	t.Run("With compression", func(t *testing.T) {
@@ -543,19 +557,18 @@ func TestUpgraderUpgradeHTTP2(t *testing.T) {
 
 		server, client := net.Pipe()
 
-		hijacker := &mockHijacker{
-			ResponseWriter: httptest.NewRecorder(),
-			conn:           server,
-			reader:         bufio.NewReader(strings.NewReader("")),
-			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		w := &mockHTTP2Writer{
+			headers: make(http.Header),
+			writer:  server,
 		}
 
 		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
 		r.ProtoMajor = 2
 		r.Proto = "websocket"
 		r.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+		r.Body = io.NopCloser(server)
 
-		conn, err := u.Upgrade(hijacker, r, nil)
+		conn, err := u.Upgrade(w, r, nil)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
 		defer conn.Close()
@@ -571,27 +584,26 @@ func TestUpgraderUpgradeHTTP2(t *testing.T) {
 
 		server, client := net.Pipe()
 
-		hijacker := &mockHijacker{
-			ResponseWriter: httptest.NewRecorder(),
-			conn:           server,
-			reader:         bufio.NewReader(strings.NewReader("")),
-			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		w := &mockHTTP2Writer{
+			headers: make(http.Header),
+			writer:  server,
 		}
 
 		r := httptest.NewRequest(http.MethodConnect, "/ws", nil)
 		r.ProtoMajor = 2
 		r.Proto = "websocket"
+		r.Body = io.NopCloser(server)
 
 		responseHeader := make(http.Header)
 		responseHeader.Set("X-Custom", "custom-value")
 
-		conn, err := u.Upgrade(hijacker, r, responseHeader)
+		conn, err := u.Upgrade(w, r, responseHeader)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
 		defer conn.Close()
 		defer client.Close()
 
-		assert.Equal(t, "custom-value", hijacker.Header().Get("X-Custom"))
+		assert.Equal(t, "custom-value", w.Header().Get("X-Custom"))
 	})
 }
 
@@ -629,7 +641,6 @@ func TestUpgraderReadBufferSize(t *testing.T) {
 		}
 
 		server, client := net.Pipe()
-		defer client.Close()
 
 		writeBuf := new(bytes.Buffer)
 		readBuf := bufio.NewReader(strings.NewReader(""))
@@ -650,7 +661,9 @@ func TestUpgraderReadBufferSize(t *testing.T) {
 		conn, err := u.Upgrade(hijacker, r, nil)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
-		defer conn.Close()
+
+		client.Close()
+		conn.Close()
 	})
 }
 
@@ -717,5 +730,131 @@ func FuzzSubprotocols(f *testing.F) {
 				t.Errorf("empty protocol in result")
 			}
 		}
+	})
+}
+
+func TestNegotiateCompressionParams(t *testing.T) {
+	t.Run("Basic negotiation", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{})
+		assert.Contains(t, result, "server_no_context_takeover")
+	})
+
+	t.Run("With client_no_context_takeover", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"client_no_context_takeover": "",
+		})
+		assert.Contains(t, result, "client_no_context_takeover")
+	})
+
+	t.Run("With client_max_window_bits", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"client_max_window_bits": "",
+		})
+		assert.Contains(t, result, "client_max_window_bits=15")
+	})
+
+	t.Run("With server_max_window_bits value", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "10",
+		})
+		assert.Contains(t, result, "server_max_window_bits=10")
+	})
+
+	t.Run("With server_max_window_bits no value", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "",
+		})
+		assert.Contains(t, result, "server_max_window_bits=15")
+	})
+
+	t.Run("With server_max_window_bits too low", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "7",
+		})
+		assert.NotContains(t, result, "server_max_window_bits")
+	})
+
+	t.Run("With server_max_window_bits too high", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "16",
+		})
+		assert.NotContains(t, result, "server_max_window_bits")
+	})
+
+	t.Run("With server_max_window_bits boundary values", func(t *testing.T) {
+		result8 := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "8",
+		})
+		assert.Contains(t, result8, "server_max_window_bits=8")
+
+		result15 := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "15",
+		})
+		assert.Contains(t, result15, "server_max_window_bits=15")
+	})
+
+	t.Run("With server_max_window_bits invalid string", func(t *testing.T) {
+		result := negotiateCompressionParams(map[string]string{
+			"server_max_window_bits": "abc",
+		})
+		assert.NotContains(t, result, "server_max_window_bits")
+	})
+}
+
+func TestHTTP2ConnAdapter(t *testing.T) {
+	t.Run("Read", func(t *testing.T) {
+		body := io.NopCloser(strings.NewReader("hello"))
+		w := &mockHTTP2Writer{
+			headers: make(http.Header),
+			writer:  io.Discard,
+		}
+
+		adapter := &http2ConnAdapter{
+			body: body,
+			w:    w,
+			rc:   http.NewResponseController(w),
+		}
+
+		buf := make([]byte, 5)
+		n, err := adapter.Read(buf)
+		require.NoError(t, err)
+		assert.Equal(t, 5, n)
+		assert.Equal(t, []byte("hello"), buf)
+	})
+
+	t.Run("Write", func(t *testing.T) {
+		var writeBuf bytes.Buffer
+		w := &mockHTTP2Writer{
+			headers: make(http.Header),
+			writer:  &writeBuf,
+		}
+
+		adapter := &http2ConnAdapter{
+			body: io.NopCloser(strings.NewReader("")),
+			w:    w,
+			rc:   http.NewResponseController(w),
+		}
+
+		n, err := adapter.Write([]byte("world"))
+		require.NoError(t, err)
+		assert.Equal(t, 5, n)
+		assert.Equal(t, "world", writeBuf.String())
+	})
+
+	t.Run("Close", func(t *testing.T) {
+		body := io.NopCloser(strings.NewReader(""))
+		w := &mockHTTP2Writer{
+			headers: make(http.Header),
+			writer:  io.Discard,
+		}
+
+		adapter := &http2ConnAdapter{
+			body: body,
+			w:    w,
+			rc:   http.NewResponseController(w),
+		}
+
+		err := adapter.Close()
+		require.NoError(t, err)
 	})
 }
