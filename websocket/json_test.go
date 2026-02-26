@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -264,6 +266,59 @@ func TestWriteJSONEncodingError(t *testing.T) {
 
 		err = conn.WriteJSON(make(chan int))
 		require.Error(t, err)
+	})
+}
+
+func TestWriteJSONCloseError(t *testing.T) {
+	t.Run("Encode succeeds but Close fails", func(t *testing.T) {
+		// failWriter allows the first N writes to succeed, then returns an error.
+		writeCount := 0
+		fw := &failWriterConn{
+			readBuf: new(bytes.Buffer),
+			failAfter: func() bool {
+				writeCount++
+				// First write (Encode's frame) succeeds, second write (Close's final frame) fails.
+				return writeCount > 1
+			},
+		}
+
+		conn := newConnFromRWC(fw, nil, true, 1024, 1024, nil)
+
+		err := conn.WriteJSON(testMessage{Name: "hello", Value: 42})
+		require.Error(t, err)
+		assert.Equal(t, errForcedWriteFailure, err)
+	})
+}
+
+var errForcedWriteFailure = errors.New("forced write failure")
+
+// failWriterConn is an io.ReadWriteCloser that fails writes when failAfter returns true.
+type failWriterConn struct {
+	readBuf   *bytes.Buffer
+	failAfter func() bool
+}
+
+func (f *failWriterConn) Read(b []byte) (int, error) { return f.readBuf.Read(b) }
+func (f *failWriterConn) Close() error               { return nil }
+func (f *failWriterConn) Write(b []byte) (int, error) {
+	if f.failAfter() {
+		return 0, errForcedWriteFailure
+	}
+	return len(b), nil
+}
+
+func TestReadJSONNextReaderError(t *testing.T) {
+	t.Run("NextReader returns error", func(t *testing.T) {
+		mc := newMockConn()
+		conn := newConn(mc, true, 1024, 1024)
+
+		// Set readErr directly so NextReader returns it immediately.
+		conn.readErr = errors.New("read error")
+
+		var msg testMessage
+		err := conn.ReadJSON(&msg)
+		require.Error(t, err)
+		assert.Equal(t, "read error", err.Error())
 	})
 }
 

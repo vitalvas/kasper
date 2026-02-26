@@ -1,7 +1,10 @@
 package websocket
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -120,7 +123,7 @@ func TestDefaultDialer(t *testing.T) {
 }
 
 func TestDialerHandshakeTimeout(t *testing.T) {
-	t.Run("Timeout on dialHTTP1 path", func(t *testing.T) {
+	t.Run("Timeout on default path", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		defer listener.Close()
@@ -133,7 +136,7 @@ func TestDialerHandshakeTimeout(t *testing.T) {
 			}
 		}()
 
-		// Use default http.Client (no custom transport) to hit dialHTTP1 path.
+		// Use default dialer (no custom transport) to hit dialDirect path.
 		d := &Dialer{
 			HandshakeTimeout: 50 * time.Millisecond,
 		}
@@ -156,7 +159,7 @@ func TestDialerHandshakeTimeout(t *testing.T) {
 			}
 		}()
 
-		// Use custom dial to trigger dialWithTransport path
+		// Use custom dial via transport.
 		transport := &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				var dialer net.Dialer
@@ -516,70 +519,53 @@ func TestDialerNilHTTPClient(t *testing.T) {
 }
 
 func TestDialerGetProxyURL(t *testing.T) {
-	t.Run("No proxy when transport is nil", func(t *testing.T) {
+	t.Run("No proxy when HTTPClient is nil", func(t *testing.T) {
 		d := &Dialer{}
-		client := &http.Client{}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(client, u))
+		assert.Nil(t, d.getProxyURL(u))
 	})
 
 	t.Run("No proxy when Proxy function is nil", func(t *testing.T) {
-		d := &Dialer{}
-		client := &http.Client{Transport: &http.Transport{}}
+		d := &Dialer{
+			HTTPClient: &http.Client{Transport: &http.Transport{}},
+		}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(client, u))
+		assert.Nil(t, d.getProxyURL(u))
 	})
 
-	t.Run("Returns proxy URL when configured", func(t *testing.T) {
+	t.Run("Returns proxy URL from transport", func(t *testing.T) {
 		proxyURL, _ := url.Parse("http://proxy.example.com:8080")
-		d := &Dialer{}
-		client := &http.Client{
-			Transport: &http.Transport{
-				Proxy: func(_ *http.Request) (*url.URL, error) {
-					return proxyURL, nil
+		d := &Dialer{
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					Proxy: func(_ *http.Request) (*url.URL, error) {
+						return proxyURL, nil
+					},
 				},
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Equal(t, proxyURL, d.getProxyURL(client, u))
+		assert.Equal(t, proxyURL, d.getProxyURL(u))
 	})
-}
 
-func TestDialerHasCustomDial(t *testing.T) {
-	tests := []struct {
-		name      string
-		transport http.RoundTripper
-		expected  bool
-	}{
-		{"No custom dial when transport is nil", nil, false},
-		{"No custom dial with default transport", &http.Transport{}, false},
-		{
-			"Has custom dial with DialContext",
-			&http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return nil, nil
+	t.Run("d.Proxy takes precedence over transport", func(t *testing.T) {
+		directProxyURL, _ := url.Parse("http://direct-proxy.example.com:8080")
+		transportProxyURL, _ := url.Parse("http://transport-proxy.example.com:8080")
+		d := &Dialer{
+			Proxy: func(_ *http.Request) (*url.URL, error) {
+				return directProxyURL, nil
+			},
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					Proxy: func(_ *http.Request) (*url.URL, error) {
+						return transportProxyURL, nil
+					},
 				},
 			},
-			true,
-		},
-		{
-			"Has custom dial with DialTLSContext",
-			&http.Transport{
-				DialTLSContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return nil, nil
-				},
-			},
-			true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := &Dialer{}
-			client := &http.Client{Transport: tt.transport}
-			assert.Equal(t, tt.expected, d.hasCustomDial(client))
-		})
-	}
+		}
+		u, _ := url.Parse("http://example.com")
+		assert.Equal(t, directProxyURL, d.getProxyURL(u))
+	})
 }
 
 func TestHostPortFromURL(t *testing.T) {
@@ -636,6 +622,45 @@ func TestDialerDefaultPort(t *testing.T) {
 	}
 }
 
+// newTestCONNECTProxy returns an HTTP CONNECT proxy test server.
+func newTestCONNECTProxy(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "expected CONNECT", http.StatusMethodNotAllowed)
+			return
+		}
+
+		targetConn, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+
+		clientConn, _, err := hijacker.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+		go func() {
+			_, _ = io.Copy(targetConn, clientConn)
+		}()
+		_, _ = io.Copy(clientConn, targetConn)
+
+		clientConn.Close()
+		targetConn.Close()
+	}))
+}
+
 func TestDialerWithProxy(t *testing.T) {
 	// Start a WebSocket server.
 	upgrader := &Upgrader{
@@ -656,45 +681,7 @@ func TestDialerWithProxy(t *testing.T) {
 	}))
 	defer wsServer.Close()
 
-	// Start a proxy server.
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodConnect {
-			http.Error(w, "expected CONNECT", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Connect to target.
-		targetConn, err := net.Dial("tcp", r.Host)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		// Hijack the connection.
-		hijacker, ok := w.(http.Hijacker)
-		if !ok {
-			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
-			return
-		}
-
-		clientConn, _, err := hijacker.Hijack()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Send 200 OK.
-		_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-
-		// Relay data.
-		go func() {
-			_, _ = io.Copy(targetConn, clientConn)
-		}()
-		_, _ = io.Copy(clientConn, targetConn)
-
-		clientConn.Close()
-		targetConn.Close()
-	}))
+	proxyServer := newTestCONNECTProxy(t)
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
@@ -777,9 +764,13 @@ func TestConnUnderlyingConn(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close()
 
-	// Client with default http.Client has nil UnderlyingConn.
-	// This is expected since we use http.Client.Do() path.
-	conn.WriteMessage(TextMessage, []byte("test"))
+	// Default dialer now uses dialDirect which preserves net.Conn.
+	assert.NotNil(t, conn.UnderlyingConn())
+	assert.NotNil(t, conn.LocalAddr())
+	assert.NotNil(t, conn.RemoteAddr())
+
+	err = conn.WriteMessage(TextMessage, []byte("test"))
+	require.NoError(t, err)
 }
 
 func TestConnCloseWithBufferPool(t *testing.T) {
@@ -1071,7 +1062,7 @@ func TestDialerValidateHTTP1Response(t *testing.T) {
 	acceptKey := computeAcceptKey(challengeKey)
 
 	t.Run("Valid response", func(t *testing.T) {
-		d := &Dialer{Subprotocols: []string{"chat"}}
+		d := &Dialer{Subprotocols: []string{"chat"}, EnableCompression: true}
 
 		resp := &http.Response{
 			StatusCode: http.StatusSwitchingProtocols,
@@ -1165,6 +1156,106 @@ func TestDialerValidateHTTP1Response(t *testing.T) {
 	})
 }
 
+func TestDialerRejectsUnrequestedSubprotocol(t *testing.T) {
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	acceptKey := computeAcceptKey(challengeKey)
+
+	t.Run("HTTP1 rejects unrequested subprotocol", func(t *testing.T) {
+		d := &Dialer{} // No subprotocols requested.
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Protocol", "chat")
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("HTTP1 accepts when no subprotocol in response", func(t *testing.T) {
+		d := &Dialer{} // No subprotocols requested.
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		require.NoError(t, err)
+	})
+}
+
+func TestDialerRejectsUnrequestedCompression(t *testing.T) {
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	acceptKey := computeAcceptKey(challengeKey)
+
+	t.Run("HTTP1 rejects unrequested compression", func(t *testing.T) {
+		d := &Dialer{} // EnableCompression is false.
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("HTTP1 accepts compression when requested", func(t *testing.T) {
+		d := &Dialer{EnableCompression: true}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+
+		_, compress, err := d.validateHTTP1Response(resp, challengeKey)
+		require.NoError(t, err)
+		assert.True(t, compress)
+	})
+
+	t.Run("HTTP1 rejects unknown extension with compression enabled", func(t *testing.T) {
+		d := &Dialer{EnableCompression: true}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Extensions", "custom-ext")
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("HTTP1 rejects mixed known and unknown extensions", func(t *testing.T) {
+		d := &Dialer{EnableCompression: true}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+		resp.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate, custom-ext")
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+}
+
 func TestDialerBadSubprotocolInDoHandshake(t *testing.T) {
 	// Server that returns wrong subprotocol.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1196,4 +1287,1217 @@ func TestDialerBadSubprotocolInDoHandshake(t *testing.T) {
 	_, _, err := d.Dial(wsURL, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrBadHandshake)
+}
+
+func TestDialerNetDialContext(t *testing.T) {
+	t.Run("NetDialContext takes precedence over transport", func(t *testing.T) {
+		netDialCalled := false
+		transportDialCalled := false
+
+		d := &Dialer{
+			NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				netDialCalled = true
+				return nil, net.ErrClosed
+			},
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+						transportDialCalled = true
+						return nil, net.ErrClosed
+					},
+				},
+			},
+		}
+
+		_, _, _ = d.Dial("ws://example.com", nil)
+		assert.True(t, netDialCalled)
+		assert.False(t, transportDialCalled)
+	})
+
+	t.Run("NetDialContext used for wss connections", func(t *testing.T) {
+		called := false
+		d := &Dialer{
+			NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				called = true
+				return nil, net.ErrClosed
+			},
+		}
+
+		_, _, _ = d.Dial("wss://example.com", nil)
+		assert.True(t, called)
+	})
+}
+
+func TestDialerTLSClientConfig(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(msgType, msg)
+	}))
+	defer server.Close()
+
+	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
+
+	t.Run("d.TLSClientConfig takes precedence over transport", func(t *testing.T) {
+		serverTransport := server.Client().Transport.(*http.Transport)
+
+		d := &Dialer{
+			TLSClientConfig: serverTransport.TLSClientConfig,
+		}
+
+		conn, resp, err := d.Dial(wsURL, nil)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		defer conn.Close()
+
+		assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+		err = conn.WriteMessage(TextMessage, []byte("tls-config"))
+		require.NoError(t, err)
+
+		msgType, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, msgType)
+		assert.Equal(t, []byte("tls-config"), msg)
+	})
+}
+
+func TestDialerProxyField(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(msgType, msg)
+	}))
+	defer wsServer.Close()
+
+	proxyServer := newTestCONNECTProxy(t)
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	t.Run("d.Proxy used for proxy detection", func(t *testing.T) {
+		d := &Dialer{
+			Proxy: func(_ *http.Request) (*url.URL, error) {
+				return proxyURL, nil
+			},
+		}
+
+		conn, _, err := d.Dial(wsURL, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		err = conn.WriteMessage(TextMessage, []byte("proxy-field"))
+		require.NoError(t, err)
+
+		msgType, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, msgType)
+		assert.Equal(t, []byte("proxy-field"), msg)
+	})
+}
+
+func TestDialerDefaultPathPreservesNetConn(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	d := &Dialer{}
+	conn, _, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	assert.NotNil(t, conn.UnderlyingConn(), "UnderlyingConn should be non-nil")
+	assert.NotNil(t, conn.LocalAddr(), "LocalAddr should be non-nil")
+	assert.NotNil(t, conn.RemoteAddr(), "RemoteAddr should be non-nil")
+
+	// Deadlines should work (not return ErrDeadlineNotSupported).
+	err = conn.SetReadDeadline(time.Now().Add(time.Second))
+	assert.NoError(t, err)
+
+	err = conn.SetWriteDeadline(time.Now().Add(time.Second))
+	assert.NoError(t, err)
+
+	// Clear deadlines.
+	err = conn.SetReadDeadline(time.Time{})
+	assert.NoError(t, err)
+
+	err = conn.SetWriteDeadline(time.Time{})
+	assert.NoError(t, err)
+}
+
+func TestDialerRespBodySafeClose(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(msgType, msg)
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	d := &Dialer{}
+	conn, resp, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// Closing resp.Body should be safe and not kill the WebSocket connection.
+	err = resp.Body.Close()
+	require.NoError(t, err)
+
+	// Connection should still work after resp.Body.Close().
+	err = conn.WriteMessage(TextMessage, []byte("after-body-close"))
+	require.NoError(t, err)
+
+	msgType, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, TextMessage, msgType)
+	assert.Equal(t, []byte("after-body-close"), msg)
+}
+
+func TestDialerTLSConfig(t *testing.T) {
+	t.Run("Uses d.TLSClientConfig first", func(t *testing.T) {
+		customConfig := &tls.Config{ServerName: "custom.example.com"}
+		d := &Dialer{
+			TLSClientConfig: customConfig,
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{ServerName: "transport.example.com"},
+				},
+			},
+		}
+
+		cfg := d.tlsConfig("fallback.example.com")
+		assert.Equal(t, "custom.example.com", cfg.ServerName)
+	})
+
+	t.Run("Falls back to transport.TLSClientConfig", func(t *testing.T) {
+		d := &Dialer{
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{ServerName: "transport.example.com"},
+				},
+			},
+		}
+
+		cfg := d.tlsConfig("fallback.example.com")
+		assert.Equal(t, "transport.example.com", cfg.ServerName)
+	})
+
+	t.Run("Falls back to empty config with server name", func(t *testing.T) {
+		d := &Dialer{}
+		cfg := d.tlsConfig("fallback.example.com")
+		assert.Equal(t, "fallback.example.com", cfg.ServerName)
+	})
+
+	t.Run("Sets ServerName when empty in config", func(t *testing.T) {
+		d := &Dialer{
+			TLSClientConfig: &tls.Config{},
+		}
+
+		cfg := d.tlsConfig("auto.example.com")
+		assert.Equal(t, "auto.example.com", cfg.ServerName)
+	})
+
+	t.Run("Does not override existing ServerName", func(t *testing.T) {
+		d := &Dialer{
+			TLSClientConfig: &tls.Config{ServerName: "explicit.example.com"},
+		}
+
+		cfg := d.tlsConfig("auto.example.com")
+		assert.Equal(t, "explicit.example.com", cfg.ServerName)
+	})
+
+	t.Run("Clones config to avoid mutation", func(t *testing.T) {
+		original := &tls.Config{ServerName: "original.example.com"}
+		d := &Dialer{
+			TLSClientConfig: original,
+		}
+
+		cfg := d.tlsConfig("other.example.com")
+		assert.Equal(t, "original.example.com", cfg.ServerName)
+		assert.Equal(t, "original.example.com", original.ServerName)
+		assert.NotSame(t, original, cfg)
+	})
+}
+
+func TestDoHandshakePreservesBufferedData(t *testing.T) {
+	t.Run("Server sends message immediately after upgrade", func(t *testing.T) {
+		upgrader := &Upgrader{
+			CheckOrigin: func(_ *http.Request) bool { return true },
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+
+			// Send a message immediately after upgrade, before reading anything.
+			_ = conn.WriteMessage(TextMessage, []byte("server-push"))
+		}))
+		defer server.Close()
+
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+		d := &Dialer{}
+		conn, _, err := d.Dial(wsURL, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		// The client must receive the server-pushed message even if it
+		// was buffered during the HTTP response read.
+		msgType, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, msgType)
+		assert.Equal(t, "server-push", string(msg))
+	})
+}
+
+func TestValidateHTTP1ResponseMultiValueHeaders(t *testing.T) {
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	acceptKey := computeAcceptKey(challengeKey)
+
+	t.Run("Connection header with multiple tokens", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "Upgrade, Keep-Alive")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		require.NoError(t, err)
+	})
+
+	t.Run("Upgrade header with multiple tokens", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket, h2c")
+		resp.Header.Set("Connection", "upgrade")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		require.NoError(t, err)
+	})
+
+	t.Run("Connection header without upgrade token rejected", func(t *testing.T) {
+		d := &Dialer{}
+		resp := &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     make(http.Header),
+		}
+		resp.Header.Set("Upgrade", "websocket")
+		resp.Header.Set("Connection", "Keep-Alive")
+		resp.Header.Set("Sec-WebSocket-Accept", acceptKey)
+
+		_, _, err := d.validateHTTP1Response(resp, challengeKey)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+}
+
+func TestDialDirectHandshakeTimeoutSuccess(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(msgType, msg)
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	d := &Dialer{
+		HandshakeTimeout: 5 * time.Second,
+	}
+
+	conn, resp, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	err = conn.WriteMessage(TextMessage, []byte("timeout-ok"))
+	require.NoError(t, err)
+
+	msgType, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, TextMessage, msgType)
+	assert.Equal(t, []byte("timeout-ok"), msg)
+}
+
+func TestDialWithProxyHandshakeTimeout(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(msgType, msg)
+	}))
+	defer wsServer.Close()
+
+	proxyServer := newTestCONNECTProxy(t)
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	t.Run("Successful with timeout", func(t *testing.T) {
+		d := &Dialer{
+			Proxy: func(_ *http.Request) (*url.URL, error) {
+				return proxyURL, nil
+			},
+			HandshakeTimeout: 5 * time.Second,
+		}
+
+		conn, _, err := d.Dial(wsURL, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		err = conn.WriteMessage(TextMessage, []byte("proxy-timeout"))
+		require.NoError(t, err)
+
+		msgType, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, msgType)
+		assert.Equal(t, []byte("proxy-timeout"), msg)
+	})
+
+	t.Run("Handshake failure through proxy", func(t *testing.T) {
+		badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		defer badServer.Close()
+
+		badWsURL := "ws" + strings.TrimPrefix(badServer.URL, "http")
+
+		d := &Dialer{
+			Proxy: func(_ *http.Request) (*url.URL, error) {
+				return proxyURL, nil
+			},
+		}
+
+		_, _, err := d.Dial(badWsURL, nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+}
+
+func TestDialProxyAuth(t *testing.T) {
+	var receivedAuth string
+
+	// Proxy that records Proxy-Authorization header.
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Proxy-Authorization")
+
+		if r.Method != http.MethodConnect {
+			http.Error(w, "expected CONNECT", http.StatusMethodNotAllowed)
+			return
+		}
+
+		targetConn, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+
+		clientConn, _, err := hijacker.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+		go func() {
+			_, _ = io.Copy(targetConn, clientConn)
+		}()
+		_, _ = io.Copy(clientConn, targetConn)
+
+		clientConn.Close()
+		targetConn.Close()
+	}))
+	defer proxyServer.Close()
+
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		conn.Close()
+	}))
+	defer wsServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	proxyURL.User = url.UserPassword("user", "pass")
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return proxyURL, nil
+		},
+	}
+
+	conn, _, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	conn.Close()
+
+	assert.Equal(t, "Basic dXNlcjpwYXNz", receivedAuth)
+}
+
+func TestDialProxyNetDialContext(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		conn.Close()
+	}))
+	defer wsServer.Close()
+
+	proxyServer := newTestCONNECTProxy(t)
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	netDialCalled := false
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return proxyURL, nil
+		},
+		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			netDialCalled = true
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+
+	conn, _, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	conn.Close()
+
+	assert.True(t, netDialCalled)
+}
+
+func TestDialProxyWSSConnection(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	wsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(msgType, msg)
+	}))
+	defer wsServer.Close()
+
+	proxyServer := newTestCONNECTProxy(t)
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	wsURL := "wss" + strings.TrimPrefix(wsServer.URL, "https")
+
+	serverTransport := wsServer.Client().Transport.(*http.Transport)
+
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return proxyURL, nil
+		},
+		TLSClientConfig: serverTransport.TLSClientConfig,
+	}
+
+	conn, _, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	err = conn.WriteMessage(TextMessage, []byte("wss-proxy"))
+	require.NoError(t, err)
+
+	msgType, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, TextMessage, msgType)
+	assert.Equal(t, []byte("wss-proxy"), msg)
+}
+
+func TestDialProxyDefaultPort(t *testing.T) {
+	var dialedAddr string
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			proxyURL, _ := url.Parse("http://proxy.example.com")
+			return proxyURL, nil
+		},
+		NetDialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+			dialedAddr = addr
+			return nil, net.ErrClosed
+		},
+	}
+
+	_, _, err := d.Dial("ws://target.example.com", nil)
+	require.Error(t, err)
+	assert.Equal(t, "proxy.example.com:80", dialedAddr)
+}
+
+func TestDialProxyDialFailure(t *testing.T) {
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			proxyURL, _ := url.Parse("http://proxy.example.com:9999")
+			return proxyURL, nil
+		},
+		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, net.ErrClosed
+		},
+	}
+
+	_, _, err := d.Dial("ws://target.example.com", nil)
+	require.Error(t, err)
+}
+
+func TestDoHandshakeCookieJar(t *testing.T) {
+	var receivedCookie string
+
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedCookie = r.Header.Get("Cookie")
+
+		// Pass Set-Cookie via responseHeader since Upgrade writes raw headers.
+		respHeaders := http.Header{}
+		respHeaders.Set("Set-Cookie", "resp-cookie=resp-value")
+
+		conn, err := upgrader.Upgrade(w, r, respHeaders)
+		if err != nil {
+			return
+		}
+		conn.Close()
+	}))
+	defer server.Close()
+
+	serverURL, _ := url.Parse(server.URL)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	jar := &testCookieJar{
+		cookies: map[string][]*http.Cookie{
+			serverURL.Host: {
+				{Name: "test-cookie", Value: "test-value"},
+			},
+		},
+	}
+
+	d := &Dialer{Jar: jar}
+	conn, _, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	conn.Close()
+
+	assert.Contains(t, receivedCookie, "test-cookie=test-value")
+	assert.NotEmpty(t, jar.setCookies)
+}
+
+type testCookieJar struct {
+	cookies    map[string][]*http.Cookie
+	setCookies []*http.Cookie
+}
+
+func (j *testCookieJar) SetCookies(_ *url.URL, cookies []*http.Cookie) {
+	j.setCookies = append(j.setCookies, cookies...)
+}
+
+func (j *testCookieJar) Cookies(u *url.URL) []*http.Cookie {
+	return j.cookies[u.Host]
+}
+
+func TestDialHTTP2CookieJar(t *testing.T) {
+	server, client := net.Pipe()
+
+	u, _ := url.Parse("https://example.com/ws")
+
+	jar := &testCookieJar{
+		cookies: map[string][]*http.Cookie{
+			u.Host: {
+				{Name: "h2-cookie", Value: "h2-value"},
+			},
+		},
+	}
+
+	h := make(http.Header)
+	h.Set("Set-Cookie", "resp-h2=val; Path=/")
+
+	var capturedCookie string
+	d := &Dialer{Jar: jar}
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			capturedCookie = req.Header.Get("Cookie")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     h,
+				Body:       server,
+			}, nil
+		}),
+	}
+
+	conn, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	defer client.Close()
+
+	assert.Contains(t, capturedCookie, "h2-cookie=h2-value")
+	assert.NotEmpty(t, jar.setCookies)
+}
+
+func TestDialHTTP2UnrequestedSubprotocol(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+
+	h := make(http.Header)
+	h.Set("Sec-WebSocket-Protocol", "chat")
+
+	d := &Dialer{} // No Subprotocols.
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     h,
+				Body:       server,
+			}, nil
+		}),
+	}
+
+	u, _ := url.Parse("https://example.com/ws")
+	_, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrBadHandshake)
+}
+
+func TestDialHTTP2UnrequestedExtension(t *testing.T) {
+	t.Run("Rejects extension when compression disabled", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+
+		h := make(http.Header)
+		h.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+
+		d := &Dialer{} // EnableCompression is false.
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     h,
+					Body:       server,
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		_, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	t.Run("Rejects unknown extension with compression enabled", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+
+		h := make(http.Header)
+		h.Set("Sec-WebSocket-Extensions", "custom-ext")
+
+		d := &Dialer{EnableCompression: true}
+		httpClient := &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     h,
+					Body:       server,
+				}, nil
+			}),
+		}
+
+		u, _ := url.Parse("https://example.com/ws")
+		_, _, err := d.dialHTTP2(context.Background(), httpClient, u, nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+}
+
+func TestGetProxyURLErrors(t *testing.T) {
+	t.Run("d.Proxy returns error", func(t *testing.T) {
+		d := &Dialer{
+			Proxy: func(_ *http.Request) (*url.URL, error) {
+				return nil, errors.New("proxy error")
+			},
+		}
+		u, _ := url.Parse("http://example.com")
+		assert.Nil(t, d.getProxyURL(u))
+	})
+
+	t.Run("d.Proxy returns nil URL", func(t *testing.T) {
+		d := &Dialer{
+			Proxy: func(_ *http.Request) (*url.URL, error) {
+				return nil, nil
+			},
+		}
+		u, _ := url.Parse("http://example.com")
+		assert.Nil(t, d.getProxyURL(u))
+	})
+
+	t.Run("transport.Proxy returns error", func(t *testing.T) {
+		d := &Dialer{
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					Proxy: func(_ *http.Request) (*url.URL, error) {
+						return nil, errors.New("transport proxy error")
+					},
+				},
+			},
+		}
+		u, _ := url.Parse("http://example.com")
+		assert.Nil(t, d.getProxyURL(u))
+	})
+
+	t.Run("transport.Proxy returns nil URL", func(t *testing.T) {
+		d := &Dialer{
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					Proxy: func(_ *http.Request) (*url.URL, error) {
+						return nil, nil
+					},
+				},
+			},
+		}
+		u, _ := url.Parse("http://example.com")
+		assert.Nil(t, d.getProxyURL(u))
+	})
+}
+
+func TestDialTLSHandshakeFailure(t *testing.T) {
+	// Server that accepts TCP but is not TLS.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			time.Sleep(100 * time.Millisecond)
+			conn.Close()
+		}
+	}()
+
+	d := &Dialer{}
+	_, _, err = d.Dial("wss://"+listener.Addr().String(), nil)
+	require.Error(t, err)
+}
+
+func TestDialContextHTTP2Path(t *testing.T) {
+	// This test verifies that DialContext dispatches to dialHTTP2 for HTTP/2 transport.
+	// The connection will fail because http2.Transport can't connect, but the dispatch is hit.
+	d := &Dialer{
+		HTTPClient: &http.Client{
+			Transport: &http2.Transport{},
+		},
+	}
+
+	_, _, err := d.DialContext(context.Background(), "wss://127.0.0.1:1", nil)
+	require.Error(t, err)
+}
+
+func TestDialProxyTransportDialContext(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		conn.Close()
+	}))
+	defer wsServer.Close()
+
+	proxyServer := newTestCONNECTProxy(t)
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	transportDialCalled := false
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return proxyURL, nil
+		},
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					transportDialCalled = true
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, network, addr)
+				},
+			},
+		},
+	}
+
+	conn, _, err := d.Dial(wsURL, nil)
+	require.NoError(t, err)
+	conn.Close()
+
+	assert.True(t, transportDialCalled)
+}
+
+func TestDialWithProxyTransportDialContextForProxy(t *testing.T) {
+	// Verify that transport.DialContext is used when NetDialContext is not set
+	// and proxy connection uses the transport dial chain.
+	transportDialCalled := false
+
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			proxyURL, _ := url.Parse("http://proxy.example.com:9999")
+			return proxyURL, nil
+		},
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					transportDialCalled = true
+					return nil, net.ErrClosed
+				},
+			},
+		},
+	}
+
+	_, _, err := d.Dial("ws://example.com", nil)
+	require.Error(t, err)
+	assert.True(t, transportDialCalled)
+}
+
+// errMockSetDeadline is a sentinel error for testing SetDeadline failures.
+var errMockSetDeadline = errors.New("mock: SetDeadline error")
+
+// deadlineMockConn wraps net.Conn with configurable SetDeadline failure for testing.
+type deadlineMockConn struct {
+	net.Conn
+	setDeadlineFailAt int // fail on Nth SetDeadline call (1-based); 0 = always pass through
+	setDeadlineCalls  int
+}
+
+func (c *deadlineMockConn) SetDeadline(t time.Time) error {
+	c.setDeadlineCalls++
+	if c.setDeadlineFailAt > 0 && c.setDeadlineCalls >= c.setDeadlineFailAt {
+		return errMockSetDeadline
+	}
+	return c.Conn.SetDeadline(t)
+}
+
+func TestDialDirectSetDeadlineErrors(t *testing.T) {
+	t.Run("set deadline error before handshake", func(t *testing.T) {
+		s, c := net.Pipe()
+		defer s.Close()
+		go func() { _, _ = io.Copy(io.Discard, s) }()
+
+		d := &Dialer{
+			HandshakeTimeout: time.Second,
+			NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return &deadlineMockConn{Conn: c, setDeadlineFailAt: 1}, nil
+			},
+		}
+
+		_, _, err := d.Dial("ws://example.com", nil)
+		require.ErrorIs(t, err, errMockSetDeadline)
+	})
+
+	t.Run("clear deadline error after handshake", func(t *testing.T) {
+		upgrader := &Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}))
+		defer server.Close()
+
+		d := &Dialer{
+			HandshakeTimeout: 5 * time.Second,
+			NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var dialer net.Dialer
+				conn, err := dialer.DialContext(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				return &deadlineMockConn{Conn: conn, setDeadlineFailAt: 2}, nil
+			},
+		}
+
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		_, _, err := d.Dial(wsURL, nil)
+		require.ErrorIs(t, err, errMockSetDeadline)
+	})
+}
+
+func TestDialWithProxySetDeadlineErrors(t *testing.T) {
+	t.Run("set deadline error before handshake", func(t *testing.T) {
+		wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer wsServer.Close()
+
+		proxyServer := newTestCONNECTProxy(t)
+		defer proxyServer.Close()
+		proxyURL, _ := url.Parse(proxyServer.URL)
+
+		d := &Dialer{
+			HandshakeTimeout: 5 * time.Second,
+			Proxy:            func(_ *http.Request) (*url.URL, error) { return proxyURL, nil },
+			NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var dialer net.Dialer
+				conn, err := dialer.DialContext(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				return &deadlineMockConn{Conn: conn, setDeadlineFailAt: 1}, nil
+			},
+		}
+
+		wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+		_, _, err := d.Dial(wsURL, nil)
+		require.ErrorIs(t, err, errMockSetDeadline)
+	})
+
+	t.Run("clear deadline error after handshake", func(t *testing.T) {
+		upgrader := &Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+		wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}))
+		defer wsServer.Close()
+
+		proxyServer := newTestCONNECTProxy(t)
+		defer proxyServer.Close()
+		proxyURL, _ := url.Parse(proxyServer.URL)
+
+		d := &Dialer{
+			HandshakeTimeout: 5 * time.Second,
+			Proxy:            func(_ *http.Request) (*url.URL, error) { return proxyURL, nil },
+			NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var dialer net.Dialer
+				conn, err := dialer.DialContext(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				return &deadlineMockConn{Conn: conn, setDeadlineFailAt: 2}, nil
+			},
+		}
+
+		wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+		_, _, err := d.Dial(wsURL, nil)
+		require.ErrorIs(t, err, errMockSetDeadline)
+	})
+}
+
+func TestDialProxyConnectWriteError(t *testing.T) {
+	s, c := net.Pipe()
+	s.Close()
+
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return &url.URL{Host: "proxy.example.com:8080"}, nil
+		},
+		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return c, nil
+		},
+	}
+
+	_, _, err := d.Dial("ws://target.example.com", nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
+func TestDialProxyReadResponseError(t *testing.T) {
+	s, c := net.Pipe()
+	go func() {
+		br := bufio.NewReader(s)
+		req, _ := http.ReadRequest(br)
+		if req != nil {
+			req.Body.Close()
+		}
+		s.Close()
+	}()
+
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return &url.URL{Host: "proxy.example.com:8080"}, nil
+		},
+		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return c, nil
+		},
+	}
+
+	_, _, err := d.Dial("ws://target.example.com", nil)
+	require.Error(t, err)
+}
+
+func TestDialProxyTLSHandshakeError(t *testing.T) {
+	s, c := net.Pipe()
+	go func() {
+		defer s.Close()
+		br := bufio.NewReader(s)
+		req, _ := http.ReadRequest(br)
+		if req != nil {
+			req.Body.Close()
+		}
+		_, _ = s.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		// Read TLS ClientHello attempt, then close to fail the handshake.
+		buf := make([]byte, 4096)
+		_, _ = s.Read(buf)
+	}()
+
+	d := &Dialer{
+		Proxy: func(_ *http.Request) (*url.URL, error) {
+			return &url.URL{Host: "proxy.example.com:8080"}, nil
+		},
+		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return c, nil
+		},
+	}
+
+	_, _, err := d.Dial("wss://target.example.com", nil)
+	require.Error(t, err)
+}
+
+func TestDoHandshakeWriteError(t *testing.T) {
+	s, c := net.Pipe()
+	s.Close()
+
+	d := &Dialer{
+		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return c, nil
+		},
+	}
+
+	_, _, err := d.Dial("ws://example.com", nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
+func TestGenerateChallengeKeyRandError(t *testing.T) {
+	origRandReader := randReader
+	testErr := errors.New("rand read error")
+	randReader = &errReader{err: testErr}
+	defer func() { randReader = origRandReader }()
+
+	_, err := generateChallengeKey()
+	require.ErrorIs(t, err, testErr)
+}
+
+func TestDoHandshakeRandError(t *testing.T) {
+	s, c := net.Pipe()
+	defer s.Close()
+	go func() { _, _ = io.Copy(io.Discard, s) }()
+
+	origRandReader := randReader
+	testErr := errors.New("rand read error")
+	randReader = &errReader{err: testErr}
+	defer func() { randReader = origRandReader }()
+
+	d := &Dialer{
+		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return c, nil
+		},
+	}
+
+	_, _, err := d.Dial("ws://example.com", nil)
+	require.ErrorIs(t, err, testErr)
 }

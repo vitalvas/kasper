@@ -357,6 +357,84 @@ func TestCompressedWriterClose(t *testing.T) {
 	})
 }
 
+func TestDecompressDataLimited(t *testing.T) {
+	t.Run("Within limit", func(t *testing.T) {
+		original := bytes.Repeat([]byte("a"), 100)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		result, err := decompressDataLimited(compressed, 200)
+		require.NoError(t, err)
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("Exceeds limit", func(t *testing.T) {
+		original := bytes.Repeat([]byte("a"), 1000)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		_, err = decompressDataLimited(compressed, 100)
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+
+	t.Run("Exactly at limit", func(t *testing.T) {
+		original := bytes.Repeat([]byte("b"), 500)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		result, err := decompressDataLimited(compressed, 500)
+		require.NoError(t, err)
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("Zero limit means no limit", func(t *testing.T) {
+		original := bytes.Repeat([]byte("c"), 10000)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		result, err := decompressDataLimited(compressed, 0)
+		require.NoError(t, err)
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("Decompression bomb blocked", func(t *testing.T) {
+		// Highly compressible data: 100KB of zeros compresses to very small.
+		original := make([]byte, 100*1024)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		// Compressed size should be much smaller than original.
+		assert.Less(t, len(compressed), len(original)/10)
+
+		// Limit to 1KB should block the decompression bomb.
+		_, err = decompressDataLimited(compressed, 1024)
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+}
+
+func TestCompressedWriterInvalidLevel(t *testing.T) {
+	t.Run("Write returns error for invalid compression level", func(t *testing.T) {
+		cw := newCompressedWriter(nil, 99)
+		_, err := cw.Write([]byte("data"))
+		assert.Error(t, err)
+	})
+}
+
+func TestCompressDataInvalidLevel(t *testing.T) {
+	t.Run("Returns error for invalid compression level", func(t *testing.T) {
+		_, err := compressData([]byte("test"), 99)
+		assert.Error(t, err)
+	})
+}
+
+func TestDecompressDataLimitedCorruptedData(t *testing.T) {
+	t.Run("Returns error for corrupted compressed data", func(t *testing.T) {
+		corrupted := []byte{0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa}
+		_, err := decompressDataLimited(corrupted, 1024)
+		assert.Error(t, err)
+	})
+}
+
 func BenchmarkCompression(b *testing.B) {
 	sizes := []struct {
 		name string

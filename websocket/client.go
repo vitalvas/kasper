@@ -3,7 +3,6 @@ package websocket
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
@@ -33,6 +32,21 @@ type Dialer struct {
 	//
 	// For HTTP/2 WebSocket (RFC 8441), use an http.Client with http2.Transport.
 	HTTPClient *http.Client
+
+	// NetDialContext specifies a custom dial function for creating TCP connections.
+	// Takes precedence over HTTPClient.Transport.(*http.Transport).DialContext.
+	// If nil, falls back to the transport's DialContext or net.Dialer.
+	NetDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// Proxy specifies a function to return a proxy for a given request.
+	// Takes precedence over HTTPClient.Transport.(*http.Transport).Proxy.
+	// If nil, falls back to the transport's Proxy function.
+	Proxy func(*http.Request) (*url.URL, error)
+
+	// TLSClientConfig specifies the TLS configuration to use for wss:// connections.
+	// Takes precedence over HTTPClient.Transport.(*http.Transport).TLSClientConfig.
+	// If nil, falls back to the transport's TLSClientConfig.
+	TLSClientConfig *tls.Config
 
 	// HandshakeTimeout specifies the duration for the handshake to complete.
 	// If zero, no timeout is applied.
@@ -95,18 +109,14 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 	}
 
 	// Check if proxy is configured - need special handling for WebSocket.
-	proxyURL := d.getProxyURL(client, u)
+	proxyURL := d.getProxyURL(u)
 	if proxyURL != nil {
-		return d.dialWithProxy(ctx, client, u, proxyURL, requestHeader)
+		return d.dialWithProxy(ctx, u, proxyURL, requestHeader)
 	}
 
-	// Check if custom dial is configured.
-	if d.hasCustomDial(client) {
-		return d.dialWithTransport(ctx, client, u, requestHeader)
-	}
-
-	// Standard HTTP/1.1 upgrade via http.Client.
-	return d.dialHTTP1(ctx, client, u, requestHeader)
+	// Direct dial with raw net.Conn, preserving the connection for
+	// LocalAddr, RemoteAddr, UnderlyingConn, and deadline access.
+	return d.dialDirect(ctx, u, requestHeader)
 }
 
 // isHTTP2 checks if the client's transport is HTTP/2.
@@ -119,107 +129,127 @@ func (d *Dialer) isHTTP2(client *http.Client) bool {
 }
 
 // getProxyURL returns the proxy URL for the given target URL, or nil if no proxy.
-func (d *Dialer) getProxyURL(client *http.Client, u *url.URL) *url.URL {
-	transport, ok := client.Transport.(*http.Transport)
-	if !ok || transport == nil || transport.Proxy == nil {
-		return nil
-	}
-
+// Resolution chain: d.Proxy -> transport.Proxy.
+func (d *Dialer) getProxyURL(u *url.URL) *url.URL {
 	req := &http.Request{URL: u}
-	proxyURL, err := transport.Proxy(req)
-	if err != nil || proxyURL == nil {
-		return nil
-	}
-	return proxyURL
-}
 
-// hasCustomDial checks if the transport has custom dial functions.
-func (d *Dialer) hasCustomDial(client *http.Client) bool {
-	transport, ok := client.Transport.(*http.Transport)
-	if !ok || transport == nil {
-		return false
-	}
-	return transport.DialContext != nil || transport.DialTLSContext != nil
-}
-
-// dialHTTP1 establishes a WebSocket connection over HTTP/1.1 per RFC 6455.
-// Uses http.Client for simple cases without proxy or custom dial.
-// Note: this relies on resp.Body implementing io.ReadWriteCloser for 101 responses,
-// which is standard Go http.Client behavior but not formally guaranteed.
-func (d *Dialer) dialHTTP1(ctx context.Context, client *http.Client, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
-	challengeKey, err := generateChallengeKey()
-	if err != nil {
-		return nil, nil, err
+	if d.Proxy != nil {
+		proxyURL, err := d.Proxy(req)
+		if err != nil || proxyURL == nil {
+			return nil
+		}
+		return proxyURL
 	}
 
-	req := &http.Request{
-		Method: http.MethodGet,
-		URL:    u,
-		Header: make(http.Header),
-		Host:   u.Host,
-	}
-	req = req.WithContext(ctx)
-
-	d.buildHandshakeHeaders(req, requestHeader, challengeKey)
-
-	if d.Jar != nil {
-		for _, cookie := range d.Jar.Cookies(u) {
-			req.AddCookie(cookie)
+	if d.HTTPClient != nil {
+		transport, ok := d.HTTPClient.Transport.(*http.Transport)
+		if ok && transport != nil && transport.Proxy != nil {
+			proxyURL, err := transport.Proxy(req)
+			if err != nil || proxyURL == nil {
+				return nil
+			}
+			return proxyURL
 		}
 	}
 
-	// Apply HandshakeTimeout via context if configured.
-	if d.HandshakeTimeout > 0 {
-		timeoutCtx, cancel := context.WithTimeout(ctx, d.HandshakeTimeout)
-		defer cancel()
-		req = req.WithContext(timeoutCtx)
+	return nil
+}
+
+// tlsConfig returns the TLS configuration for the given server name.
+// Resolution chain: d.TLSClientConfig -> transport.TLSClientConfig -> empty config.
+func (d *Dialer) tlsConfig(serverName string) *tls.Config {
+	if d.TLSClientConfig != nil {
+		cfg := d.TLSClientConfig.Clone()
+		if cfg.ServerName == "" {
+			cfg.ServerName = serverName
+		}
+		return cfg
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if d.Jar != nil {
-		if rc := resp.Cookies(); len(rc) > 0 {
-			d.Jar.SetCookies(u, rc)
+	if d.HTTPClient != nil {
+		if transport, ok := d.HTTPClient.Transport.(*http.Transport); ok && transport != nil && transport.TLSClientConfig != nil {
+			cfg := transport.TLSClientConfig.Clone()
+			if cfg.ServerName == "" {
+				cfg.ServerName = serverName
+			}
+			return cfg
 		}
 	}
 
-	return d.finishHTTP1Handshake(resp, challengeKey)
+	return &tls.Config{ServerName: serverName}
 }
 
-// dialWithTransport establishes a WebSocket connection using transport's dial functions.
-func (d *Dialer) dialWithTransport(ctx context.Context, client *http.Client, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
-	transport := client.Transport.(*http.Transport)
+// dial establishes a TCP or TLS connection using the resolution chain:
+// TLS fast-path (transport.DialTLSContext), then TCP dial (d.NetDialContext ->
+// transport.DialContext -> net.Dialer), then TLS handshake if needed.
+func (d *Dialer) dial(ctx context.Context, isTLS bool, hostPort, serverName string) (net.Conn, error) {
+	var transport *http.Transport
+	if d.HTTPClient != nil {
+		transport, _ = d.HTTPClient.Transport.(*http.Transport)
+	}
 
+	// TLS fast-path: use transport.DialTLSContext if available.
+	if isTLS && transport != nil && transport.DialTLSContext != nil {
+		return transport.DialTLSContext(ctx, "tcp", hostPort)
+	}
+
+	// TCP dial: d.NetDialContext -> transport.DialContext -> net.Dialer.
+	var netConn net.Conn
+	var err error
+
+	switch {
+	case d.NetDialContext != nil:
+		netConn, err = d.NetDialContext(ctx, "tcp", hostPort)
+	case transport != nil && transport.DialContext != nil:
+		netConn, err = transport.DialContext(ctx, "tcp", hostPort)
+	default:
+		var dialer net.Dialer
+		netConn, err = dialer.DialContext(ctx, "tcp", hostPort)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if !isTLS {
+		return netConn, nil
+	}
+
+	// TLS handshake.
+	tlsConf := d.tlsConfig(serverName)
+	tlsConn := tls.Client(netConn, tlsConf)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		netConn.Close()
+		return nil, err
+	}
+	return tlsConn, nil
+}
+
+// dialDirect establishes a WebSocket connection by dialing TCP directly,
+// preserving the net.Conn for address and deadline access.
+func (d *Dialer) dialDirect(ctx context.Context, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
 	hostPort := hostPortFromURL(u)
+	isTLS := u.Scheme == "https"
 
-	var deadline time.Time
-	if d.HandshakeTimeout > 0 {
-		deadline = time.Now().Add(d.HandshakeTimeout)
-	}
-
-	// Dial using transport's dial function.
-	netConn, err := d.dialNet(ctx, transport, u.Scheme == "https", hostPort, u.Hostname())
+	netConn, err := d.dial(ctx, isTLS, hostPort, u.Hostname())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if !deadline.IsZero() {
+	if d.HandshakeTimeout > 0 {
+		deadline := time.Now().Add(d.HandshakeTimeout)
 		if err := netConn.SetDeadline(deadline); err != nil {
 			netConn.Close()
 			return nil, nil, err
 		}
 	}
 
-	conn, resp, err := d.doHandshake(ctx, netConn, u, requestHeader, transport.TLSClientConfig)
+	conn, resp, err := d.doHandshake(ctx, netConn, u, requestHeader)
 	if err != nil {
 		netConn.Close()
 		return nil, resp, err
 	}
 
-	if !deadline.IsZero() {
+	if d.HandshakeTimeout > 0 {
 		if err := netConn.SetDeadline(time.Time{}); err != nil {
 			conn.Close()
 			return nil, resp, err
@@ -230,16 +260,14 @@ func (d *Dialer) dialWithTransport(ctx context.Context, client *http.Client, u *
 }
 
 // dialWithProxy establishes a WebSocket connection through an HTTP proxy.
-func (d *Dialer) dialWithProxy(ctx context.Context, client *http.Client, u *url.URL, proxyURL *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
-	transport, _ := client.Transport.(*http.Transport)
-
+func (d *Dialer) dialWithProxy(ctx context.Context, u *url.URL, proxyURL *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
 	var deadline time.Time
 	if d.HandshakeTimeout > 0 {
 		deadline = time.Now().Add(d.HandshakeTimeout)
 	}
 
 	// Connect to proxy.
-	proxyConn, err := d.dialProxy(ctx, transport, proxyURL, u)
+	proxyConn, err := d.dialProxy(ctx, proxyURL, u)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -251,12 +279,7 @@ func (d *Dialer) dialWithProxy(ctx context.Context, client *http.Client, u *url.
 		}
 	}
 
-	var tlsConfig *tls.Config
-	if transport != nil {
-		tlsConfig = transport.TLSClientConfig
-	}
-
-	conn, resp, err := d.doHandshake(ctx, proxyConn, u, requestHeader, tlsConfig)
+	conn, resp, err := d.doHandshake(ctx, proxyConn, u, requestHeader)
 	if err != nil {
 		proxyConn.Close()
 		return nil, resp, err
@@ -274,7 +297,7 @@ func (d *Dialer) dialWithProxy(ctx context.Context, client *http.Client, u *url.
 
 // dialProxy connects to the proxy and establishes a CONNECT tunnel per RFC 7231, section 4.3.6.
 // This allows WebSocket traffic to be tunneled through HTTP proxies.
-func (d *Dialer) dialProxy(ctx context.Context, transport *http.Transport, proxyURL *url.URL, targetURL *url.URL) (net.Conn, error) {
+func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *url.URL) (net.Conn, error) {
 	proxyHost := proxyURL.Host
 	if proxyURL.Port() == "" {
 		proxyHost = net.JoinHostPort(proxyURL.Hostname(), "80")
@@ -282,13 +305,22 @@ func (d *Dialer) dialProxy(ctx context.Context, transport *http.Transport, proxy
 
 	targetHostPort := hostPortFromURL(targetURL)
 
-	// Dial to proxy server.
+	// Dial to proxy server using the resolution chain:
+	// d.NetDialContext -> transport.DialContext -> net.Dialer.
 	var proxyConn net.Conn
 	var err error
 
-	if transport != nil && transport.DialContext != nil {
+	var transport *http.Transport
+	if d.HTTPClient != nil {
+		transport, _ = d.HTTPClient.Transport.(*http.Transport)
+	}
+
+	switch {
+	case d.NetDialContext != nil:
+		proxyConn, err = d.NetDialContext(ctx, "tcp", proxyHost)
+	case transport != nil && transport.DialContext != nil:
 		proxyConn, err = transport.DialContext(ctx, "tcp", proxyHost)
-	} else {
+	default:
 		var dialer net.Dialer
 		proxyConn, err = dialer.DialContext(ctx, "tcp", proxyHost)
 	}
@@ -333,15 +365,9 @@ func (d *Dialer) dialProxy(ctx context.Context, transport *http.Transport, proxy
 
 	// For wss://, upgrade to TLS.
 	if targetURL.Scheme == "https" {
-		tlsConfig := &tls.Config{}
-		if transport != nil && transport.TLSClientConfig != nil {
-			tlsConfig = transport.TLSClientConfig.Clone()
-		}
-		if tlsConfig.ServerName == "" {
-			tlsConfig.ServerName = targetURL.Hostname()
-		}
+		tlsConf := d.tlsConfig(targetURL.Hostname())
 
-		tlsConn := tls.Client(proxyConn, tlsConfig)
+		tlsConn := tls.Client(proxyConn, tlsConf)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			proxyConn.Close()
 			return nil, err
@@ -352,53 +378,9 @@ func (d *Dialer) dialProxy(ctx context.Context, transport *http.Transport, proxy
 	return proxyConn, nil
 }
 
-// dialNet dials using the transport's dial functions.
-func (d *Dialer) dialNet(ctx context.Context, transport *http.Transport, isTLS bool, hostPort, serverName string) (net.Conn, error) {
-	if isTLS {
-		if transport.DialTLSContext != nil {
-			return transport.DialTLSContext(ctx, "tcp", hostPort)
-		}
-
-		// Use DialContext + manual TLS.
-		var netConn net.Conn
-		var err error
-		if transport.DialContext != nil {
-			netConn, err = transport.DialContext(ctx, "tcp", hostPort)
-		} else {
-			var dialer net.Dialer
-			netConn, err = dialer.DialContext(ctx, "tcp", hostPort)
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		tlsConfig := &tls.Config{}
-		if transport.TLSClientConfig != nil {
-			tlsConfig = transport.TLSClientConfig.Clone()
-		}
-		if tlsConfig.ServerName == "" {
-			tlsConfig.ServerName = serverName
-		}
-
-		tlsConn := tls.Client(netConn, tlsConfig)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			netConn.Close()
-			return nil, err
-		}
-		return tlsConn, nil
-	}
-
-	if transport.DialContext != nil {
-		return transport.DialContext(ctx, "tcp", hostPort)
-	}
-
-	var dialer net.Dialer
-	return dialer.DialContext(ctx, "tcp", hostPort)
-}
-
 // doHandshake performs the client-side opening handshake per RFC 6455, section 4.1.
-// Used for connections established via raw net.Conn (proxy/custom dial paths).
-func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, requestHeader http.Header, _ *tls.Config) (*Conn, *http.Response, error) {
+// Used for connections established via raw net.Conn (direct dial and proxy paths).
+func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
 	challengeKey, err := generateChallengeKey()
 	if err != nil {
 		return nil, nil, err
@@ -444,9 +426,19 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 		return nil, resp, err
 	}
 
+	// Prevent callers from closing the underlying connection via resp.Body.
+	// The WebSocket Conn now owns the stream; resp is only useful for reading headers.
+	resp.Body = http.NoBody
+
 	conn := newConnWithPool(netConn, false, d.ReadBufferSize, d.WriteBufferSize, d.WriteBufferPool)
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
+
+	// Reuse the handshake bufio.Reader if it buffered data beyond the HTTP response.
+	// Without this, early WebSocket frames from the server would be silently lost.
+	if br.Buffered() > 0 {
+		conn.br = br
+	}
 
 	return conn, resp, nil
 }
@@ -481,11 +473,11 @@ func (d *Dialer) validateHTTP1Response(resp *http.Response, challengeKey string)
 		return "", false, ErrBadHandshake
 	}
 
-	if !strings.EqualFold(resp.Header.Get("Upgrade"), "websocket") {
+	if !headerContainsToken(resp.Header, "Upgrade", "websocket") {
 		return "", false, ErrBadHandshake
 	}
 
-	if !strings.EqualFold(resp.Header.Get("Connection"), "upgrade") {
+	if !headerContainsToken(resp.Header, "Connection", "upgrade") {
 		return "", false, ErrBadHandshake
 	}
 
@@ -494,44 +486,29 @@ func (d *Dialer) validateHTTP1Response(resp *http.Response, challengeKey string)
 		return "", false, ErrBadHandshake
 	}
 
+	// Validate subprotocol per RFC 6455, section 4.1: if the server sends a
+	// Sec-WebSocket-Protocol value that was not present in the client's handshake,
+	// the client must fail the connection. This includes any value when the client
+	// did not request subprotocols at all.
 	subprotocol = resp.Header.Get("Sec-WebSocket-Protocol")
-	if subprotocol != "" && len(d.Subprotocols) > 0 {
-		if !slices.Contains(d.Subprotocols, subprotocol) {
+	if subprotocol != "" {
+		if len(d.Subprotocols) == 0 || !slices.Contains(d.Subprotocols, subprotocol) {
 			return "", false, ErrBadHandshake
 		}
 	}
 
+	// Validate extensions per RFC 6455, section 4.1: if the server includes
+	// an extension that was not present in the client's handshake, the client
+	// must fail the connection.
 	for _, ext := range parseExtensions(resp.Header) {
-		if ext.name == "permessage-deflate" {
+		if d.EnableCompression && ext.name == "permessage-deflate" {
 			compress = true
-			break
+			continue
 		}
+		return "", false, ErrBadHandshake
 	}
 
 	return subprotocol, compress, nil
-}
-
-// finishHTTP1Handshake validates the server response and creates the WebSocket connection.
-// For 101 responses, resp.Body must implement io.ReadWriteCloser, which is standard
-// Go http.Client behavior for upgraded connections.
-func (d *Dialer) finishHTTP1Handshake(resp *http.Response, challengeKey string) (*Conn, *http.Response, error) {
-	subprotocol, compress, err := d.validateHTTP1Response(resp, challengeKey)
-	if err != nil {
-		resp.Body.Close()
-		return nil, resp, err
-	}
-
-	rwc, ok := resp.Body.(io.ReadWriteCloser)
-	if !ok {
-		resp.Body.Close()
-		return nil, resp, errors.New("websocket: response body is not ReadWriteCloser")
-	}
-
-	conn := newConnFromRWC(rwc, nil, false, d.ReadBufferSize, d.WriteBufferSize, d.WriteBufferPool)
-	conn.subprotocol = subprotocol
-	conn.compressionEnabled = compress
-
-	return conn, resp, nil
 }
 
 // dialHTTP2 establishes a WebSocket connection over HTTP/2 per RFC 8441.
@@ -588,22 +565,29 @@ func (d *Dialer) dialHTTP2(ctx context.Context, client *http.Client, u *url.URL,
 		return nil, resp, ErrBadHandshake
 	}
 
-	// Validate subprotocol per RFC 6455, section 4.2.2.
+	// Validate subprotocol per RFC 6455, section 4.1: if the server sends a
+	// Sec-WebSocket-Protocol value that was not present in the client's handshake,
+	// the client must fail the connection. This includes any value when the client
+	// did not request subprotocols at all.
 	subprotocol := resp.Header.Get("Sec-WebSocket-Protocol")
-	if subprotocol != "" && len(d.Subprotocols) > 0 {
-		if !slices.Contains(d.Subprotocols, subprotocol) {
+	if subprotocol != "" {
+		if len(d.Subprotocols) == 0 || !slices.Contains(d.Subprotocols, subprotocol) {
 			resp.Body.Close()
 			return nil, resp, ErrBadHandshake
 		}
 	}
 
-	// Check for permessage-deflate extension per RFC 7692.
+	// Validate extensions per RFC 6455, section 4.1: if the server includes
+	// an extension that was not present in the client's handshake, the client
+	// must fail the connection.
 	var compress bool
 	for _, ext := range parseExtensions(resp.Header) {
-		if ext.name == "permessage-deflate" {
+		if d.EnableCompression && ext.name == "permessage-deflate" {
 			compress = true
-			break
+			continue
 		}
+		resp.Body.Close()
+		return nil, resp, ErrBadHandshake
 	}
 
 	// Create a connection wrapper around the response body.
@@ -637,7 +621,7 @@ func hostPortFromURL(u *url.URL) string {
 // per RFC 6455, section 4.1.
 func generateChallengeKey() (string, error) {
 	key := make([]byte, 16)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
+	if _, err := io.ReadFull(randReader, key); err != nil {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(key), nil

@@ -341,9 +341,10 @@ func (c *Conn) SetReadLimit(limit int64) {
 // how long to wait for a pong response before considering the connection dead.
 // The goroutine stops when the connection is closed.
 func (c *Conn) StartKeepalive(interval, pongTimeout time.Duration) {
-	lastPong := time.Now()
+	var lastPong atomic.Int64
+	lastPong.Store(time.Now().UnixNano())
 	c.SetPongHandler(func(_ string) error {
-		lastPong = time.Now()
+		lastPong.Store(time.Now().UnixNano())
 		return nil
 	})
 
@@ -356,7 +357,8 @@ func (c *Conn) StartKeepalive(interval, pongTimeout time.Duration) {
 				return
 			}
 
-			if time.Since(lastPong) > interval+pongTimeout {
+			elapsed := time.Since(time.Unix(0, lastPong.Load()))
+			if elapsed > interval+pongTimeout {
 				_ = c.Close()
 				return
 			}
@@ -452,6 +454,12 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	}
 
 	_, err := c.rwc.Write(frame)
+
+	// Clear the deadline so subsequent data writes are not affected.
+	if c.netConn != nil {
+		_ = c.netConn.SetWriteDeadline(time.Time{})
+	}
+
 	if messageType == CloseMessage {
 		c.writeErr = ErrCloseSent
 	}
@@ -517,7 +525,9 @@ func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
 // to unblock any pending read operation.
 func (c *Conn) ReadMessageContext(ctx context.Context) (messageType int, p []byte, err error) {
 	done := make(chan struct{})
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		select {
 		case <-ctx.Done():
 			_ = c.SetReadDeadline(time.Now())
@@ -527,9 +537,14 @@ func (c *Conn) ReadMessageContext(ctx context.Context) (messageType int, p []byt
 
 	messageType, p, err = c.ReadMessage()
 	close(done)
+	<-finished // wait for goroutine to complete before resetting deadline
 
-	if ctx.Err() != nil && err != nil {
-		return 0, nil, ctx.Err()
+	if ctx.Err() != nil {
+		// Reset the deadline so subsequent reads are not affected.
+		_ = c.SetReadDeadline(time.Time{})
+		if err != nil {
+			return 0, nil, ctx.Err()
+		}
 	}
 
 	return messageType, p, err
@@ -615,6 +630,10 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 						if len(p) >= 2 {
 							code = int(p[0])<<8 | int(p[1])
 							text = string(p[2:])
+							if !isValidCloseCode(code) {
+								c.readErr = ErrInvalidCloseCode
+								return 0, nil, ErrInvalidCloseCode
+							}
 						}
 						if err := c.closeHandler(code, text); err != nil {
 							return 0, nil, err
@@ -634,18 +653,26 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 					compressedData = append(compressedData, p...)
 					final = f
 				}
-				// Decompress the complete message.
+				// Decompress the complete message, enforcing read limit
+				// to prevent decompression bombs.
 				var decErr error
-				payload, decErr = decompressData(compressedData)
+				payload, decErr = decompressDataLimited(compressedData, c.readLimit)
 				if decErr != nil {
+					if decErr == ErrReadLimit {
+						c.readErr = ErrReadLimit
+					}
 					return 0, nil, decErr
 				}
 				c.reader = &messageReader{c: c, buf: payload, final: true, compressed: false}
 			case compressed:
-				// Single frame compressed message.
+				// Single frame compressed message, enforcing read limit
+				// to prevent decompression bombs.
 				var decErr error
-				payload, decErr = decompressData(payload)
+				payload, decErr = decompressDataLimited(payload, c.readLimit)
 				if decErr != nil {
+					if decErr == ErrReadLimit {
+						c.readErr = ErrReadLimit
+					}
 					return 0, nil, decErr
 				}
 				c.reader = &messageReader{c: c, buf: payload, final: final, compressed: false}
@@ -814,6 +841,7 @@ type messageWriter struct {
 	compress   bool
 	closed     bool
 	firstWrite bool
+	buf        []byte // buffer for compressed message assembly (RFC 7692)
 }
 
 func (w *messageWriter) Write(p []byte) (int, error) {
@@ -821,16 +849,25 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 		return 0, ErrWriteToClosedConnection
 	}
 
-	frameType := w.c.writeFrameType
-	compress := w.compress && !w.firstWrite
-	if !w.firstWrite {
-		w.firstWrite = true
-	} else {
-		frameType = continuationFrame
-		compress = false
+	// Per RFC 7692, compression applies to the entire message before fragmentation.
+	// Buffer all data until Close() to compress as a single unit.
+	if w.compress {
+		w.buf = append(w.buf, p...)
+		return len(p), nil
 	}
 
-	return w.c.writeFrameWithCompress(frameType, p, false, compress)
+	frameType := w.c.writeFrameType
+	if w.firstWrite {
+		frameType = continuationFrame
+	} else {
+		w.firstWrite = true
+	}
+
+	_, err := w.c.writeFrameWithCompress(frameType, p, false, false)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func (w *messageWriter) Close() error {
@@ -839,14 +876,21 @@ func (w *messageWriter) Close() error {
 	}
 	w.closed = true
 
-	frameType := w.c.writeFrameType
-	compress := w.compress && !w.firstWrite
-	if w.firstWrite {
-		frameType = continuationFrame
-		compress = false
+	if w.compress {
+		// Compress the entire buffered message and send as a single frame.
+		_, err := w.c.writeFrameWithCompress(w.c.writeFrameType, w.buf, true, true)
+		w.buf = nil
+		w.c.writeFrameType = 0
+		w.c.writeMu.Unlock()
+		return err
 	}
 
-	_, err := w.c.writeFrameWithCompress(frameType, nil, true, compress)
+	frameType := w.c.writeFrameType
+	if w.firstWrite {
+		frameType = continuationFrame
+	}
+
+	_, err := w.c.writeFrameWithCompress(frameType, nil, true, false)
 	w.c.writeFrameType = 0
 	w.c.writeMu.Unlock()
 	return err
@@ -859,6 +903,8 @@ func (c *Conn) writeFrameWithCompress(frameType int, data []byte, final bool, co
 	if c.writeErr != nil {
 		return 0, c.writeErr
 	}
+
+	originalLen := len(data)
 
 	// Compress payload if requested (RFC 7692 permessage-deflate).
 	if compress {
@@ -923,15 +969,22 @@ func (c *Conn) writeFrameWithCompress(frameType int, data []byte, final bool, co
 	if headerLen+payloadLen <= len(c.writeBuf) {
 		copy(c.writeBuf[headerLen:], data)
 		_, err := c.rwc.Write(c.writeBuf[:headerLen+payloadLen])
-		return payloadLen, err
+		if err != nil {
+			c.writeErr = err
+		}
+		return originalLen, err
 	}
 
 	// For large payloads, write header and data separately.
 	if _, err := c.rwc.Write(c.writeBuf[:headerLen]); err != nil {
+		c.writeErr = err
 		return 0, err
 	}
 	_, err := c.rwc.Write(data)
-	return payloadLen, err
+	if err != nil {
+		c.writeErr = err
+	}
+	return originalLen, err
 }
 
 type messageReader struct {
@@ -951,6 +1004,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		// Compressed fragmented messages are fully read in NextReader.
 		frameType, payload, final, _, err := r.c.readFrame()
 		if err != nil {
+			r.c.readErr = err
 			return 0, err
 		}
 		// Handle control frames inline per RFC 6455, section 5.4.
@@ -971,6 +1025,10 @@ func (r *messageReader) Read(p []byte) (int, error) {
 			if len(payload) >= 2 {
 				code = int(payload[0])<<8 | int(payload[1])
 				text = string(payload[2:])
+				if !isValidCloseCode(code) {
+					r.c.readErr = ErrInvalidCloseCode
+					return 0, ErrInvalidCloseCode
+				}
 			}
 			if err := r.c.closeHandler(code, text); err != nil {
 				return 0, err
@@ -985,6 +1043,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		}
 		r.c.readMsgSize += int64(len(payload))
 		if r.c.readLimit > 0 && r.c.readMsgSize > r.c.readLimit {
+			r.c.readErr = ErrReadLimit
 			return 0, ErrReadLimit
 		}
 		r.buf = payload

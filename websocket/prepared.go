@@ -139,5 +139,8 @@ func (c *Conn) WritePreparedMessage(pm *PreparedMessage) error {
 	}
 
 	_, err = c.rwc.Write(frameData)
+	if err != nil {
+		c.writeErr = err
+	}
 	return err
 }

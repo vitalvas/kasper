@@ -407,6 +407,20 @@ func (m *mockConn) SetDeadline(_ time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(_ time.Time) error { return nil }
 
+// deadlineTrackingConn wraps a net.Conn and tracks SetReadDeadline calls.
+type deadlineTrackingConn struct {
+	net.Conn
+	mu               sync.Mutex
+	lastReadDeadline time.Time
+}
+
+func (d *deadlineTrackingConn) SetReadDeadline(t time.Time) error {
+	d.mu.Lock()
+	d.lastReadDeadline = t
+	d.mu.Unlock()
+	return d.Conn.SetReadDeadline(t)
+}
+
 // buildMaskedFrame constructs a WebSocket frame with the mask bit set,
 // as required for client-to-server frames per RFC 6455.
 func buildMaskedFrame(opcode byte, payload []byte, final bool) []byte {
@@ -2367,5 +2381,812 @@ func TestReadMessageContext(t *testing.T) {
 		// Close client first to unblock close frame write.
 		client.Close()
 		sConn.Close()
+	})
+
+	t.Run("Deadline reset after context cancellation", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		// Wrap server with deadline tracking.
+		tracked := &deadlineTrackingConn{Conn: server}
+		conn := newConnFromRWC(tracked, tracked, true, 1024, 1024, nil)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		_, _, err := conn.ReadMessageContext(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+		// Verify the deadline was reset to zero (not left in the past).
+		tracked.mu.Lock()
+		lastDeadline := tracked.lastReadDeadline
+		tracked.mu.Unlock()
+		assert.True(t, lastDeadline.IsZero(), "read deadline should be reset to zero after context cancellation")
+	})
+}
+
+func TestStartKeepaliveRaceSafety(t *testing.T) {
+	t.Run("Concurrent pong and keepalive check", func(_ *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+
+		conn := newConn(server, true, 1024, 1024)
+		conn.StartKeepalive(50*time.Millisecond, 200*time.Millisecond)
+
+		// Simulate concurrent pong responses to exercise the atomic lastPong.
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				_ = conn.pongHandler("")
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+
+		wg.Wait()
+		conn.Close()
+	})
+}
+
+func TestCloseCodeValidationInFragmentedRead(t *testing.T) {
+	t.Run("Invalid close code during compressed fragments", func(t *testing.T) {
+		original := []byte("hello world, fragmented compressed")
+		compressed, err := compressData(original, -1)
+		require.NoError(t, err)
+
+		mid := len(compressed) / 2
+
+		var buf bytes.Buffer
+		// First frame: compressed, not final.
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, compressed[:mid]))
+		// Interleaved close frame with invalid code 1005 (must not appear on wire).
+		// CloseNoStatusReceived = 1005 = 0x03ED
+		closePayload := []byte{0x03, 0xED}
+		buf.Write(buildMaskedFrame(byte(CloseMessage), closePayload, true))
+
+		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mockConn, true, 1024, 1024)
+		conn.compressionEnabled = true
+
+		_, _, err = conn.NextReader()
+		assert.ErrorIs(t, err, ErrInvalidCloseCode)
+	})
+
+	t.Run("Invalid close code during messageReader read", func(t *testing.T) {
+		var buf bytes.Buffer
+		// First frame: text, not final.
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("part1"), false))
+		// Close frame with invalid code 1006 (must not appear on wire).
+		// CloseAbnormalClosure = 1006 = 0x03EE
+		closePayload := []byte{0x03, 0xEE}
+		buf.Write(buildMaskedFrame(byte(CloseMessage), closePayload, true))
+
+		mockConn := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mockConn, true, 1024, 1024)
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, ErrInvalidCloseCode)
+	})
+}
+
+func TestWriteErrSetOnFailure(t *testing.T) {
+	t.Run("writeErr set after write failure", func(t *testing.T) {
+		writeErr := errors.New("write failed")
+		mock := &failingWriter{err: writeErr}
+		conn := newConnFromRWC(mock, nil, true, 1024, 1024, nil)
+
+		err := conn.WriteMessage(TextMessage, []byte("test"))
+		require.Error(t, err)
+
+		// Subsequent writes should fail fast with the stored writeErr.
+		err = conn.WriteMessage(TextMessage, []byte("second"))
+		require.Error(t, err)
+		assert.Equal(t, writeErr, err)
+	})
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (f *failingWriter) Read([]byte) (int, error)  { return 0, io.EOF }
+func (f *failingWriter) Write([]byte) (int, error) { return 0, f.err }
+func (f *failingWriter) Close() error              { return nil }
+
+func TestReadMessageContextRaceSafety(t *testing.T) {
+	t.Run("Concurrent context cancel and read completion", func(t *testing.T) {
+		// Run multiple iterations to exercise the race window.
+		for i := range 50 {
+			server, client := net.Pipe()
+
+			tracked := &deadlineTrackingConn{Conn: server}
+			conn := newConnFromRWC(tracked, tracked, true, 1024, 1024, nil)
+
+			// Write a message from client just before context expires,
+			// to exercise the race between context cancel and read completion.
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				frame := buildMaskedFrame(byte(TextMessage), []byte("race"), true)
+				_, _ = client.Write(frame)
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+			_, _, _ = conn.ReadMessageContext(ctx)
+			cancel()
+
+			// Verify deadline is reset regardless of which path was taken.
+			tracked.mu.Lock()
+			deadline := tracked.lastReadDeadline
+			tracked.mu.Unlock()
+			assert.True(t, deadline.IsZero(), "iteration %d: deadline should be reset to zero", i)
+
+			client.Close()
+			server.Close()
+		}
+	})
+}
+
+func TestDecompressionBombProtection(t *testing.T) {
+	t.Run("Single frame compressed message exceeding read limit", func(t *testing.T) {
+		// Create highly compressible data (zeros).
+		original := make([]byte, 10000)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		// Build a compressed frame (server-side, so no mask on read side).
+		firstByte := byte(BinaryMessage) | finalBit | rsv1Bit
+		frame := buildMaskedFrameRaw(firstByte, compressed)
+
+		mock := newMockConn()
+		mock.readBuf.Write(frame)
+		conn := newConn(mock, true, 4096, 4096)
+		conn.compressionEnabled = true
+		conn.SetReadLimit(1000) // 1KB limit, but decompressed is 10KB.
+
+		_, _, err = conn.ReadMessage()
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+
+	t.Run("Fragmented compressed message exceeding read limit", func(t *testing.T) {
+		// Create highly compressible data.
+		original := make([]byte, 10000)
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		// Split compressed data into two fragments.
+		mid := len(compressed) / 2
+		frag1 := compressed[:mid]
+		frag2 := compressed[mid:]
+
+		// First fragment: RSV1 set, not final.
+		frame1 := buildMaskedFrameRaw(byte(BinaryMessage)|rsv1Bit, frag1)
+		// Second fragment: continuation, final.
+		frame2 := buildMaskedFrame(byte(continuationFrame), frag2, true)
+
+		mock := newMockConn()
+		mock.readBuf.Write(frame1)
+		mock.readBuf.Write(frame2)
+		conn := newConn(mock, true, 4096, 4096)
+		conn.compressionEnabled = true
+		conn.SetReadLimit(1000)
+
+		_, _, err = conn.ReadMessage()
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+
+	t.Run("Compressed message within read limit succeeds", func(t *testing.T) {
+		original := []byte("small compressed message")
+		compressed, err := compressData(original, defaultCompressionLevel)
+		require.NoError(t, err)
+
+		firstByte := byte(BinaryMessage) | finalBit | rsv1Bit
+		frame := buildMaskedFrameRaw(firstByte, compressed)
+
+		mock := newMockConn()
+		mock.readBuf.Write(frame)
+		conn := newConn(mock, true, 4096, 4096)
+		conn.compressionEnabled = true
+		conn.SetReadLimit(1000)
+
+		msgType, p, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, BinaryMessage, msgType)
+		assert.Equal(t, original, p)
+	})
+}
+
+func TestMessageWriterCompressedBuffering(t *testing.T) {
+	t.Run("Compressed writes are buffered and sent on Close", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+		conn.compressionEnabled = true
+		conn.EnableWriteCompression(true)
+
+		w, err := conn.NextWriter(TextMessage)
+		require.NoError(t, err)
+
+		// Multiple writes should all be buffered.
+		n, err := w.Write([]byte("hello "))
+		require.NoError(t, err)
+		assert.Equal(t, 6, n)
+
+		n, err = w.Write([]byte("world"))
+		require.NoError(t, err)
+		assert.Equal(t, 5, n)
+
+		// Nothing should be written to the wire yet (compression buffers all data).
+		assert.Empty(t, mock.writeBuf.Bytes())
+
+		err = w.Close()
+		require.NoError(t, err)
+
+		// Now the compressed frame should be on the wire.
+		data := mock.writeBuf.Bytes()
+		require.True(t, len(data) > 0)
+		// RSV1 bit should be set (compressed).
+		assert.True(t, data[0]&rsv1Bit != 0)
+		// FIN bit should be set (single frame).
+		assert.True(t, data[0]&finalBit != 0)
+	})
+
+	t.Run("Compressed NextWriter roundtrip with reader", func(t *testing.T) {
+		// Server writes compressed message via NextWriter, client reads it.
+		serverMock := newMockConn()
+		serverConn := newConn(serverMock, true, 4096, 4096)
+		serverConn.compressionEnabled = true
+		serverConn.EnableWriteCompression(true)
+
+		original := "hello world, this is a fragmented compressed test via NextWriter"
+
+		w, err := serverConn.NextWriter(TextMessage)
+		require.NoError(t, err)
+
+		// Write in multiple chunks.
+		_, err = w.Write([]byte(original[:20]))
+		require.NoError(t, err)
+		_, err = w.Write([]byte(original[20:]))
+		require.NoError(t, err)
+		err = w.Close()
+		require.NoError(t, err)
+
+		// Read the written frame back using a client-side connection.
+		clientMock := &mockConn{
+			readBuf:  bytes.NewBuffer(serverMock.writeBuf.Bytes()),
+			writeBuf: &bytes.Buffer{},
+		}
+		clientConn := newConnFromRWC(clientMock, nil, false, 4096, 4096, nil)
+		clientConn.compressionEnabled = true
+
+		msgType, p, err := clientConn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, msgType)
+		assert.Equal(t, original, string(p))
+	})
+
+	t.Run("Write returns len(p) not compressed size", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+		conn.compressionEnabled = true
+		conn.EnableWriteCompression(true)
+
+		w, err := conn.NextWriter(TextMessage)
+		require.NoError(t, err)
+
+		data := bytes.Repeat([]byte("a"), 1000)
+		n, err := w.Write(data)
+		require.NoError(t, err)
+		assert.Equal(t, 1000, n)
+
+		err = w.Close()
+		require.NoError(t, err)
+	})
+}
+
+// writeDeadlineTrackingConn tracks SetWriteDeadline calls on a net.Conn.
+type writeDeadlineTrackingConn struct {
+	net.Conn
+	mu                sync.Mutex
+	lastWriteDeadline time.Time
+}
+
+func (d *writeDeadlineTrackingConn) SetWriteDeadline(t time.Time) error {
+	d.mu.Lock()
+	d.lastWriteDeadline = t
+	d.mu.Unlock()
+	return d.Conn.SetWriteDeadline(t)
+}
+
+func (d *writeDeadlineTrackingConn) getLastWriteDeadline() time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lastWriteDeadline
+}
+
+func TestWriteControlClearsDeadline(t *testing.T) {
+	t.Run("Deadline cleared after ping", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+
+		// Drain client side so writes don't block.
+		go func() { _, _ = io.Copy(io.Discard, client) }()
+
+		tracked := &writeDeadlineTrackingConn{Conn: server}
+		conn := newConn(tracked, true, 0, 0)
+		defer conn.Close()
+
+		err := conn.WriteControl(PingMessage, nil, time.Now().Add(5*time.Second))
+		require.NoError(t, err)
+
+		// After WriteControl, the deadline should be cleared (zero time).
+		assert.True(t, tracked.getLastWriteDeadline().IsZero())
+	})
+
+	t.Run("Data write succeeds after control frame", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+
+		go func() { _, _ = io.Copy(io.Discard, client) }()
+
+		conn := newConn(server, true, 0, 0)
+		defer conn.Close()
+
+		err := conn.WriteControl(PingMessage, nil, time.Now().Add(5*time.Second))
+		require.NoError(t, err)
+
+		err = conn.WriteMessage(TextMessage, []byte("hello"))
+		require.NoError(t, err)
+	})
+}
+
+func TestMessageReaderReadLimitSetsReadErr(t *testing.T) {
+	t.Run("readErr set on limit exceeded", func(t *testing.T) {
+		mock := newMockConn()
+		frag1 := make([]byte, 60)
+		frag2 := make([]byte, 60)
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), frag1, false))
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), frag2, true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetReadLimit(100)
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, ErrReadLimit)
+
+		// readErr should be set, so the next NextReader call returns
+		// ErrReadLimit immediately instead of a confusing error.
+		_, _, err = conn.NextReader()
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+}
+
+func TestMessageReaderReadFrameErrorSetsReadErr(t *testing.T) {
+	t.Run("readErr set on readFrame error during continuation", func(t *testing.T) {
+		mock := newMockConn()
+		// First frame: small non-final text message (10 bytes < readLimit of 50).
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), make([]byte, 10), false))
+		// Continuation frame: payload of 60 bytes > readLimit of 50.
+		// This triggers ErrReadLimit inside readFrame (individual frame check),
+		// not the accumulated message size check in messageReader.Read.
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), make([]byte, 60), true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetReadLimit(50)
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		// Read the first fragment, then readFrame fails on the oversized continuation.
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, ErrReadLimit)
+
+		// readErr should be set, so subsequent NextReader fails immediately
+		// instead of trying to parse the partially-consumed stream.
+		_, _, err = conn.NextReader()
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+}
+
+// countingWriter counts how many Write calls have been made and can fail on a specific call.
+type countingWriter struct {
+	count   int
+	failOn  int // 1-based: fail on the Nth Write call
+	err     error
+	written [][]byte
+}
+
+func (w *countingWriter) Read([]byte) (int, error) { return 0, io.EOF }
+func (w *countingWriter) Close() error             { return nil }
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.count++
+	if w.failOn > 0 && w.count == w.failOn {
+		return 0, w.err
+	}
+	cp := make([]byte, len(p))
+	copy(cp, p)
+	w.written = append(w.written, cp)
+	return len(p), nil
+}
+
+// largeBufferPool returns a buffer large enough for writeBufferPool reuse.
+type largeBufferPool struct {
+	buf     []byte
+	putBufs []any
+}
+
+func (p *largeBufferPool) Get() any {
+	if p.buf != nil {
+		b := p.buf
+		p.buf = nil
+		return b
+	}
+	return nil
+}
+
+func (p *largeBufferPool) Put(buf any) {
+	p.putBufs = append(p.putBufs, buf)
+}
+
+func TestNewConnFromRWCWriteBufferPool(t *testing.T) {
+	t.Run("Pool returns valid buffer that is reused", func(t *testing.T) {
+		needed := defaultWriteBufferSize + maxFrameHeaderSize
+		poolBuf := make([]byte, needed+100) // larger than needed
+		pool := &largeBufferPool{buf: poolBuf}
+
+		rwc := &mockRWC{}
+		conn := newConnFromRWC(rwc, nil, true, 0, 0, pool)
+
+		// The writeBuf should be a slice of the pooled buffer.
+		assert.Equal(t, needed, len(conn.writeBuf))
+		// Verify it is the same underlying array as the pool buffer.
+		assert.Equal(t, &poolBuf[0], &conn.writeBuf[0])
+	})
+
+	t.Run("Pool returns buffer too small, falls back to alloc", func(t *testing.T) {
+		needed := defaultWriteBufferSize + maxFrameHeaderSize
+		smallBuf := make([]byte, needed-1) // too small
+		pool := &largeBufferPool{buf: smallBuf}
+
+		rwc := &mockRWC{}
+		conn := newConnFromRWC(rwc, nil, true, 0, 0, pool)
+
+		// Should have allocated a new buffer of the correct size.
+		assert.Equal(t, needed, len(conn.writeBuf))
+		// The returned buffer from pool was too small so it should not have been used.
+		assert.NotEqual(t, cap(smallBuf), cap(conn.writeBuf))
+	})
+
+	t.Run("Pool returns non-byte-slice, falls back to alloc", func(t *testing.T) {
+		pool := &largeBufferPool{buf: nil} // Get() returns nil
+
+		rwc := &mockRWC{}
+		conn := newConnFromRWC(rwc, nil, true, 0, 0, pool)
+
+		needed := defaultWriteBufferSize + maxFrameHeaderSize
+		assert.Equal(t, needed, len(conn.writeBuf))
+	})
+}
+
+func TestReadFrameTruncatedExtendedLength(t *testing.T) {
+	t.Run("16-bit extended length truncated", func(t *testing.T) {
+		mock := newMockConn()
+		// Frame with payloadLen16 indicator but only 1 byte of the 2-byte extended length.
+		frame := []byte{byte(TextMessage) | finalBit, payloadLen16, 0x00}
+		mock.readBuf.Write(frame)
+
+		conn := newConn(mock, false, 0, 0) // client-side: expects unmasked frames
+
+		_, _, _, _, err := conn.readFrame()
+		assert.Error(t, err)
+	})
+
+	t.Run("64-bit extended length truncated", func(t *testing.T) {
+		mock := newMockConn()
+		// Frame with payloadLen64 indicator but only 4 bytes of the 8-byte extended length.
+		frame := []byte{byte(TextMessage) | finalBit, payloadLen64, 0x00, 0x00, 0x00, 0x00}
+		mock.readBuf.Write(frame)
+
+		conn := newConn(mock, false, 0, 0)
+
+		_, _, _, _, err := conn.readFrame()
+		assert.Error(t, err)
+	})
+
+	t.Run("Mask bytes truncated", func(t *testing.T) {
+		mock := newMockConn()
+		// Server-side conn expects masked frames. Send header with mask bit but truncated mask.
+		frame := []byte{byte(TextMessage) | finalBit, 5 | maskBit, 0x12, 0x34}
+		mock.readBuf.Write(frame)
+
+		conn := newConn(mock, true, 0, 0) // server-side: expects masked frames
+
+		_, _, _, _, err := conn.readFrame()
+		assert.Error(t, err)
+	})
+
+	t.Run("Payload truncated", func(t *testing.T) {
+		mock := newMockConn()
+		// Unmasked frame claiming 10 bytes of payload but only providing 3.
+		frame := []byte{byte(TextMessage) | finalBit, 10, 'a', 'b', 'c'}
+		mock.readBuf.Write(frame)
+
+		conn := newConn(mock, false, 0, 0)
+
+		_, _, _, _, err := conn.readFrame()
+		assert.Error(t, err)
+	})
+}
+
+func TestReadMessageReadAllError(t *testing.T) {
+	t.Run("ReadAll error on fragmented message with truncated continuation", func(t *testing.T) {
+		mock := newMockConn()
+		// First fragment: non-final text frame.
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello"), false))
+		// Write only 1 byte of the next frame header -- readFrame will get
+		// io.ErrUnexpectedEOF from io.ReadFull, which io.ReadAll does not swallow.
+		mock.readBuf.Write([]byte{0x00})
+
+		conn := newConn(mock, true, 0, 0)
+
+		msgType, p, err := conn.ReadMessage()
+		assert.Error(t, err)
+		assert.Equal(t, TextMessage, msgType)
+		assert.Equal(t, []byte("hello"), p)
+	})
+}
+
+func TestMessageWriterWriteError(t *testing.T) {
+	t.Run("Write propagates writeFrameWithCompress error", func(t *testing.T) {
+		writeErr := errors.New("write failed")
+		mock := &countingWriter{failOn: 1, err: writeErr}
+		conn := newConnFromRWC(mock, nil, true, 0, 0, nil)
+
+		w, err := conn.NextWriter(TextMessage)
+		require.NoError(t, err)
+
+		_, err = w.Write([]byte("hello"))
+		assert.ErrorIs(t, err, writeErr)
+	})
+}
+
+func TestWriteFrameWithCompressWriteErrAlreadySet(t *testing.T) {
+	t.Run("Returns writeErr immediately when already set", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+
+		existingErr := errors.New("prior write error")
+		conn.writeErr = existingErr
+
+		conn.writeMu.Lock()
+		_, err := conn.writeFrameWithCompress(TextMessage, []byte("test"), true, false)
+		conn.writeMu.Unlock()
+
+		assert.ErrorIs(t, err, existingErr)
+	})
+}
+
+func TestWriteFrameWithCompressLargePayloadErrors(t *testing.T) {
+	t.Run("Header write fails for large payload", func(t *testing.T) {
+		writeErr := errors.New("header write failed")
+		mock := &countingWriter{failOn: 1, err: writeErr}
+		// Use very small write buffer to force the two-write path for a payload
+		// that exceeds the buffer size.
+		conn := newConnFromRWC(mock, nil, true, 0, 32, nil)
+
+		conn.writeMu.Lock()
+		_, err := conn.writeFrameWithCompress(TextMessage, make([]byte, 100), true, false)
+		conn.writeMu.Unlock()
+
+		assert.ErrorIs(t, err, writeErr)
+		assert.Equal(t, writeErr, conn.writeErr)
+	})
+
+	t.Run("Data write fails for large payload", func(t *testing.T) {
+		writeErr := errors.New("data write failed")
+		mock := &countingWriter{failOn: 2, err: writeErr}
+		conn := newConnFromRWC(mock, nil, true, 0, 32, nil)
+
+		conn.writeMu.Lock()
+		_, err := conn.writeFrameWithCompress(TextMessage, make([]byte, 100), true, false)
+		conn.writeMu.Unlock()
+
+		assert.ErrorIs(t, err, writeErr)
+		assert.Equal(t, writeErr, conn.writeErr)
+	})
+}
+
+func TestNextReaderCompressedFragmentControlFrameErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		ctrlFrame  byte
+		ctrlData   []byte
+		setHandler func(c *Conn, handlerErr error)
+	}{
+		{"Ping handler error during compressed continuation", byte(PingMessage), []byte("ping"),
+			func(c *Conn, e error) { c.SetPingHandler(func(_ string) error { return e }) }},
+		{"Pong handler error during compressed continuation", byte(PongMessage), []byte("pong"),
+			func(c *Conn, e error) { c.SetPongHandler(func(_ string) error { return e }) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := []byte("hello world, this is a fragmented compressed test")
+			compressed, err := compressData(original, -1)
+			require.NoError(t, err)
+
+			half := len(compressed) / 2
+
+			var buf bytes.Buffer
+			buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, compressed[:half]))
+			buf.Write(buildMaskedFrame(tc.ctrlFrame, tc.ctrlData, true))
+			buf.Write(buildMaskedFrameRaw(byte(continuationFrame)|finalBit, compressed[half:]))
+
+			mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+			conn := newConn(mc, true, 1024, 1024)
+			conn.compressionEnabled = true
+
+			handlerErr := errors.New("handler failed")
+			tc.setHandler(conn, handlerErr)
+
+			_, _, err = conn.NextReader()
+			assert.ErrorIs(t, err, handlerErr)
+		})
+	}
+
+	t.Run("Close handler error during compressed continuation", func(t *testing.T) {
+		compressed, err := compressData([]byte("test data for close handler error"), -1)
+		require.NoError(t, err)
+
+		half := len(compressed) / 2
+
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, compressed[:half]))
+		buf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8}, true))
+
+		mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mc, true, 1024, 1024)
+		conn.compressionEnabled = true
+
+		closeErr := errors.New("close handler failed")
+		conn.SetCloseHandler(func(_ int, _ string) error { return closeErr })
+
+		_, _, err = conn.NextReader()
+		assert.ErrorIs(t, err, closeErr)
+	})
+
+	t.Run("Read limit exceeded during compressed continuation", func(t *testing.T) {
+		// Create a message large enough to exceed limit during compressed continuation.
+		original := bytes.Repeat([]byte("abcdefghijklmnop"), 10)
+		compressed, err := compressData(original, -1)
+		require.NoError(t, err)
+
+		// Split compressed data: first part very small so initial frame passes,
+		// but accumulated size exceeds the limit on continuation.
+		splitPoint := 3
+		if splitPoint >= len(compressed) {
+			splitPoint = 1
+		}
+		part1 := compressed[:splitPoint]
+		part2 := compressed[splitPoint:]
+
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrameRaw(byte(TextMessage)|rsv1Bit, part1))
+		buf.Write(buildMaskedFrameRaw(byte(continuationFrame)|finalBit, part2))
+
+		mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mc, true, 1024, 1024)
+		conn.compressionEnabled = true
+		// Set a limit smaller than the total compressed data to trigger ErrReadLimit
+		// at the accumulated message size check (line 649-652).
+		conn.SetReadLimit(int64(splitPoint + 1))
+
+		_, _, err = conn.NextReader()
+		assert.ErrorIs(t, err, ErrReadLimit)
+	})
+}
+
+func TestMessageReaderControlFrameErrors(t *testing.T) {
+	t.Run("Ping handler error during uncompressed continuation", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("part1"), false))
+		buf.Write(buildMaskedFrame(byte(PingMessage), []byte("ping"), true))
+		buf.Write(buildMaskedFrame(byte(continuationFrame), []byte("part2"), true))
+
+		mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mc, true, 1024, 1024)
+
+		pingErr := errors.New("ping handler failed in reader")
+		conn.SetPingHandler(func(_ string) error { return pingErr })
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, pingErr)
+	})
+
+	t.Run("Pong handler error during uncompressed continuation", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("part1"), false))
+		buf.Write(buildMaskedFrame(byte(PongMessage), []byte("pong"), true))
+		buf.Write(buildMaskedFrame(byte(continuationFrame), []byte("part2"), true))
+
+		mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mc, true, 1024, 1024)
+
+		pongErr := errors.New("pong handler failed in reader")
+		conn.SetPongHandler(func(_ string) error { return pongErr })
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, pongErr)
+	})
+
+	t.Run("Close handler error during uncompressed continuation", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("part1"), false))
+		buf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8}, true))
+
+		mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mc, true, 1024, 1024)
+
+		closeErr := errors.New("close handler failed in reader")
+		conn.SetCloseHandler(func(_ int, _ string) error { return closeErr })
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, closeErr)
+	})
+
+	t.Run("Close during continuation sets readErr", func(t *testing.T) {
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrame(byte(TextMessage), []byte("data"), false))
+		buf.Write(buildMaskedFrame(byte(CloseMessage), []byte{0x03, 0xe8}, true))
+
+		mc := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mc, true, 1024, 1024)
+		conn.SetCloseHandler(func(_ int, _ string) error { return nil })
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		var closeErr *CloseError
+		assert.ErrorAs(t, err, &closeErr)
+		assert.Equal(t, CloseNormalClosure, closeErr.Code)
+
+		// readErr should be set so subsequent reads fail immediately.
+		_, _, err = conn.NextReader()
+		assert.ErrorAs(t, err, &closeErr)
+	})
+}
+
+func TestDefaultPongHandler(t *testing.T) {
+	t.Run("Default pong handler invoked during read", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(PongMessage), []byte("test"), true))
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("msg"), true))
+
+		conn := newConn(mock, true, 0, 0)
+		// Use the default pong handler (set during newConn).
+
+		msgType, reader, err := conn.NextReader()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, msgType)
+
+		data, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		assert.Equal(t, []byte("msg"), data)
 	})
 }

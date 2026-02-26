@@ -343,7 +343,7 @@ func Subprotocols(r *http.Request) []string {
 	}
 	var protocols []string
 	for _, s := range h {
-		for _, p := range strings.Split(s, ",") {
+		for p := range strings.SplitSeq(s, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				protocols = append(protocols, p)
@@ -360,11 +360,13 @@ func IsWebSocketUpgrade(r *http.Request) bool {
 		headerContainsToken(r.Header, "Upgrade", "websocket")
 }
 
-// headerContainsToken checks if a header contains a specific token (case-insensitive).
+// headerContainsToken checks if a header contains a specific token using case-insensitive
+// comparison. Used for Connection and Upgrade headers where token values are
+// case-insensitive per RFC 7230, sections 6.1 and 6.7.
 // Tokens may be comma-separated (e.g., "Connection: keep-alive, Upgrade").
 func headerContainsToken(h http.Header, name, token string) bool {
 	for _, v := range h.Values(name) {
-		for _, t := range strings.Split(v, ",") {
+		for t := range strings.SplitSeq(v, ",") {
 			if equalASCIIFold(strings.TrimSpace(t), token) {
 				return true
 			}
@@ -380,10 +382,13 @@ type extension struct {
 }
 
 // parseExtensions parses Sec-WebSocket-Extensions header per RFC 6455, section 9.1.
+// Header field names (keys) are case-insensitive per RFC 7230, section 3.2, which
+// Go's net/http handles via canonical form. Header field values, including extension
+// names and parameter names, are case-sensitive and preserved as-is.
 func parseExtensions(header http.Header) []extension {
 	var extensions []extension
 	for _, h := range header.Values("Sec-WebSocket-Extensions") {
-		for _, ext := range strings.Split(h, ",") {
+		for ext := range strings.SplitSeq(h, ",") {
 			ext = strings.TrimSpace(ext)
 			if ext == "" {
 				continue
@@ -395,8 +400,8 @@ func parseExtensions(header http.Header) []extension {
 			}
 			for _, param := range parts[1:] {
 				param = strings.TrimSpace(param)
-				if idx := strings.Index(param, "="); idx >= 0 {
-					e.params[strings.TrimSpace(param[:idx])] = strings.TrimSpace(param[idx+1:])
+				if key, val, ok := strings.Cut(param, "="); ok {
+					e.params[strings.TrimSpace(key)] = strings.TrimSpace(val)
 				} else {
 					e.params[param] = ""
 				}

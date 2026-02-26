@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -280,6 +282,87 @@ func TestWritePreparedMessageCompressed(t *testing.T) {
 		data := mock.writeBuf.Bytes()
 		assert.True(t, len(data) > 0)
 		assert.Equal(t, byte(TextMessage)|finalBit|rsv1Bit, data[0])
+	})
+}
+
+func TestWritePreparedMessageWriteErrOnFailure(t *testing.T) {
+	t.Run("writeErr set after WritePreparedMessage failure", func(t *testing.T) {
+		writeErr := errors.New("write failed")
+		mock := &failingWriterPM{err: writeErr}
+		conn := newConnFromRWC(mock, nil, true, 1024, 1024, nil)
+
+		pm, err := NewPreparedMessage(TextMessage, []byte("test"))
+		require.NoError(t, err)
+
+		err = conn.WritePreparedMessage(pm)
+		require.Error(t, err)
+		assert.Equal(t, writeErr, err)
+
+		// Subsequent writes should fail fast with the stored writeErr.
+		err = conn.WritePreparedMessage(pm)
+		require.Error(t, err)
+		assert.Equal(t, writeErr, err)
+
+		// WriteMessage should also fail fast.
+		err = conn.WriteMessage(TextMessage, []byte("data"))
+		require.Error(t, err)
+		assert.Equal(t, writeErr, err)
+	})
+}
+
+type failingWriterPM struct {
+	err error
+}
+
+func (f *failingWriterPM) Read([]byte) (int, error)  { return 0, io.EOF }
+func (f *failingWriterPM) Write([]byte) (int, error) { return 0, f.err }
+func (f *failingWriterPM) Close() error              { return nil }
+
+func TestBuildFrameRandReaderError(t *testing.T) {
+	t.Run("Masked frame fails when randReader errors", func(t *testing.T) {
+		origRandReader := randReader
+		testErr := errors.New("rand error")
+		randReader = &errReader{err: testErr}
+		defer func() { randReader = origRandReader }()
+
+		frame, err := buildFrame(TextMessage, []byte("hello"), true, false)
+		assert.Nil(t, frame)
+		assert.ErrorIs(t, err, testErr)
+	})
+}
+
+func TestPreparedMessageFrameRandReaderError(t *testing.T) {
+	t.Run("Client frame fails when randReader errors", func(t *testing.T) {
+		origRandReader := randReader
+		testErr := errors.New("rand error")
+		randReader = &errReader{err: testErr}
+		defer func() { randReader = origRandReader }()
+
+		pm, err := NewPreparedMessage(TextMessage, []byte("hello"))
+		require.NoError(t, err)
+
+		key := prepareKey{isServer: false, compress: false, compressNo: true}
+		frame, err := pm.frame(key)
+		assert.Nil(t, frame)
+		assert.ErrorIs(t, err, testErr)
+	})
+}
+
+func TestWritePreparedMessageFrameError(t *testing.T) {
+	t.Run("WritePreparedMessage fails when frame errors", func(t *testing.T) {
+		origRandReader := randReader
+		testErr := errors.New("rand error")
+		randReader = &errReader{err: testErr}
+		defer func() { randReader = origRandReader }()
+
+		pm, err := NewPreparedMessage(TextMessage, []byte("hello"))
+		require.NoError(t, err)
+
+		mock := newMockConn()
+		conn := newConn(mock, false, 0, 0) // client-side => masked => reads randReader
+
+		err = conn.WritePreparedMessage(pm)
+		assert.ErrorIs(t, err, testErr)
 	})
 }
 

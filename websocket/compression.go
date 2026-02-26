@@ -191,6 +191,26 @@ func decompressData(data []byte) ([]byte, error) {
 	return io.ReadAll(cr)
 }
 
+// decompressDataLimited decompresses data with a maximum decompressed size limit.
+// Returns ErrReadLimit if the decompressed data exceeds maxBytes.
+// A maxBytes of 0 means no limit (falls back to decompressData).
+func decompressDataLimited(data []byte, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return decompressData(data)
+	}
+	cr := newCompressedReader(&byteReader{data: data})
+	defer cr.Close()
+	lr := io.LimitReader(cr, maxBytes+1)
+	result, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(result)) > maxBytes {
+		return nil, ErrReadLimit
+	}
+	return result, nil
+}
+
 type byteReader struct {
 	data []byte
 	pos  int
