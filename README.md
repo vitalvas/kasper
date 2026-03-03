@@ -11,7 +11,7 @@ Requires Go 1.25+.
 
 ---
 
-## mux `github.com/vitalvas/kasper/mux`
+## mux
 
 HTTP request multiplexer. API-compatible with gorilla/mux.
 
@@ -25,7 +25,7 @@ HTTP request multiplexer. API-compatible with gorilla/mux.
 
 ---
 
-## websocket `github.com/vitalvas/kasper/websocket`
+## websocket
 
 RFC 6455 / RFC 8441 WebSocket implementation.
 
@@ -40,7 +40,7 @@ RFC 6455 / RFC 8441 WebSocket implementation.
 
 ---
 
-## openapi `github.com/vitalvas/kasper/openapi`
+## openapi
 
 Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and struct tags.
 
@@ -58,7 +58,7 @@ Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and stru
 
 ---
 
-## httpsig `github.com/vitalvas/kasper/httpsig`
+## httpsig
 
 HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530).
 
@@ -73,7 +73,7 @@ HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530).
 
 ---
 
-## muxhandlers `github.com/vitalvas/kasper/muxhandlers`
+## muxhandlers
 
 HTTP middleware for the mux router.
 
