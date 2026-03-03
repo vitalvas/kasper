@@ -17,7 +17,7 @@ func ResponseJSON(w http.ResponseWriter, code int, v any) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", ContentTypeApplicationJSON)
 	w.WriteHeader(code)
 	w.Write(buf.Bytes())
 }
@@ -32,7 +32,7 @@ func ResponseXML(w http.ResponseWriter, code int, v any) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/xml")
+	w.Header().Set("Content-Type", ContentTypeApplicationXML)
 	w.WriteHeader(code)
 	w.Write(buf.Bytes())
 }

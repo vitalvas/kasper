@@ -186,7 +186,7 @@ func (s *Spec) registerJSON(r *mux.Router, path string) {
 			http.Error(w, "failed to serialize OpenAPI spec as JSON", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", mux.ContentTypeApplicationJSON)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 	})
@@ -215,7 +215,7 @@ func (s *Spec) registerYAML(r *mux.Router, path string) {
 			http.Error(w, "failed to serialize OpenAPI spec as YAML", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/x-yaml")
+		w.Header().Set("Content-Type", mux.ContentTypeApplicationYAML)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 	})

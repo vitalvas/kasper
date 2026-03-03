@@ -3,6 +3,8 @@ package openapi
 import (
 	"net/http"
 	"strconv"
+
+	"github.com/vitalvas/kasper/mux"
 )
 
 // operationMeta stores metadata collected via the fluent builder
@@ -93,7 +95,7 @@ func (b *OperationBuilder) Deprecated() *OperationBuilder {
 //
 // See: https://spec.openapis.org/oas/v3.1.0#request-body-object
 func (b *OperationBuilder) Request(body any) *OperationBuilder {
-	b.meta.requestContents["application/json"] = body
+	b.meta.requestContents[mux.ContentTypeApplicationJSON] = body
 	return b
 }
 
@@ -137,7 +139,7 @@ func (b *OperationBuilder) Response(statusCode int, body any) *OperationBuilder 
 		if b.meta.responseContents[key] == nil {
 			b.meta.responseContents[key] = make(map[string]any)
 		}
-		b.meta.responseContents[key]["application/json"] = body
+		b.meta.responseContents[key][mux.ContentTypeApplicationJSON] = body
 	} else {
 		b.meta.responseContents[key] = nil
 	}
@@ -168,7 +170,7 @@ func (b *OperationBuilder) DefaultResponse(body any) *OperationBuilder {
 		if b.meta.responseContents["default"] == nil {
 			b.meta.responseContents["default"] = make(map[string]any)
 		}
-		b.meta.responseContents["default"]["application/json"] = body
+		b.meta.responseContents["default"][mux.ContentTypeApplicationJSON] = body
 	} else {
 		b.meta.responseContents["default"] = nil
 	}

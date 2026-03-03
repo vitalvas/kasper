@@ -114,7 +114,7 @@ func (g *RouteGroup) Response(statusCode int, body any) *RouteGroup {
 		if g.defaults.responseContents[key] == nil {
 			g.defaults.responseContents[key] = make(map[string]any)
 		}
-		g.defaults.responseContents[key]["application/json"] = body
+		g.defaults.responseContents[key][mux.ContentTypeApplicationJSON] = body
 	} else if g.defaults.responseContents[key] == nil {
 		g.defaults.responseContents[key] = nil
 	}
@@ -196,7 +196,7 @@ func (g *RouteGroup) DefaultResponse(body any) *RouteGroup {
 		if g.defaults.responseContents["default"] == nil {
 			g.defaults.responseContents["default"] = make(map[string]any)
 		}
-		g.defaults.responseContents["default"]["application/json"] = body
+		g.defaults.responseContents["default"][mux.ContentTypeApplicationJSON] = body
 	} else if g.defaults.responseContents["default"] == nil {
 		g.defaults.responseContents["default"] = nil
 	}

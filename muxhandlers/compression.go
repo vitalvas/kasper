@@ -186,14 +186,14 @@ var compressedContentTypes = []string{
 	"image/",
 	"video/",
 	"audio/",
-	"application/zip",
-	"application/gzip",
-	"application/x-gzip",
-	"application/x-bzip2",
-	"application/x-xz",
-	"application/zstd",
-	"application/x-7z-compressed",
-	"application/x-rar-compressed",
+	mux.ContentTypeApplicationZip,
+	mux.ContentTypeApplicationGzip,
+	mux.ContentTypeApplicationXGzip,
+	mux.ContentTypeApplicationXBzip2,
+	mux.ContentTypeApplicationXXZ,
+	mux.ContentTypeApplicationZstd,
+	mux.ContentTypeApplicationX7ZCompressed,
+	mux.ContentTypeApplicationXRARCompressed,
 }
 
 // isCompressedContentType reports whether the content type is an inherently
