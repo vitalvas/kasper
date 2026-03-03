@@ -13,6 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SchemaDisabled is the sentinel value for JSONFilename or YAMLFilename
+// that disables the corresponding spec endpoint.
+const SchemaDisabled = "-"
+
 // DocsUI selects which interactive documentation UI to serve.
 // The UI renders the OpenAPI Document as interactive HTML documentation.
 //
@@ -37,7 +41,7 @@ type HandleConfig struct {
 	Title string
 
 	// JSONFilename is the path for the JSON spec endpoint
-	// (default: "schema.json"). Set to "-" to disable.
+	// (default: "schema.json"). Set to SchemaDisabled to disable.
 	//
 	// Relative paths are joined with the base path:
 	//
@@ -50,7 +54,7 @@ type HandleConfig struct {
 	JSONFilename string
 
 	// YAMLFilename is the path for the YAML spec endpoint
-	// (default: "schema.yaml"). Set to "-" to disable.
+	// (default: SchemaDisabled). Set to "schema.yaml" to enable.
 	// Follows the same absolute/relative rules as JSONFilename.
 	YAMLFilename string
 
@@ -77,10 +81,10 @@ func (cfg HandleConfig) jsonFilename() string {
 	return cfg.JSONFilename
 }
 
-// yamlFilename returns the configured YAML spec filename, defaulting to "schema.yaml".
+// yamlFilename returns the configured YAML spec filename, defaulting to SchemaDisabled.
 func (cfg HandleConfig) yamlFilename() string {
 	if cfg.YAMLFilename == "" {
-		return "schema.yaml"
+		return SchemaDisabled
 	}
 	return cfg.YAMLFilename
 }
@@ -135,12 +139,12 @@ func (s *Spec) Handle(r *mux.Router, basePath string, cfg *HandleConfig) {
 
 	var jsonPath, yamlPath string
 
-	if jsonFile != "-" {
+	if jsonFile != SchemaDisabled {
 		jsonPath = resolvePath(basePath, jsonFile)
 		s.registerJSON(r, jsonPath)
 	}
 
-	if yamlFile != "-" {
+	if yamlFile != SchemaDisabled {
 		yamlPath = resolvePath(basePath, yamlFile)
 		s.registerYAML(r, yamlPath)
 	}

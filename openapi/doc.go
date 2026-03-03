@@ -437,21 +437,20 @@
 //
 //	spec.Handle(r, "/swagger", nil)
 //
-// This registers three routes:
+// This registers two routes (YAML is disabled by default):
 //
 //	/swagger/            - interactive HTML docs
 //	/swagger/schema.json - OpenAPI spec as JSON
-//	/swagger/schema.yaml - OpenAPI spec as YAML
 //
 // Both /swagger and /swagger/ serve the docs UI. All handlers build the
 // document once on first request using sync.Once.
 //
-// Filenames are relative to the base path by default. Use an absolute path
-// (starting with "/") to serve the schema at an independent location:
+// Enable YAML or use an absolute path (starting with "/") to serve the
+// schema at an independent location:
 //
 //	spec.Handle(r, "/swagger", &openapi.HandleConfig{
 //	    JSONFilename: "/api/v1/swagger.json",
-//	    YAMLFilename: "-",
+//	    YAMLFilename: "schema.yaml", // opt-in
 //	})
 //	// /swagger/              -> docs UI pointing to /api/v1/swagger.json
 //	// /api/v1/swagger.json   -> JSON spec

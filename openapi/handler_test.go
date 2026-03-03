@@ -59,9 +59,17 @@ func TestHandle(t *testing.T) {
 		assert.Contains(t, doc.Paths, "/items/{id}")
 	})
 
-	t.Run("YAML spec at /swagger/schema.yaml", func(t *testing.T) {
+	t.Run("YAML spec disabled by default", func(t *testing.T) {
 		r, spec := setupTestRouter()
 		spec.Handle(r, "/swagger", nil)
+
+		w := serveRequest(r, http.MethodGet, "/swagger/schema.yaml")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("YAML spec when explicitly enabled", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{YAMLFilename: "schema.yaml"})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.yaml")
 
@@ -145,9 +153,12 @@ func TestHandle(t *testing.T) {
 		}
 	})
 
-	t.Run("disable JSON endpoint", func(t *testing.T) {
+	t.Run("disable JSON endpoint with constant", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", &HandleConfig{JSONFilename: "-"})
+		spec.Handle(r, "/swagger", &HandleConfig{
+			JSONFilename: SchemaDisabled,
+			YAMLFilename: "schema.yaml",
+		})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.json")
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -156,9 +167,9 @@ func TestHandle(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("disable YAML endpoint", func(t *testing.T) {
+	t.Run("disable YAML endpoint with constant", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", &HandleConfig{YAMLFilename: "-"})
+		spec.Handle(r, "/swagger", &HandleConfig{YAMLFilename: SchemaDisabled})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/schema.yaml")
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -183,7 +194,10 @@ func TestHandle(t *testing.T) {
 
 	t.Run("docs fallback to YAML when JSON disabled", func(t *testing.T) {
 		r, spec := setupTestRouter()
-		spec.Handle(r, "/swagger", &HandleConfig{JSONFilename: "-"})
+		spec.Handle(r, "/swagger", &HandleConfig{
+			JSONFilename: SchemaDisabled,
+			YAMLFilename: "schema.yaml",
+		})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
 		body := w.Body.String()
@@ -247,18 +261,19 @@ func TestHandleDocsUI(t *testing.T) {
 
 func TestHandleCaching(t *testing.T) {
 	tests := []struct {
-		name string
-		path string
+		name   string
+		config *HandleConfig
+		path   string
 	}{
-		{"JSON is cached", "/swagger/schema.json"},
-		{"YAML is cached", "/swagger/schema.yaml"},
-		{"docs page is cached", "/swagger/"},
+		{"JSON is cached", nil, "/swagger/schema.json"},
+		{"YAML is cached", &HandleConfig{YAMLFilename: "schema.yaml"}, "/swagger/schema.yaml"},
+		{"docs page is cached", nil, "/swagger/"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, spec := setupTestRouter()
-			spec.Handle(r, "/swagger", nil)
+			spec.Handle(r, "/swagger", tt.config)
 
 			w1 := serveRequest(r, http.MethodGet, tt.path)
 			w2 := serveRequest(r, http.MethodGet, tt.path)
@@ -282,11 +297,12 @@ func TestHandleHTMLWellFormed(t *testing.T) {
 func TestHandleSerializationError(t *testing.T) {
 	tests := []struct {
 		name        string
+		config      *HandleConfig
 		path        string
 		expectedMsg string
 	}{
-		{"JSON returns 500 on marshal error", "/swagger/schema.json", "failed to serialize OpenAPI spec as JSON"},
-		{"YAML returns 500 on marshal error", "/swagger/schema.yaml", "failed to serialize OpenAPI spec as YAML"},
+		{"JSON returns 500 on marshal error", nil, "/swagger/schema.json", "failed to serialize OpenAPI spec as JSON"},
+		{"YAML returns 500 on marshal error", &HandleConfig{YAMLFilename: "schema.yaml"}, "/swagger/schema.yaml", "failed to serialize OpenAPI spec as YAML"},
 	}
 
 	for _, tt := range tests {
@@ -297,7 +313,7 @@ func TestHandleSerializationError(t *testing.T) {
 				Response(http.StatusOK, nil)
 
 			spec.AddComponentExample("bad", &Example{Value: func() {}})
-			spec.Handle(r, "/swagger", nil)
+			spec.Handle(r, "/swagger", tt.config)
 
 			w := serveRequest(r, http.MethodGet, tt.path)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -310,8 +326,7 @@ func TestHandleBothSpecsDisabled(t *testing.T) {
 	t.Run("docs UI not registered when both JSON and YAML disabled", func(t *testing.T) {
 		r, spec := setupTestRouter()
 		spec.Handle(r, "/swagger", &HandleConfig{
-			JSONFilename: "-",
-			YAMLFilename: "-",
+			JSONFilename: SchemaDisabled,
 		})
 
 		w := serveRequest(r, http.MethodGet, "/swagger/")
@@ -323,7 +338,7 @@ func TestHandleBothSpecsDisabled(t *testing.T) {
 }
 
 func TestHandleRootBasePath(t *testing.T) {
-	t.Run("base path / serves docs and schemas", func(t *testing.T) {
+	t.Run("base path / serves docs and JSON schema", func(t *testing.T) {
 		r, spec := setupTestRouter()
 		spec.Handle(r, "/", nil)
 
@@ -339,8 +354,16 @@ func TestHandleRootBasePath(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 
-		// YAML spec at /schema.yaml.
+		// YAML spec disabled by default.
 		w = serveRequest(r, http.MethodGet, "/schema.yaml")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("base path / with YAML enabled", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/", &HandleConfig{YAMLFilename: "schema.yaml"})
+
+		w := serveRequest(r, http.MethodGet, "/schema.yaml")
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "application/x-yaml", w.Header().Get("Content-Type"))
 	})
@@ -362,7 +385,6 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 			name: "absolute JSON path",
 			config: &HandleConfig{
 				JSONFilename: "/api/v1/swagger.json",
-				YAMLFilename: "-",
 			},
 			requests: []struct {
 				path           string
@@ -379,7 +401,7 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 		{
 			name: "absolute YAML path",
 			config: &HandleConfig{
-				JSONFilename: "-",
+				JSONFilename: SchemaDisabled,
 				YAMLFilename: "/api/v1/openapi.yaml",
 			},
 			requests: []struct {
@@ -410,7 +432,6 @@ func TestHandleAbsoluteFilename(t *testing.T) {
 			name: "relative nested path under basePath",
 			config: &HandleConfig{
 				JSONFilename: "data/openapi.json",
-				YAMLFilename: "-",
 			},
 			requests: []struct {
 				path           string

@@ -543,7 +543,7 @@ Schema name mapping:
 `Handle` registers all endpoints under a single base path. The config parameter is optional -- pass `nil` for defaults:
 
 ```go
-// Swagger UI (default) at /swagger/, schema at /swagger/schema.json and /swagger/schema.yaml
+// Swagger UI (default) at /swagger/, schema at /swagger/schema.json (YAML disabled by default)
 spec.Handle(r, "/swagger", nil)
 
 // RapiDoc
@@ -552,11 +552,14 @@ spec.Handle(r, "/swagger", &openapi.HandleConfig{UI: openapi.DocsRapiDoc})
 // Redoc
 spec.Handle(r, "/swagger", &openapi.HandleConfig{UI: openapi.DocsRedoc})
 
+// Enable YAML endpoint (disabled by default)
+spec.Handle(r, "/swagger", &openapi.HandleConfig{YAMLFilename: "schema.yaml"})
+
 // Custom filenames (relative to base path)
 spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: "openapi.json", YAMLFilename: "openapi.yaml"})
 
-// Disable YAML endpoint
-spec.Handle(r, "/swagger", &openapi.HandleConfig{YAMLFilename: "-"})
+// Disable JSON endpoint using the SchemaDisabled constant
+spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: openapi.SchemaDisabled, YAMLFilename: "schema.yaml"})
 
 // Disable interactive docs, serve only spec files
 spec.Handle(r, "/swagger", &openapi.HandleConfig{DisableDocs: true})
@@ -601,7 +604,6 @@ spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: "data/openapi.jso
 // Absolute path: docs at /swagger/, schema at /api/v1/swagger.json
 spec.Handle(r, "/swagger", &openapi.HandleConfig{
     JSONFilename: "/api/v1/swagger.json",
-    YAMLFilename: "-",
 })
 ```
 
