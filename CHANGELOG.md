@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/vitalvas/kasper/compare/v0.4.1...v0.5.0) (2026-03-03)
+
+
+### Features
+
+* **mux:** add common MIME content type constants ([e0c2d28](https://github.com/vitalvas/kasper/commit/e0c2d28e46af4e2fe8849a22a6134095070669ba))
+* **openapi:** add SchemaDisabled constant and disable YAML schema by default ([66d452f](https://github.com/vitalvas/kasper/commit/66d452f2ea234c38f7c91b13e0ad6bf5610e538e))
+
+
+### Bug Fixes
+
+* **docs:** remove import paths from README section headings ([7ecf6f7](https://github.com/vitalvas/kasper/commit/7ecf6f7b517478ef33539e54a6303a0d849b99bd))
+
 ## [0.4.1](https://github.com/vitalvas/kasper/compare/v0.4.0...v0.4.1) (2026-02-26)
 
 
