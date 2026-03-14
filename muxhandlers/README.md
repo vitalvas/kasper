@@ -688,6 +688,40 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Early Hints Middleware
+
+`EarlyHintsMiddleware` sends a 103 Early Hints informational response per
+[RFC 8297](https://www.rfc-editor.org/rfc/rfc8297) before the final response.
+This allows clients to begin preloading resources (stylesheets, scripts, fonts)
+while the server is still processing the request.
+
+### EarlyHintsConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Links` | `[]string` | Link header values per RFC 8288; at least one required |
+
+### EarlyHints Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/", pageHandler).Methods(http.MethodGet)
+
+mw, err := muxhandlers.EarlyHintsMiddleware(muxhandlers.EarlyHintsConfig{
+    Links: []string{
+        `</style.css>; rel=preload; as=style`,
+        `</app.js>; rel=preload; as=script`,
+        `</font.woff2>; rel=preload; as=font; crossorigin`,
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
 ## IP Allow Middleware
 
 `IPAllowMiddleware` restricts access to requests originating from a

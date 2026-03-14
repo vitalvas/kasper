@@ -94,5 +94,6 @@ HTTP middleware for the mux router.
 | `CacheControlMiddleware` | -- | Sets `Cache-Control` and `Expires` response headers based on Content-Type prefix rules, case-insensitive matching |
 | `StaticFilesHandler` | -- | Serves static files from any `fs.FS` via `http.FileServerFS`, directory listing disabled by default, SPA fallback support |
 | `ProfilerHandler` | -- | Serves `net/http/pprof` endpoints (index, cmdline, profile, symbol, trace) |
+| `EarlyHintsMiddleware` | RFC 8297 | Sends 103 Early Hints with Link headers for resource preloading |
 | `SunsetMiddleware` | RFC 8594 | Sets `Sunset`, `Deprecation`, and `Link` response headers for API deprecation |
 | `IPAllowMiddleware` | -- | IP allow list with CIDR support, customizable denied handler |

@@ -279,6 +279,25 @@
 //	}
 //	r.Use(mw)
 //
+// # Early Hints Middleware
+//
+// EarlyHintsMiddleware sends a 103 Early Hints informational response per
+// RFC 8297 before the final response. This allows clients to begin preloading
+// resources (stylesheets, scripts, fonts) while the server is still processing
+// the request. The configured Link headers are sent with the 103 response and
+// are not carried over to the final response.
+//
+//	mw, err := muxhandlers.EarlyHintsMiddleware(muxhandlers.EarlyHintsConfig{
+//	    Links: []string{
+//	        `</style.css>; rel=preload; as=style`,
+//	        `</app.js>; rel=preload; as=script`,
+//	    },
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
 // # IP Allow Middleware
 //
 // IPAllowMiddleware restricts access to requests originating from a configured
