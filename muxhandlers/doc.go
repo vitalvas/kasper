@@ -33,6 +33,26 @@
 //	}
 //	r.Use(mw)
 //
+// # Bearer Auth Middleware
+//
+// BearerAuthMiddleware implements HTTP Bearer Token Authentication per RFC 6750.
+// It extracts the token from the Authorization header and validates it using a
+// user-provided function. When the token is missing, malformed, or invalid, the
+// middleware responds with 401 Unauthorized and a WWW-Authenticate: Bearer header
+// per RFC 6750 Section 3. The ValidateFunc receives the full request, allowing
+// token validation based on route variables, headers, or other request context.
+//
+//	mw, err := muxhandlers.BearerAuthMiddleware(muxhandlers.BearerAuthConfig{
+//	    Realm: "My API",
+//	    ValidateFunc: func(r *http.Request, token string) bool {
+//	        return token == expectedToken
+//	    },
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
 // # Proxy Headers Middleware
 //
 // ProxyHeadersMiddleware populates request fields from reverse proxy headers

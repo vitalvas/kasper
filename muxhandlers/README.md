@@ -104,6 +104,42 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Bearer Auth Middleware
+
+`BearerAuthMiddleware` implements HTTP Bearer Token Authentication per
+[RFC 6750](https://www.rfc-editor.org/rfc/rfc6750). It extracts the token
+from the `Authorization` header and validates it using a user-provided
+function. When the token is missing, malformed, or invalid, the middleware
+responds with 401 Unauthorized and a `WWW-Authenticate: Bearer` header per
+RFC 6750 Section 3.
+
+### BearerAuthConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Realm` | `string` | Authentication realm for `WWW-Authenticate` header; defaults to `"Restricted"` |
+| `ValidateFunc` | `func(*http.Request, string) bool` | Token validation callback; receives request and raw token |
+
+### BearerAuth Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.BearerAuthMiddleware(muxhandlers.BearerAuthConfig{
+    Realm: "My API",
+    ValidateFunc: func(r *http.Request, token string) bool {
+        return token == expectedToken
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
 ## Proxy Headers Middleware
 
 `ProxyHeadersMiddleware` populates request fields from reverse proxy
