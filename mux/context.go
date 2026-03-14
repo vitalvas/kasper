@@ -13,6 +13,12 @@ type routeContextKey struct{}
 // ctxKey is the single context key used to store both route and vars.
 var ctxKey = routeContextKey{}
 
+// metadataCtxKeyType is an unexported type for the metadata context key.
+type metadataCtxKeyType struct{}
+
+// metadataCtxKey is the context key used to store merged request metadata.
+var metadataCtxKey = metadataCtxKeyType{}
+
 // routerCtxKeyType is an unexported type for the router context key.
 type routerCtxKeyType struct{}
 
@@ -60,6 +66,20 @@ func CurrentRouter(r *http.Request) *Router {
 func CurrentRoute(r *http.Request) *Route {
 	if rc, ok := r.Context().Value(ctxKey).(*routeContext); ok {
 		return rc.route
+	}
+	return nil
+}
+
+// RequestMetadata returns the merged metadata for the current request.
+// It combines the route's static metadata with any dynamic metadata
+// produced by MetadataFunc. Returns nil if no metadata is available.
+func RequestMetadata(r *http.Request) map[any]any {
+	if m, ok := r.Context().Value(metadataCtxKey).(map[any]any); ok {
+		return m
+	}
+	route := CurrentRoute(r)
+	if route != nil {
+		return route.GetMetadata()
 	}
 	return nil
 }

@@ -760,14 +760,38 @@ Use `GetMetadataValueOr` for a fallback when the key may not exist:
 limit := route.GetMetadataValueOr("rateLimit", 60)
 ```
 
+### Dynamic Metadata (MetadataFunc)
+
+`MetadataFunc` adds request-time dynamic metadata. The function receives the current `*http.Request` and returns a map that is merged on top of the route's static metadata:
+
+```go
+r.HandleFunc("/users", handler).
+    Metadata("static", "value").
+    MetadataFunc(func(r *http.Request) map[any]any {
+        return map[any]any{"lang": r.Header.Get("Accept-Language")}
+    })
+```
+
+Use `RequestMetadata` inside a handler to retrieve the merged metadata (static + dynamic). When no `MetadataFunc` is set, it falls back to the route's static metadata without extra context allocation:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    md := mux.RequestMetadata(r)
+    lang := md["lang"]
+    role := md["static"]
+}
+```
+
 | Method | Description |
 |--------|-------------|
 | `Metadata(key, value any)` | Set a key-value pair (fluent, chainable) |
 | `MetadataMap(m map[any]any)` | Merge a map into metadata (fluent, chainable) |
+| `MetadataFunc(fn func(*http.Request) map[any]any)` | Set dynamic metadata function (fluent, chainable) |
 | `GetMetadata()` | Return the full metadata map (`nil` if unset) |
 | `MetadataContains(key any)` | Check whether a key exists |
 | `GetMetadataValue(key any)` | Get value or `ErrMetadataKeyNotFound` |
 | `GetMetadataValueOr(key, fallback any)` | Get value with fallback default |
+| `RequestMetadata(r *http.Request)` | Get merged metadata from request context (package-level function) |
 
 ## Custom Regexp Compiler
 

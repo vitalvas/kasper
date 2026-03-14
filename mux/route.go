@@ -26,16 +26,17 @@ type parentRoute interface {
 
 // Route stores information to match a request and build URLs.
 type Route struct {
-	parent      parentRoute
-	handler     http.Handler
-	matchers    []matcher
-	middlewares []MiddlewareFunc
-	regexp      routeRegexpGroup
-	name        string
-	err         error
-	metadata    map[any]any
-	namedRoutes map[string]*Route
-	buildOnly   bool
+	parent       parentRoute
+	handler      http.Handler
+	matchers     []matcher
+	middlewares  []MiddlewareFunc
+	regexp       routeRegexpGroup
+	name         string
+	err          error
+	metadata     map[any]any
+	metadataFunc func(*http.Request) map[any]any
+	namedRoutes  map[string]*Route
+	buildOnly    bool
 
 	strictSlash    bool
 	skipClean      bool
@@ -381,6 +382,14 @@ func (r *Route) MetadataMap(m map[any]any) *Route {
 		r.metadata = make(map[any]any, len(m))
 	}
 	maps.Copy(r.metadata, m)
+	return r
+}
+
+// MetadataFunc sets a function that produces dynamic metadata from the
+// current request. The returned map is merged on top of the route's
+// static metadata at request time and stored in the request context.
+func (r *Route) MetadataFunc(fn func(*http.Request) map[any]any) *Route {
+	r.metadataFunc = fn
 	return r
 }
 

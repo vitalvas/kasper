@@ -558,6 +558,80 @@ func TestRouteMetadata(t *testing.T) {
 		assert.Equal(t, 1, md["a"])
 		assert.Equal(t, 2, md["b"])
 	})
+
+	t.Run("MetadataFunc returns values based on request headers", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			md := RequestMetadata(r)
+			require.NotNil(t, md)
+			assert.Equal(t, "en", md["lang"])
+		}).MetadataFunc(func(r *http.Request) map[any]any {
+			return map[any]any{"lang": r.Header.Get("Accept-Language")}
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		req.Header.Set("Accept-Language", "en")
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+	})
+
+	t.Run("MetadataFunc merged with static Metadata", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			md := RequestMetadata(r)
+			require.NotNil(t, md)
+			assert.Equal(t, "admin", md["role"])
+			assert.Equal(t, "dynamic-value", md["dynamic"])
+		}).Metadata("role", "admin").
+			MetadataFunc(func(_ *http.Request) map[any]any {
+				return map[any]any{"dynamic": "dynamic-value"}
+			})
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+	})
+
+	t.Run("MetadataFunc overrides static keys", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			md := RequestMetadata(r)
+			require.NotNil(t, md)
+			assert.Equal(t, "overridden", md["role"])
+		}).Metadata("role", "admin").
+			MetadataFunc(func(_ *http.Request) map[any]any {
+				return map[any]any{"role": "overridden"}
+			})
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+	})
+
+	t.Run("RequestMetadata returns static metadata when no func set", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			md := RequestMetadata(r)
+			require.NotNil(t, md)
+			assert.Equal(t, "admin", md["role"])
+		}).Metadata("role", "admin")
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+	})
+
+	t.Run("RequestMetadata returns nil when no metadata at all", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/users", func(_ http.ResponseWriter, r *http.Request) {
+			md := RequestMetadata(r)
+			assert.Nil(t, md)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/users", nil)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+	})
 }
 
 func TestRouteMethodMatcher(t *testing.T) {

@@ -452,6 +452,25 @@
 //	role, err := route.GetMetadataValue("role")
 //	limit := route.GetMetadataValueOr("rateLimit", 60)
 //
+// MetadataFunc adds request-time dynamic metadata. The function receives
+// the current request and returns a map that is merged on top of the
+// route's static metadata and stored in the request context:
+//
+//	r.HandleFunc("/users", handler).
+//	    Metadata("static", "value").
+//	    MetadataFunc(func(r *http.Request) map[any]any {
+//	        return map[any]any{"lang": r.Header.Get("Accept-Language")}
+//	    })
+//
+// Use RequestMetadata inside a handler to retrieve the merged metadata
+// (static + dynamic). When no MetadataFunc is set, it falls back to the
+// route's static metadata without extra context allocation:
+//
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//	    md := mux.RequestMetadata(r)
+//	    lang := md["lang"]
+//	}
+//
 // # Walking Routes
 //
 // Walk traverses the router and all its subrouters, calling a function for

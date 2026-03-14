@@ -2,6 +2,7 @@ package mux
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -78,6 +79,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			handler = defaultNotFoundHandler
 		}
 		req = setRouteContext(req, match.Route, match.Vars)
+
+		if match.Route != nil && match.Route.metadataFunc != nil {
+			merged := make(map[any]any)
+			maps.Copy(merged, match.Route.metadata)
+			maps.Copy(merged, match.Route.metadataFunc(req))
+			ctx := context.WithValue(req.Context(), metadataCtxKey, merged)
+			req = req.WithContext(ctx)
+		}
 	} else {
 		if match.methodNotAllowed {
 			// RFC 7231 Section 6.5.5: the origin server MUST generate an
