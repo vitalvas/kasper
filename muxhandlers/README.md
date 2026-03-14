@@ -651,3 +651,52 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## IP Allow Middleware
+
+`IPAllowMiddleware` restricts access to requests originating from a
+configured set of IP addresses and CIDR ranges. Requests from IPs not
+in the allowed list are rejected with 403 Forbidden by default. The
+client IP is extracted from `r.RemoteAddr`.
+
+### IPAllowConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Allowed` | `[]string` | IP addresses and CIDR ranges that are permitted; required |
+| `DeniedHandler` | `http.Handler` | Custom handler for denied requests; `nil` = 403 Forbidden with empty body |
+
+### IPAllow Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.IPAllowMiddleware(muxhandlers.IPAllowConfig{
+    Allowed: []string{"10.0.0.0/8", "192.168.0.0/16", "::1"},
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+### IPAllow Usage with custom denied handler
+
+```go
+mw, err := muxhandlers.IPAllowMiddleware(muxhandlers.IPAllowConfig{
+    Allowed: []string{"10.0.0.0/8"},
+    DeniedHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusForbidden)
+        w.Write([]byte(`{"error":"access denied"}`))
+    }),
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```

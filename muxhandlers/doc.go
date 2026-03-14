@@ -258,4 +258,19 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # IP Allow Middleware
+//
+// IPAllowMiddleware restricts access to requests originating from a configured
+// set of IP addresses and CIDR ranges. Requests from IPs not in the allowed
+// list are rejected with 403 Forbidden by default. Use DeniedHandler to
+// customize the error response.
+//
+//	mw, err := muxhandlers.IPAllowMiddleware(muxhandlers.IPAllowConfig{
+//	    Allowed: []string{"10.0.0.0/8", "192.168.0.0/16"},
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
 package muxhandlers
