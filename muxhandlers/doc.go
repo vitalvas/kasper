@@ -242,4 +242,20 @@
 // http.Handler that serves profiling data directly.
 //
 //	r.PathPrefix("/debug/pprof").Handler(muxhandlers.ProfilerHandler())
+//
+// # Sunset Middleware
+//
+// SunsetMiddleware sets the Sunset response header per RFC 8594 to indicate
+// that a resource will become unresponsive at a specific point in time.
+// Optionally sets the Deprecation header and a Link header with rel="sunset".
+//
+//	mw, err := muxhandlers.SunsetMiddleware(muxhandlers.SunsetConfig{
+//	    Sunset:      time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+//	    Deprecation: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+//	    Link:        "https://example.com/docs/migration",
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
 package muxhandlers

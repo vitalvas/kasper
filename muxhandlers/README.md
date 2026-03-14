@@ -616,3 +616,38 @@ r := mux.NewRouter()
 
 r.PathPrefix("/debug/pprof").Handler(muxhandlers.ProfilerHandler())
 ```
+
+## Sunset Middleware
+
+`SunsetMiddleware` sets the `Sunset` response header per
+[RFC 8594](https://www.rfc-editor.org/rfc/rfc8594) to indicate that a
+resource is expected to become unresponsive at a specific point in time.
+Optionally sets the `Deprecation` header and a `Link` header with
+`rel="sunset"` pointing to migration documentation.
+
+### SunsetConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Sunset` | `time.Time` | When the resource becomes unresponsive; required; serialized as HTTP-date |
+| `Deprecation` | `time.Time` | When the resource was deprecated; zero = omit |
+| `Link` | `string` | URI to deprecation/migration docs; empty = omit; added as `Link` header with `rel="sunset"` |
+
+### Sunset Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.SunsetMiddleware(muxhandlers.SunsetConfig{
+    Sunset:      time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+    Deprecation: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+    Link:        "https://example.com/docs/migration",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
