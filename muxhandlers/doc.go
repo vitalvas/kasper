@@ -234,4 +234,12 @@
 //	    log.Fatal(err)
 //	}
 //	r.PathPrefix("/").Handler(handler)
+//
+// # Profiler Handler
+//
+// ProfilerHandler returns an http.Handler that serves the standard
+// net/http/pprof endpoints. It is not middleware — it returns an
+// http.Handler that serves profiling data directly.
+//
+//	r.PathPrefix("/debug/pprof").Handler(muxhandlers.ProfilerHandler())
 package muxhandlers

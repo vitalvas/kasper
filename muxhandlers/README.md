@@ -589,3 +589,30 @@ if err != nil {
 
 r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
 ```
+
+## Profiler Handler
+
+`ProfilerHandler` returns an `http.Handler` that serves the standard
+`net/http/pprof` endpoints. It is not middleware — it returns an
+`http.Handler` that serves profiling data directly.
+
+### Registered Endpoints
+
+| Path | Description |
+|------|-------------|
+| `/debug/pprof/` | Index page with links to all profiles |
+| `/debug/pprof/cmdline` | Running program command line |
+| `/debug/pprof/profile` | CPU profile (supports `?seconds=N`) |
+| `/debug/pprof/symbol` | Symbol lookup |
+| `/debug/pprof/trace` | Execution trace (supports `?seconds=N`) |
+
+Named profiles (`allocs`, `block`, `goroutine`, `heap`, `mutex`,
+`threadcreate`) are served by the index handler.
+
+### Profiler Usage
+
+```go
+r := mux.NewRouter()
+
+r.PathPrefix("/debug/pprof").Handler(muxhandlers.ProfilerHandler())
+```

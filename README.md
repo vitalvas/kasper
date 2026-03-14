@@ -93,3 +93,4 @@ HTTP middleware for the mux router.
 | `ServerMiddleware` | -- | Sets `X-Server-Hostname` response header, resolved once via `os.Hostname` or static value |
 | `CacheControlMiddleware` | -- | Sets `Cache-Control` and `Expires` response headers based on Content-Type prefix rules, case-insensitive matching |
 | `StaticFilesHandler` | -- | Serves static files from any `fs.FS` via `http.FileServerFS`, directory listing disabled by default, SPA fallback support |
+| `ProfilerHandler` | -- | Serves `net/http/pprof` endpoints (index, cmdline, profile, symbol, trace) |
