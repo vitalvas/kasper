@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/vitalvas/kasper/compare/v0.5.0...v0.6.0) (2026-03-14)
+
+
+### Features
+
+* **mux:** add MetadataFunc and RequestMetadata for dynamic route metadata ([9e9a0ee](https://github.com/vitalvas/kasper/commit/9e9a0ee904974975cd1894cf29898c056ecb7998))
+* **muxhandlers:** add IPAllowMiddleware for IP-based access control ([10744bc](https://github.com/vitalvas/kasper/commit/10744bc0be53cec510760fa1a93ad5832c1aa455))
+* **muxhandlers:** add ProfilerHandler for net/http/pprof endpoints ([a1f85a2](https://github.com/vitalvas/kasper/commit/a1f85a2b9454e3c59780949d226448f9b39acf47))
+* **muxhandlers:** add SunsetMiddleware for RFC 8594 Sunset header ([386009e](https://github.com/vitalvas/kasper/commit/386009ec4f3c54b133d3f825089b26eb1d55bafc))
+
+
+### Bug Fixes
+
+* **docs:** remove FastAPI reference and add SunsetMiddleware to README ([6ada714](https://github.com/vitalvas/kasper/commit/6ada714b4b7c4e38bdc679cbab55a09a83761ef4))
+
 ## [0.5.0](https://github.com/vitalvas/kasper/compare/v0.4.1...v0.5.0) (2026-03-03)
 
 
