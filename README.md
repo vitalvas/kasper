@@ -1,7 +1,6 @@
 # Kasper
 
 HTTP toolkit for Go. Drop-in gorilla/mux replacement with WebSocket, OpenAPI, and middleware support.
-Inspired by [FastAPI](https://fastapi.tiangolo.com/).
 
 ```bash
 go get github.com/vitalvas/kasper
@@ -94,3 +93,4 @@ HTTP middleware for the mux router.
 | `CacheControlMiddleware` | -- | Sets `Cache-Control` and `Expires` response headers based on Content-Type prefix rules, case-insensitive matching |
 | `StaticFilesHandler` | -- | Serves static files from any `fs.FS` via `http.FileServerFS`, directory listing disabled by default, SPA fallback support |
 | `ProfilerHandler` | -- | Serves `net/http/pprof` endpoints (index, cmdline, profile, symbol, trace) |
+| `SunsetMiddleware` | RFC 8594 | Sets `Sunset`, `Deprecation`, and `Link` response headers for API deprecation |
