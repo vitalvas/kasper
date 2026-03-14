@@ -279,6 +279,36 @@
 //	}
 //	r.Use(mw)
 //
+// # Problem Details
+//
+// WriteProblemDetails writes an RFC 9457 Problem Details JSON response with
+// Content-Type "application/problem+json". The ProblemDetails struct contains
+// the standard members (type, title, status, detail, instance) and supports
+// extension members via the Extensions map. NewProblemDetails creates a
+// ProblemDetails with the status code and standard status text as title.
+//
+//	muxhandlers.WriteProblemDetails(w, muxhandlers.ProblemDetails{
+//	    Type:   "https://example.com/errors/not-found",
+//	    Title:  "Resource not found",
+//	    Status: http.StatusNotFound,
+//	    Detail: "User with ID 42 was not found",
+//	})
+//
+// With extensions:
+//
+//	muxhandlers.WriteProblemDetails(w, muxhandlers.ProblemDetails{
+//	    Type:   "https://example.com/errors/validation",
+//	    Title:  "Validation Error",
+//	    Status: http.StatusUnprocessableEntity,
+//	    Extensions: map[string]any{
+//	        "errors": []string{"email is required"},
+//	    },
+//	})
+//
+// Quick error response:
+//
+//	muxhandlers.WriteProblemDetails(w, muxhandlers.NewProblemDetails(http.StatusForbidden))
+//
 // # Early Hints Middleware
 //
 // EarlyHintsMiddleware sends a 103 Early Hints informational response per

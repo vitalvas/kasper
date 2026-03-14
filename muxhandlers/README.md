@@ -688,6 +688,64 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Problem Details
+
+`WriteProblemDetails` writes an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)
+Problem Details JSON response with Content-Type `application/problem+json`.
+
+### ProblemDetails
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Type` | `string` | URI identifying the problem type; defaults to `"about:blank"` |
+| `Title` | `string` | Short human-readable summary |
+| `Status` | `int` | HTTP status code |
+| `Detail` | `string` | Human-readable explanation specific to this occurrence |
+| `Instance` | `string` | URI identifying the specific occurrence |
+| `Extensions` | `map[string]any` | Additional members merged into the top-level JSON object |
+
+### ProblemDetails Usage
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    user, err := db.GetUser(id)
+    if err != nil {
+        muxhandlers.WriteProblemDetails(w, muxhandlers.ProblemDetails{
+            Type:   "https://example.com/errors/not-found",
+            Title:  "Resource not found",
+            Status: http.StatusNotFound,
+            Detail: fmt.Sprintf("User with ID %s was not found", id),
+        })
+        return
+    }
+}
+```
+
+### ProblemDetails with Extensions
+
+```go
+muxhandlers.WriteProblemDetails(w, muxhandlers.ProblemDetails{
+    Type:   "https://example.com/errors/validation",
+    Title:  "Validation Error",
+    Status: http.StatusUnprocessableEntity,
+    Detail: "One or more fields are invalid",
+    Extensions: map[string]any{
+        "errors": []map[string]string{
+            {"field": "email", "message": "invalid format"},
+        },
+    },
+})
+```
+
+### Quick Error Response
+
+`NewProblemDetails` creates a `ProblemDetails` with the status code and
+the standard status text as title:
+
+```go
+muxhandlers.WriteProblemDetails(w, muxhandlers.NewProblemDetails(http.StatusForbidden))
+```
+
 ## Early Hints Middleware
 
 `EarlyHintsMiddleware` sends a 103 Early Hints informational response per
