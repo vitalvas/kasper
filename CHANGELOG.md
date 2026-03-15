@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/vitalvas/kasper/compare/v0.6.0...v0.7.0) (2026-03-15)
+
+
+### Features
+
+* **muxhandlers:** add BearerAuthMiddleware for RFC 6750 token authentication ([782fdfa](https://github.com/vitalvas/kasper/commit/782fdfaf40a679e12294d7ac01d5fe0c4ae47225))
+* **muxhandlers:** add ContentNegotiationMiddleware for RFC 9110 Accept parsing ([64b7c12](https://github.com/vitalvas/kasper/commit/64b7c1274e2878e225ea9464551ef165af02374f))
+* **muxhandlers:** add EarlyHintsMiddleware for RFC 8297 resource preloading ([e6f2b7a](https://github.com/vitalvas/kasper/commit/e6f2b7a5390ddadea19e1a392d5c80c96939cdb2))
+* **muxhandlers:** add IdempotencyMiddleware with pluggable store interface ([4171527](https://github.com/vitalvas/kasper/commit/4171527f794e2529eae822fd9731e519e8270b3f))
+* **muxhandlers:** add WriteProblemDetails for RFC 9457 error responses ([4f709e9](https://github.com/vitalvas/kasper/commit/4f709e97d1e4fc787e2a101227ddbf046d4b703c))
+
 ## [0.6.0](https://github.com/vitalvas/kasper/compare/v0.5.0...v0.6.0) (2026-03-14)
 
 
