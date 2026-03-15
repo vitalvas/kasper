@@ -688,6 +688,57 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Content Negotiation Middleware
+
+`ContentNegotiationMiddleware` performs proactive content negotiation per
+[RFC 9110 Section 12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1).
+It parses the `Accept` header with quality values, selects the best matching
+type from the offered list, and stores the result in the request context.
+Returns 406 Not Acceptable when no match is found.
+
+### ContentNegotiationConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Offered` | `[]string` | Media types the server can produce, in preference order; empty = accept all |
+
+### ContentNegotiation Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", handler).Methods(http.MethodGet)
+
+r.Use(muxhandlers.ContentNegotiationMiddleware(muxhandlers.ContentNegotiationConfig{
+    Offered: []string{"application/json", "application/xml"},
+}))
+```
+
+### Reading the Negotiated Type
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    switch muxhandlers.NegotiatedType(r) {
+    case "application/json":
+        mux.ResponseJSON(w, http.StatusOK, data)
+    case "application/xml":
+        mux.ResponseXML(w, http.StatusOK, data)
+    }
+}
+```
+
+### Negotiation Rules
+
+| Accept Header | Behavior |
+|---------------|----------|
+| absent or empty | First offered type is selected |
+| `application/json` | Exact match |
+| `text/*` | Matches any `text/` subtype |
+| `*/*` | Matches any type; first offered wins |
+| `application/json;q=0.5, text/html;q=0.9` | Higher quality wins |
+| `application/json;q=0` | Explicitly excluded |
+| `text/csv` (not offered) | 406 Not Acceptable |
+
 ## Problem Details
 
 `WriteProblemDetails` writes an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)

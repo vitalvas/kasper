@@ -279,6 +279,30 @@
 //	}
 //	r.Use(mw)
 //
+// # Content Negotiation Middleware
+//
+// ContentNegotiationMiddleware performs proactive content negotiation per
+// RFC 9110 Section 12.5.1. It parses the Accept header with quality values,
+// selects the best matching type from the offered list, and stores the result
+// in the request context. Use NegotiatedType to retrieve the selected type
+// inside a handler. When Offered is empty, any media type is accepted.
+// When no offered type matches, the middleware responds with 406 Not Acceptable.
+//
+//	r.Use(muxhandlers.ContentNegotiationMiddleware(muxhandlers.ContentNegotiationConfig{
+//	    Offered: []string{"application/json", "application/xml", "text/html"},
+//	}))
+//
+// Inside a handler:
+//
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//	    switch muxhandlers.NegotiatedType(r) {
+//	    case "application/json":
+//	        mux.ResponseJSON(w, http.StatusOK, data)
+//	    case "application/xml":
+//	        mux.ResponseXML(w, http.StatusOK, data)
+//	    }
+//	}
+//
 // # Problem Details
 //
 // WriteProblemDetails writes an RFC 9457 Problem Details JSON response with
