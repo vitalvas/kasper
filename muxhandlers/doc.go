@@ -279,6 +279,22 @@
 //	}
 //	r.Use(mw)
 //
+// # Idempotency Middleware
+//
+// IdempotencyMiddleware caches responses keyed by the Idempotency-Key header per
+// draft-ietf-httpapi-idempotency-key-header. Duplicate requests with the same key
+// replay the cached response without invoking the handler. The middleware requires
+// an IdempotencyStore implementation for persistence (e.g. Redis, in-memory).
+//
+//	mw, err := muxhandlers.IdempotencyMiddleware(muxhandlers.IdempotencyConfig{
+//	    Store: redisStore,
+//	    TTL:   1 * time.Hour,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
 // # Content Negotiation Middleware
 //
 // ContentNegotiationMiddleware performs proactive content negotiation per

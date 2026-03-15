@@ -688,6 +688,61 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Idempotency Middleware
+
+`IdempotencyMiddleware` caches responses keyed by the `Idempotency-Key` header per
+[draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/).
+Duplicate requests with the same key replay the cached response without
+invoking the handler. The middleware requires an `IdempotencyStore`
+implementation for persistence.
+
+### IdempotencyStore Interface
+
+```go
+type IdempotencyStore interface {
+    Get(ctx context.Context, key string) ([]byte, bool)
+    Set(ctx context.Context, key string, value []byte, ttl time.Duration)
+}
+```
+
+### IdempotencyConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Store` | `IdempotencyStore` | Backing store for cached responses; required |
+| `HeaderName` | `string` | Header name; defaults to `"Idempotency-Key"` |
+| `TTL` | `time.Duration` | Cache TTL; defaults to 24 hours; zero = no expiry |
+| `Methods` | `[]string` | HTTP methods that require idempotency; `nil` = POST |
+| `EnforceKey` | `bool` | Return 400 if header is missing on matched methods |
+| `CacheableStatusCodes` | `[]int` | Status codes to cache; `nil` = cache all; e.g. `[]int{200, 201}` |
+
+### Idempotency Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/payments", createPayment).Methods(http.MethodPost)
+
+mw, err := muxhandlers.IdempotencyMiddleware(muxhandlers.IdempotencyConfig{
+    Store: redisStore, // implements IdempotencyStore
+    TTL:   1 * time.Hour,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+### Idempotency Usage with EnforceKey
+
+```go
+mw, err := muxhandlers.IdempotencyMiddleware(muxhandlers.IdempotencyConfig{
+    Store:      redisStore,
+    EnforceKey: true, // 400 if Idempotency-Key header is missing
+})
+```
+
 ## Content Negotiation Middleware
 
 `ContentNegotiationMiddleware` performs proactive content negotiation per

@@ -94,6 +94,7 @@ HTTP middleware for the mux router.
 | `CacheControlMiddleware` | -- | Sets `Cache-Control` and `Expires` response headers based on Content-Type prefix rules, case-insensitive matching |
 | `StaticFilesHandler` | -- | Serves static files from any `fs.FS` via `http.FileServerFS`, directory listing disabled by default, SPA fallback support |
 | `ProfilerHandler` | -- | Serves `net/http/pprof` endpoints (index, cmdline, profile, symbol, trace) |
+| `IdempotencyMiddleware` | IETF Draft | Caches responses by `Idempotency-Key` header, replays on duplicate requests |
 | `ContentNegotiationMiddleware` | RFC 9110 | Accept header parsing with quality values, 406 on mismatch |
 | `WriteProblemDetails` | RFC 9457 | Writes `application/problem+json` error responses with extensions |
 | `EarlyHintsMiddleware` | RFC 8297 | Sends 103 Early Hints with Link headers for resource preloading |
