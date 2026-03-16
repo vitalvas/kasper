@@ -705,6 +705,15 @@ type IdempotencyStore interface {
 }
 ```
 
+### IdempotencyLocker Interface
+
+```go
+type IdempotencyLocker interface {
+    Lock(ctx context.Context, key string) bool
+    Unlock(ctx context.Context, key string)
+}
+```
+
 ### IdempotencyConfig
 
 | Field | Type | Description |
@@ -715,6 +724,33 @@ type IdempotencyStore interface {
 | `Methods` | `[]string` | HTTP methods that require idempotency; `nil` = POST |
 | `EnforceKey` | `bool` | Return 400 if header is missing on matched methods |
 | `CacheableStatusCodes` | `[]int` | Status codes to cache; `nil` = cache all; e.g. `[]int{200, 201}` |
+| `CacheKeyFunc` | `func(*http.Request, string) string` | Custom cache key builder; receives request and raw key; `nil` = default scoping by method + path + key |
+| `ValidateKeyFunc` | `func(*http.Request, string) bool` | Key format validator; return false to reject with 400; `nil` = no validation |
+| `KeyMaxLength` | `int` | Maximum key length; 0 = default (64); -1 = no limit |
+| `CanCache` | `func(*http.Request) bool` | Pre-check before cache lookup/storage; return false to skip caching; `nil` = all matched requests are eligible |
+| `OnCacheHit` | `func(*http.Request, string)` | Called on cache hit with request and raw key; use for observability; `nil` = no callback |
+| `OnCacheMiss` | `func(*http.Request, string)` | Called on cache miss with request and raw key; use for observability; `nil` = no callback |
+| `Locker` | `IdempotencyLocker` | Optional distributed lock for in-flight requests; returns 409 Conflict when lock cannot be acquired; `nil` = no locking |
+| `FingerprintFunc` | `func(*http.Request) string` | Computes a request fingerprint; mismatched fingerprint on cache hit returns 422 Unprocessable Entity; `nil` = no fingerprint check |
+| `OnConflict` | `func(*http.Request, string)` | Called on 409 Conflict (lock failure); use for observability; `nil` = no callback |
+| `OnFingerprintMismatch` | `func(*http.Request, string)` | Called on 422 (fingerprint mismatch); use for observability; `nil` = no callback |
+| `RetryAfter` | `time.Duration` | Duration for `Retry-After` header (as whole seconds) on 409 Conflict responses; 0 = no header |
+| `ReplayedHeaderName` | `string` | Response header set to `"true"` on replayed responses; empty = no header; e.g. `"X-Idempotency-Replayed"` |
+| `ErrorHandler` | `func(http.ResponseWriter, *http.Request, int)` | Custom error writer for 400/409/422 responses; `nil` = plain-text `http.Error` |
+| `OnStore` | `func(*http.Request, string, int)` | Called when a response is stored in cache with request, key, and status code; `nil` = no callback |
+| `ResponseHeadersFunc` | `func(http.Header, *http.Request, bool)` | Called before writing any response; `replayed` param is true for cached replays; `nil` = no callback |
+| `MaxCacheBodySize` | `int64` | Maximum response body size in bytes to cache; larger responses are served but not stored; 0 = no limit |
+
+### Route Metadata
+
+Use the `IdempotencySkipMetadataKey` constant to skip idempotency processing
+for specific routes via route metadata:
+
+```go
+r.HandleFunc("/health", handler).
+    Methods(http.MethodPost).
+    Metadata(muxhandlers.IdempotencySkipMetadataKey, true)
+```
 
 ### Idempotency Usage
 
@@ -740,6 +776,18 @@ r.Use(mw)
 mw, err := muxhandlers.IdempotencyMiddleware(muxhandlers.IdempotencyConfig{
     Store:      redisStore,
     EnforceKey: true, // 400 if Idempotency-Key header is missing
+})
+```
+
+### Idempotency Usage with CacheKeyFunc (per-user scoping)
+
+```go
+mw, err := muxhandlers.IdempotencyMiddleware(muxhandlers.IdempotencyConfig{
+    Store: redisStore,
+    CacheKeyFunc: func(r *http.Request, key string) string {
+        userID := r.Header.Get("X-User-ID")
+        return userID + ":" + r.Method + ":" + r.URL.Path + ":" + key
+    },
 })
 ```
 
