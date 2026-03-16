@@ -19,7 +19,8 @@ HTTP request multiplexer. API-compatible with gorilla/mux.
 | Path variables | Regex constraints and macros: `uuid`, `int`, `float`, `slug`, `alpha`, `alphanum`, `date`, `hex`, `domain` |
 | Matchers | Host, method, header, query, scheme, custom `MatcherFunc` |
 | Routing | Subrouters, middleware, named routes, URL building |
-| Request/Response | `BindJSON`, `BindXML`, `ResponseJSON`, `ResponseXML` |
+| Request/Response | `BindJSON`, `BindXML`, `BindQuery`, `BindForm`, `ResponseJSON`, `ResponseXML` |
+| Values encoding | `EncodeQuery`, `EncodeForm` — struct to `url.Values` with dot notation |
 | Standards | Strict slash (RFC 7538), path cleaning (RFC 3986), route walking |
 
 ---
@@ -102,3 +103,4 @@ HTTP middleware for the mux router.
 | `IPAllowMiddleware` | -- | IP allow list with CIDR support, customizable denied handler |
 | `PatchRoutingMiddleware` | RFC 7396, RFC 6902 | PATCH content type validation and routing, stores resolved type in context |
 | `AcceptPatchMiddleware` | RFC 5789 | OPTIONS handler with Allow and Accept-Patch headers, auto-discovers methods from router |
+| `CanonicalHostMiddleware` | -- | Redirects requests to canonical scheme and host, preserves path and query |

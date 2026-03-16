@@ -645,6 +645,156 @@ r.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 | `BindJSON` | Yes (default), pass `true` to allow | Yes |
 | `BindXML` | No (not supported by `encoding/xml`) | Yes |
 
+`BindJSON` and `BindXML` use the standard `json` and `xml` struct tags from the
+Go stdlib. The `required` and `default` tag options described below apply only
+to `BindQuery` and `BindForm`.
+
+### Query Parameter Binding
+
+`BindQuery` decodes URL query parameters into a struct using the `query` struct tag.
+Supports `required` and `default:<value>` tag options, nested structs (dot notation),
+slices of structs (indexed dot notation), and map fields.
+
+```go
+type ListParams struct {
+    Page   int               `query:"page,default:1"`
+    Limit  int               `query:"limit,default:20"`
+    Sort   string            `query:"sort,default:created_at"`
+    Status string            `query:"status,required"`
+    IDs    []int             `query:"id"`
+    Meta   map[string]string `query:"meta"`
+}
+
+r.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+    var params ListParams
+    if err := mux.BindQuery(r, &params); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    // use params
+}).Methods(http.MethodGet)
+```
+
+Nested structs use dot notation in query parameters:
+
+```go
+// GET /search?filter.city=NYC&filter.min_age=18
+type Filter struct {
+    City   string `query:"city"`
+    MinAge int    `query:"min_age"`
+}
+type SearchParams struct {
+    Filter Filter `query:"filter"`
+}
+```
+
+Slices of structs use indexed dot notation:
+
+```go
+// GET /order?items.0.name=A&items.0.qty=2&items.1.name=B&items.1.qty=1
+type Item struct {
+    Name string `query:"name"`
+    Qty  int    `query:"qty"`
+}
+type OrderParams struct {
+    Items []Item `query:"items"`
+}
+```
+
+Maps support multiple values per key with `map[string][]string`:
+
+```go
+// GET /search?tags.color=red&tags.color=blue&tags.size=large
+type SearchParams struct {
+    Tags map[string][]string `query:"tags"`
+}
+```
+
+Embedded (anonymous) structs flatten their fields to the parent level:
+
+```go
+// GET /users?page=2&limit=10&status=active
+type Pagination struct {
+    Page  int `query:"page,default:1"`
+    Limit int `query:"limit,default:20"`
+}
+
+type ListUsersParams struct {
+    Pagination
+    Status string `query:"status"`
+}
+```
+
+An embedded struct with an explicit tag uses dot notation instead of flattening:
+
+```go
+// GET /users?paging.page=2&paging.limit=10
+type ListUsersParams struct {
+    Pagination `query:"paging"`
+    Status     string `query:"status"`
+}
+```
+
+Slice indices are limited to `DefaultMaxSliceIndex` (1000) to prevent abuse
+from keys like `items.999999.name`.
+
+### Form Binding
+
+`BindForm` decodes `application/x-www-form-urlencoded` request bodies into a
+struct using the `form` struct tag. It supports the same features as `BindQuery`
+(required, defaults, nested structs, slices, maps).
+
+```go
+type LoginForm struct {
+    Username string `form:"username,required"`
+    Password string `form:"password,required"`
+    Remember bool   `form:"remember,default:false"`
+}
+
+r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+    var form LoginForm
+    if err := mux.BindForm(r, &form); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    // use form
+}).Methods(http.MethodPost)
+```
+
+### Values Encoding
+
+`EncodeQuery` and `EncodeForm` encode a struct into `url.Values` using the
+`query` or `form` struct tag respectively. Supports `omitempty` to skip zero
+values. Nested structs, slices of structs, and maps use the same dot notation.
+
+```go
+type Filter struct {
+    Page   int    `query:"page"`
+    Limit  int    `query:"limit,omitempty"`
+    Status string `query:"status"`
+}
+
+vals, err := mux.EncodeQuery(Filter{Page: 2, Status: "active"})
+// vals.Encode() → "page=2&status=active"
+```
+
+| Function | Tag | Direction |
+|----------|-----|-----------|
+| `BindQuery` | `query` | `url.Values` → struct |
+| `BindForm` | `form` | `url.Values` → struct |
+| `EncodeQuery` | `query` | struct → `url.Values` |
+| `EncodeForm` | `form` | struct → `url.Values` |
+
+### Tag Options
+
+| Option | Example | Description |
+|--------|---------|-------------|
+| field name | `query:"page"` | Maps to query parameter name |
+| `-` | `query:"-"` | Field is ignored |
+| `required` | `query:"page,required"` | Returns error if missing |
+| `default:<val>` | `query:"page,default:1"` | Used when parameter is missing |
+| `omitempty` | `query:"page,omitempty"` | Encoding only: skips zero values |
+
 ## Response Helpers
 
 `ResponseJSON` and `ResponseXML` encode a value and write it to the response with the appropriate `Content-Type` header. If encoding fails, an HTTP 500 Internal Server Error is written instead.

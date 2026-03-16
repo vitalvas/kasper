@@ -11,6 +11,15 @@ Kasper adds features on top without breaking the existing API.
 | `gorilla/mux` | `kasper/mux` | Full API compatible + extensions |
 | `gorilla/websocket` | `kasper/websocket` | Full API compatible + extensions |
 | `gorilla/handlers` | `kasper/muxhandlers` | New implementation, different API |
+| `gorilla/sessions` | -- | No Kasper equivalent |
+| `gorilla/securecookie` | -- | No Kasper equivalent |
+| `gorilla/csrf` | -- | No Kasper equivalent |
+| `gorilla/schema` | `kasper/mux` | `BindQuery`, `BindForm`, `EncodeQuery`, `EncodeForm` with dot notation |
+| `gorilla/feeds` | -- | No Kasper equivalent |
+| `gorilla/rpc` | -- | No Kasper equivalent |
+| `gorilla/pat` | `kasper/mux` | Covered by mux pattern syntax |
+| `gorilla/reverse` | `kasper/mux` | Covered by mux URL building |
+| `gorilla/context` | -- | Deprecated; Go stdlib `context.Context` used instead |
 | -- | `kasper/openapi` | No Gorilla equivalent |
 | -- | `kasper/httpsig` | No Gorilla equivalent |
 
@@ -74,6 +83,15 @@ requires migration.
 | **Request/Response Helpers** | | |
 | JSON request binding (`BindJSON`) | No | Yes |
 | XML request binding (`BindXML`) | No | Yes |
+| Query parameter binding (`BindQuery`) | No | Yes |
+| Form body binding (`BindForm`) | No | Yes |
+| Values encoding (`EncodeQuery`, `EncodeForm`) | No | Yes |
+| Nested struct binding (dot notation) | No | Yes |
+| Slice-of-struct binding (indexed dot) | No | Yes |
+| Map field binding | No | Yes |
+| Embedded struct flattening | No | Yes |
+| Max slice index protection | No | Yes |
+| Tag options (`required`, `default`, `omitempty`) | No | Yes |
 | JSON response writing (`ResponseJSON`) | No | Yes |
 | XML response writing (`ResponseXML`) | No | Yes |
 | Typed JSON handlers (`HandleJSON`) | No | Yes |
@@ -360,6 +378,8 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | **Logging** | | |
 | Apache/combined log format | Yes | No |
 | Custom log formatting | Yes | No |
+| **Other** | | |
+| Canonical host redirect | Yes | Yes |
 
 ### API Style Difference
 
