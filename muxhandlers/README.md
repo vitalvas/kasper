@@ -911,7 +911,10 @@ while the server is still processing the request.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Links` | `[]string` | Link header values per RFC 8288; at least one required |
+| `Links` | `[]string` | Static Link header values per RFC 8288 |
+| `LinksFunc` | `func(*http.Request) []string` | Per-request dynamic link computation; results are sent alongside static Links |
+
+Either `Links` or `LinksFunc` (or both) must be set.
 
 ### EarlyHints Usage
 
@@ -926,6 +929,51 @@ mw, err := muxhandlers.EarlyHintsMiddleware(muxhandlers.EarlyHintsConfig{
         `</app.js>; rel=preload; as=script`,
         `</font.woff2>; rel=preload; as=font; crossorigin`,
     },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+### EarlyHints Usage with embed.FS
+
+```go
+//go:embed static
+var staticFS embed.FS
+
+// buildLinks walks the embedded FS and returns Link headers for
+// known asset types.
+func buildLinks() []string {
+    asType := map[string]string{
+        ".css":   "style",
+        ".js":    "script",
+        ".woff2": "font",
+    }
+
+    var links []string
+    fs.WalkDir(staticFS, ".", func(path string, d fs.DirEntry, err error) error {
+        if err != nil || d.IsDir() {
+            return err
+        }
+        ext := filepath.Ext(path)
+        as, ok := asType[ext]
+        if !ok {
+            return nil
+        }
+        link := fmt.Sprintf("<%s>; rel=preload; as=%s", "/"+path, as)
+        if as == "font" {
+            link += "; crossorigin"
+        }
+        links = append(links, link)
+        return nil
+    })
+    return links
+}
+
+mw, err := muxhandlers.EarlyHintsMiddleware(muxhandlers.EarlyHintsConfig{
+    Links: buildLinks(),
 })
 if err != nil {
     log.Fatal(err)

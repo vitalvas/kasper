@@ -10,7 +10,7 @@ import (
 )
 
 func TestEarlyHintsMiddleware(t *testing.T) {
-	t.Run("config error no links", func(t *testing.T) {
+	t.Run("config error when both Links and LinksFunc are nil", func(t *testing.T) {
 		_, err := EarlyHintsMiddleware(EarlyHintsConfig{})
 		assert.ErrorIs(t, err, ErrNoLinks)
 	})
@@ -81,6 +81,99 @@ func TestEarlyHintsMiddleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, recorder.finalCode)
 		assert.Equal(t, "value", recorder.finalHeader.Get("X-Custom"))
+	})
+
+	t.Run("LinksFunc only", func(t *testing.T) {
+		mw, err := EarlyHintsMiddleware(EarlyHintsConfig{
+			LinksFunc: func(_ *http.Request) []string {
+				return []string{`</dynamic.css>; rel=preload; as=style`}
+			},
+		})
+		require.NoError(t, err)
+
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		recorder := newInformationalRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		handler.ServeHTTP(recorder, req)
+
+		require.Len(t, recorder.informational, 1)
+		assert.Equal(t, http.StatusEarlyHints, recorder.informational[0].code)
+		assert.Equal(t,
+			[]string{`</dynamic.css>; rel=preload; as=style`},
+			recorder.informational[0].header.Values("Link"),
+		)
+		assert.Equal(t, http.StatusOK, recorder.finalCode)
+	})
+
+	t.Run("LinksFunc combined with static Links", func(t *testing.T) {
+		mw, err := EarlyHintsMiddleware(EarlyHintsConfig{
+			Links: []string{`</style.css>; rel=preload; as=style`},
+			LinksFunc: func(_ *http.Request) []string {
+				return []string{`</dynamic.js>; rel=preload; as=script`}
+			},
+		})
+		require.NoError(t, err)
+
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		recorder := newInformationalRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		handler.ServeHTTP(recorder, req)
+
+		require.Len(t, recorder.informational, 1)
+		links := recorder.informational[0].header.Values("Link")
+		assert.Len(t, links, 2)
+		assert.Equal(t, `</style.css>; rel=preload; as=style`, links[0])
+		assert.Equal(t, `</dynamic.js>; rel=preload; as=script`, links[1])
+	})
+
+	t.Run("LinksFunc returns empty slice with static Links", func(t *testing.T) {
+		mw, err := EarlyHintsMiddleware(EarlyHintsConfig{
+			Links: []string{`</style.css>; rel=preload; as=style`},
+			LinksFunc: func(_ *http.Request) []string {
+				return nil
+			},
+		})
+		require.NoError(t, err)
+
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		recorder := newInformationalRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		handler.ServeHTTP(recorder, req)
+
+		require.Len(t, recorder.informational, 1)
+		assert.Equal(t,
+			[]string{`</style.css>; rel=preload; as=style`},
+			recorder.informational[0].header.Values("Link"),
+		)
+	})
+
+	t.Run("LinksFunc returns empty slice without static Links", func(t *testing.T) {
+		mw, err := EarlyHintsMiddleware(EarlyHintsConfig{
+			LinksFunc: func(_ *http.Request) []string {
+				return nil
+			},
+		})
+		require.NoError(t, err)
+
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		recorder := newInformationalRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		handler.ServeHTTP(recorder, req)
+
+		assert.Empty(t, recorder.informational)
+		assert.Equal(t, http.StatusOK, recorder.finalCode)
 	})
 
 	t.Run("internal copy is not affected by external mutation", func(t *testing.T) {
