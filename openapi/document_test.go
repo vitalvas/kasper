@@ -35,7 +35,7 @@ func TestDocumentExportJSON(t *testing.T) {
 			Info:    Info{Title: "RT", Version: "2.0.0"},
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("object")},
+					"User": {Type: SchemaTypeObject},
 				},
 			},
 		}
@@ -164,7 +164,7 @@ func TestDocumentFromJSON(t *testing.T) {
 			},
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"Error": {Type: TypeString("object")},
+					"Error": {Type: SchemaTypeObject},
 				},
 			},
 		}
@@ -180,7 +180,7 @@ func TestDocumentFromJSON(t *testing.T) {
 		assert.Equal(t, "Health check", parsed.Paths["/health"].Get.Summary)
 		require.NotNil(t, parsed.Components)
 		require.Contains(t, parsed.Components.Schemas, "Error")
-		assert.Equal(t, TypeString("object"), parsed.Components.Schemas["Error"].Type)
+		assert.Equal(t, SchemaTypeObject, parsed.Components.Schemas["Error"].Type)
 	})
 }
 

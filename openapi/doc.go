@@ -87,7 +87,7 @@
 //	    ResponseDescription(http.StatusForbidden, "Insufficient permissions").
 //	    DefaultResponse(ErrorResponse{}).
 //	    DefaultResponseHeader("X-Request-ID", &openapi.Header{
-//	        Schema: &openapi.Schema{Type: openapi.TypeString("string")},
+//	        Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 //	    })
 //
 // Override/merge semantics per field:
@@ -154,7 +154,7 @@
 //	spec.AddComponentParameter("pageParam", &openapi.Parameter{Name: "page", In: "query"})
 //	spec.AddComponentExample("sample", &openapi.Example{Summary: "A sample", Value: "test"})
 //	spec.AddComponentRequestBody("CreatePet", &openapi.RequestBody{Description: "Pet to create"})
-//	spec.AddComponentHeader("X-Rate-Limit", &openapi.Header{Schema: &openapi.Schema{Type: openapi.TypeString("integer")}})
+//	spec.AddComponentHeader("X-Rate-Limit", &openapi.Header{Schema: &openapi.Schema{Type: openapi.SchemaTypeInteger}})
 //	spec.AddComponentLink("GetUser", &openapi.Link{OperationID: "getUser"})
 //
 // # Path-Level Metadata
@@ -166,7 +166,7 @@
 //	spec.SetPathDescription("/users/{id}", "Individual user identified by ID.")
 //	spec.AddPathParameter("/users/{id}", &openapi.Parameter{
 //	    Name: "X-Tenant-ID", In: "header",
-//	    Schema: &openapi.Schema{Type: openapi.TypeString("string")},
+//	    Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 //	})
 //
 // # Server Overrides
@@ -211,12 +211,12 @@
 //
 //	// Binary file upload
 //	spec.Op("upload").RequestContent("application/octet-stream", &openapi.Schema{
-//	    Type: openapi.TypeString("string"), Format: "binary",
+//	    Type: openapi.SchemaTypeString, Format: "binary",
 //	})
 //
 //	// Image response
 //	spec.Op("avatar").ResponseContent(http.StatusOK, "image/png", &openapi.Schema{
-//	    Type: openapi.TypeString("string"), Format: "binary",
+//	    Type: openapi.SchemaTypeString, Format: "binary",
 //	})
 //
 //	// Form data
@@ -255,7 +255,7 @@
 //	    Response(http.StatusOK, []User{}).
 //	    ResponseHeader(http.StatusOK, "X-Total-Count", &openapi.Header{
 //	        Description: "Total number of users",
-//	        Schema:      &openapi.Schema{Type: openapi.TypeString("integer")},
+//	        Schema:      &openapi.Schema{Type: openapi.SchemaTypeInteger},
 //	    }).
 //	    ResponseLink(http.StatusOK, "GetNext", &openapi.Link{
 //	        OperationID: "listUsers",

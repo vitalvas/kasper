@@ -56,7 +56,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"id", TypeString("string"), ""},
+				{"id", SchemaTypeString, ""},
 			},
 		},
 		{
@@ -69,7 +69,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"id", TypeString("string"), "uuid"},
+				{"id", SchemaTypeString, "uuid"},
 			},
 		},
 		{
@@ -82,7 +82,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"page", TypeString("integer"), ""},
+				{"page", SchemaTypeInteger, ""},
 			},
 		},
 		{
@@ -95,7 +95,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"v", TypeString("number"), ""},
+				{"v", SchemaTypeNumber, ""},
 			},
 		},
 		{
@@ -108,7 +108,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"d", TypeString("string"), "date"},
+				{"d", SchemaTypeString, "date"},
 			},
 		},
 		{
@@ -121,7 +121,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"host", TypeString("string"), "hostname"},
+				{"host", SchemaTypeString, "hostname"},
 			},
 		},
 		{
@@ -134,7 +134,7 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"code", TypeString("string"), ""},
+				{"code", SchemaTypeString, ""},
 			},
 		},
 		{
@@ -147,8 +147,8 @@ func TestParsePath(t *testing.T) {
 				schemaType SchemaType
 				format     string
 			}{
-				{"userId", TypeString("string"), "uuid"},
-				{"postId", TypeString("integer"), ""},
+				{"userId", SchemaTypeString, "uuid"},
+				{"postId", SchemaTypeInteger, ""},
 			},
 		},
 	}
@@ -475,7 +475,7 @@ func TestSpecBuilderMethods(t *testing.T) {
 
 	t.Run("AddComponentHeader", func(t *testing.T) {
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentHeader("X-Rate-Limit", &Header{Schema: &Schema{Type: TypeString("integer")}})
+			AddComponentHeader("X-Rate-Limit", &Header{Schema: &Schema{Type: SchemaTypeInteger}})
 		require.NotNil(t, spec.compHeaders)
 		assert.Contains(t, spec.compHeaders, "X-Rate-Limit")
 	})
@@ -708,7 +708,7 @@ func TestBuildComponents(t *testing.T) {
 		{
 			name: "parameters in components",
 			setup: func(s *Spec) {
-				s.AddComponentParameter("pageParam", &Parameter{Name: "page", In: "query", Schema: &Schema{Type: TypeString("integer")}})
+				s.AddComponentParameter("pageParam", &Parameter{Name: "page", In: "query", Schema: &Schema{Type: SchemaTypeInteger}})
 			},
 			checkFunc: func(t *testing.T, c *Components) {
 				assert.Contains(t, c.Parameters, "pageParam")
@@ -735,7 +735,7 @@ func TestBuildComponents(t *testing.T) {
 		{
 			name: "headers in components",
 			setup: func(s *Spec) {
-				s.AddComponentHeader("X-Rate-Limit", &Header{Schema: &Schema{Type: TypeString("integer")}})
+				s.AddComponentHeader("X-Rate-Limit", &Header{Schema: &Schema{Type: SchemaTypeInteger}})
 			},
 			checkFunc: func(t *testing.T, c *Components) {
 				assert.Contains(t, c.Headers, "X-Rate-Limit")
@@ -1005,7 +1005,7 @@ func TestBuildPathParameters(t *testing.T) {
 			AddPathParameter("/users", &Parameter{
 				Name:   "X-Tenant-ID",
 				In:     "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		spec.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
@@ -1026,11 +1026,11 @@ func TestBuildPathParameters(t *testing.T) {
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/items", &Parameter{
 				Name: "X-Tenant-ID", In: "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			}).
 			AddPathParameter("/items", &Parameter{
 				Name: "Accept-Language", In: "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		spec.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).
@@ -1048,7 +1048,7 @@ func TestBuildPathParameters(t *testing.T) {
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/users/{id}", &Parameter{
 				Name: "X-Request-ID", In: "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		spec.Route(r.HandleFunc("/users/{id:uuid}", dummyHandler).Methods(http.MethodGet)).
@@ -1083,7 +1083,7 @@ func TestBuildPathParameters(t *testing.T) {
 			AddPathServer("/users/{id}", Server{URL: "https://users.example.com"}).
 			AddPathParameter("/users/{id}", &Parameter{
 				Name: "X-Trace-ID", In: "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		spec.Route(r.HandleFunc("/users/{id:uuid}", dummyHandler).Methods(http.MethodGet)).
@@ -1533,7 +1533,7 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 		assert.Equal(t, "X-Tenant-Id", param.Name)
 		assert.Equal(t, "header", param.In)
 		assert.True(t, param.Required)
-		assert.Equal(t, TypeString("string"), param.Schema.Type)
+		assert.Equal(t, SchemaTypeString, param.Schema.Type)
 		assert.Nil(t, param.Schema.Enum)
 	})
 
@@ -1597,7 +1597,7 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 						In:          "header",
 						Description: tt.paramDesc,
 						Required:    false,
-						Schema:      &Schema{Type: TypeString("string")},
+						Schema:      &Schema{Type: SchemaTypeString},
 					})
 
 				doc := spec.Build(r)

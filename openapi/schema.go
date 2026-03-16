@@ -152,7 +152,7 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 				return &Schema{
 					AnyOf: []*Schema{
 						ref,
-						{Type: TypeString("null")},
+						{Type: SchemaTypeNull},
 					},
 				}
 			}
@@ -174,43 +174,43 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 	// Special cases first.
 	if t == reflect.TypeFor[time.Time]() {
-		return &Schema{Type: TypeString("string"), Format: "date-time"}
+		return &Schema{Type: SchemaTypeString, Format: "date-time"}
 	}
 
 	switch t.Kind() {
 	case reflect.Bool:
-		return &Schema{Type: TypeString("boolean")}
+		return &Schema{Type: SchemaTypeBoolean}
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return &Schema{Type: TypeString("integer")}
+		return &Schema{Type: SchemaTypeInteger}
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return &Schema{Type: TypeString("integer")}
+		return &Schema{Type: SchemaTypeInteger}
 
 	case reflect.Float32, reflect.Float64:
-		return &Schema{Type: TypeString("number")}
+		return &Schema{Type: SchemaTypeNumber}
 
 	case reflect.String:
-		return &Schema{Type: TypeString("string")}
+		return &Schema{Type: SchemaTypeString}
 
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
-			return &Schema{Type: TypeString("string"), Format: "byte"}
+			return &Schema{Type: SchemaTypeString, Format: "byte"}
 		}
 		return &Schema{
-			Type:  TypeString("array"),
+			Type:  SchemaTypeArray,
 			Items: g.generateType(t.Elem()),
 		}
 
 	case reflect.Array:
 		return &Schema{
-			Type:  TypeString("array"),
+			Type:  SchemaTypeArray,
 			Items: g.generateType(t.Elem()),
 		}
 
 	case reflect.Map:
 		return &Schema{
-			Type:                 TypeString("object"),
+			Type:                 SchemaTypeObject,
 			AdditionalProperties: g.generateType(t.Elem()),
 		}
 
@@ -230,7 +230,7 @@ func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 // See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.5.3 (required)
 func (g *SchemaGenerator) generateStructSchema(t reflect.Type) *Schema {
 	schema := &Schema{
-		Type:       TypeString("object"),
+		Type:       SchemaTypeObject,
 		Properties: make(map[string]*Schema),
 	}
 
@@ -698,6 +698,6 @@ func applyStringEncoding(schema *Schema) {
 	if slices.Contains(types, "null") {
 		schema.Type = TypeArray("string", "null")
 	} else {
-		schema.Type = TypeString("string")
+		schema.Type = SchemaTypeString
 	}
 }

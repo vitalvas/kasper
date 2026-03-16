@@ -190,6 +190,19 @@ type SchemaType struct {
 	value []string
 }
 
+// Common SchemaType values for frequently used JSON Schema types.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.1.1
+var (
+	SchemaTypeString  = TypeString("string")
+	SchemaTypeInteger = TypeString("integer")
+	SchemaTypeNumber  = TypeString("number")
+	SchemaTypeBoolean = TypeString("boolean")
+	SchemaTypeObject  = TypeString("object")
+	SchemaTypeArray   = TypeString("array")
+	SchemaTypeNull    = TypeString("null")
+)
+
 // TypeString creates a SchemaType with a single type.
 //
 // See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.1.1

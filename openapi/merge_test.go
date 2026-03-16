@@ -69,14 +69,14 @@ func TestMergeDocuments(t *testing.T) {
 		doc1 := &Document{
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("object")},
+					"User": {Type: SchemaTypeObject},
 				},
 			},
 		}
 		doc2 := &Document{
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("string")},
+					"User": {Type: SchemaTypeString},
 				},
 			},
 		}
@@ -90,14 +90,14 @@ func TestMergeDocuments(t *testing.T) {
 		doc1 := &Document{
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("object"), Description: "A user"},
+					"User": {Type: SchemaTypeObject, Description: "A user"},
 				},
 			},
 		}
 		doc2 := &Document{
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("object"), Description: "A user"},
+					"User": {Type: SchemaTypeObject, Description: "A user"},
 				},
 			},
 		}
@@ -112,7 +112,7 @@ func TestMergeDocuments(t *testing.T) {
 	t.Run("all 10 component types merged", func(t *testing.T) {
 		doc1 := &Document{
 			Components: &Components{
-				Schemas:         map[string]*Schema{"S1": {Type: TypeString("object")}},
+				Schemas:         map[string]*Schema{"S1": {Type: SchemaTypeObject}},
 				Responses:       map[string]*Response{"R1": {Description: "OK"}},
 				Parameters:      map[string]*Parameter{"P1": {Name: "p1", In: "query"}},
 				Examples:        map[string]*Example{"E1": {Summary: "ex1"}},
@@ -126,7 +126,7 @@ func TestMergeDocuments(t *testing.T) {
 		}
 		doc2 := &Document{
 			Components: &Components{
-				Schemas:         map[string]*Schema{"S2": {Type: TypeString("string")}},
+				Schemas:         map[string]*Schema{"S2": {Type: SchemaTypeString}},
 				Responses:       map[string]*Response{"R2": {Description: "Created"}},
 				Parameters:      map[string]*Parameter{"P2": {Name: "p2", In: "header"}},
 				Examples:        map[string]*Example{"E2": {Summary: "ex2"}},
@@ -220,7 +220,7 @@ func TestMergeDocuments(t *testing.T) {
 		}
 		doc2 := &Document{
 			Components: &Components{
-				Schemas: map[string]*Schema{"User": {Type: TypeString("object")}},
+				Schemas: map[string]*Schema{"User": {Type: SchemaTypeObject}},
 			},
 		}
 
@@ -248,7 +248,7 @@ func TestMergeDocuments(t *testing.T) {
 			},
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("object")},
+					"User": {Type: SchemaTypeObject},
 				},
 			},
 		}
@@ -258,7 +258,7 @@ func TestMergeDocuments(t *testing.T) {
 			},
 			Components: &Components{
 				Schemas: map[string]*Schema{
-					"User": {Type: TypeString("string")},
+					"User": {Type: SchemaTypeString},
 				},
 			},
 		}
@@ -323,7 +323,7 @@ func TestMergeDocuments(t *testing.T) {
 			Components: &Components{
 				Schemas: map[string]*Schema{
 					"User": {
-						Type:     TypeString("object"),
+						Type:     SchemaTypeObject,
 						Required: []string{"name", "id"},
 					},
 				},
@@ -333,7 +333,7 @@ func TestMergeDocuments(t *testing.T) {
 			Components: &Components{
 				Schemas: map[string]*Schema{
 					"User": {
-						Type:     TypeString("object"),
+						Type:     SchemaTypeObject,
 						Required: []string{"id", "name"},
 					},
 				},

@@ -16,7 +16,7 @@ func TestSchemaType(t *testing.T) {
 			input    SchemaType
 			expected string
 		}{
-			{"single type marshals as string", TypeString("string"), `"string"`},
+			{"single type marshals as string", SchemaTypeString, `"string"`},
 			{"multiple types marshal as array", TypeArray("string", "null"), `["string","null"]`},
 			{"empty type marshals as null", SchemaType{}, "null"},
 		}
@@ -59,7 +59,7 @@ func TestSchemaType(t *testing.T) {
 	t.Run("IsEmpty", func(t *testing.T) {
 		var empty SchemaType
 		assert.True(t, empty.IsEmpty())
-		assert.False(t, TypeString("string").IsEmpty())
+		assert.False(t, SchemaTypeString.IsEmpty())
 	})
 }
 
@@ -108,7 +108,7 @@ func TestDocumentJSON(t *testing.T) {
 								Content: map[string]*MediaType{
 									"application/json": {
 										Schema: &Schema{
-											Type: TypeString("array"),
+											Type: SchemaTypeArray,
 											Items: &Schema{
 												Ref: "#/components/schemas/Pet",
 											},
@@ -123,10 +123,10 @@ func TestDocumentJSON(t *testing.T) {
 			Components: &Components{
 				Schemas: map[string]*Schema{
 					"Pet": {
-						Type: TypeString("object"),
+						Type: SchemaTypeObject,
 						Properties: map[string]*Schema{
 							"name": {
-								Type:      TypeString("string"),
+								Type:      SchemaTypeString,
 								MinLength: &minLen,
 							},
 						},
@@ -179,7 +179,7 @@ func TestSchemaJSON(t *testing.T) {
 			name: "numeric constraints",
 			schema: func() Schema {
 				lo, hi := 0.0, 150.0
-				return Schema{Type: TypeString("integer"), Minimum: &lo, Maximum: &hi}
+				return Schema{Type: SchemaTypeInteger, Minimum: &lo, Maximum: &hi}
 			}(),
 			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
 				assert.Equal(t, "integer", parsed["type"])
@@ -191,7 +191,7 @@ func TestSchemaJSON(t *testing.T) {
 			name: "string constraints",
 			schema: func() Schema {
 				minLen, maxLen := 1, 100
-				return Schema{Type: TypeString("string"), MinLength: &minLen, MaxLength: &maxLen, Pattern: `^[a-z]+$`}
+				return Schema{Type: SchemaTypeString, MinLength: &minLen, MaxLength: &maxLen, Pattern: `^[a-z]+$`}
 			}(),
 			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
 				assert.Equal(t, 1.0, parsed["minLength"])
@@ -201,14 +201,14 @@ func TestSchemaJSON(t *testing.T) {
 		},
 		{
 			name:   "enum values",
-			schema: Schema{Type: TypeString("string"), Enum: []any{"admin", "user", "guest"}},
+			schema: Schema{Type: SchemaTypeString, Enum: []any{"admin", "user", "guest"}},
 			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
 				assert.Len(t, parsed["enum"].([]any), 3)
 			},
 		},
 		{
 			name:   "deprecated and readOnly",
-			schema: Schema{Type: TypeString("string"), Deprecated: true, ReadOnly: true},
+			schema: Schema{Type: SchemaTypeString, Deprecated: true, ReadOnly: true},
 			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
 				assert.Equal(t, true, parsed["deprecated"])
 				assert.Equal(t, true, parsed["readOnly"])
@@ -216,7 +216,7 @@ func TestSchemaJSON(t *testing.T) {
 		},
 		{
 			name:   "omits empty fields",
-			schema: Schema{Type: TypeString("string")},
+			schema: Schema{Type: SchemaTypeString},
 			checkFunc: func(t *testing.T, _ []byte, parsed map[string]any) {
 				for _, key := range []string{"properties", "items", "format", "deprecated", "readOnly", "writeOnly"} {
 					assert.NotContains(t, parsed, key)
@@ -249,7 +249,7 @@ func TestOperationJSON(t *testing.T) {
 					Name:     "X-Request-ID",
 					In:       "header",
 					Required: false,
-					Schema:   &Schema{Type: TypeString("string")},
+					Schema:   &Schema{Type: SchemaTypeString},
 				},
 			},
 			RequestBody: &RequestBody{
@@ -520,7 +520,7 @@ func TestParameterNewFields(t *testing.T) {
 			In:      "query",
 			Style:   "form",
 			Explode: &explode,
-			Schema:  &Schema{Type: TypeString("array"), Items: &Schema{Type: TypeString("string")}},
+			Schema:  &Schema{Type: SchemaTypeArray, Items: &Schema{Type: SchemaTypeString}},
 		}
 		data, err := json.Marshal(p)
 		require.NoError(t, err)
@@ -568,7 +568,7 @@ func TestParameterNewFields(t *testing.T) {
 			Name: "filter",
 			In:   "query",
 			Content: map[string]*MediaType{
-				"application/json": {Schema: &Schema{Type: TypeString("object")}},
+				"application/json": {Schema: &Schema{Type: SchemaTypeObject}},
 			},
 		}
 		data, err := json.Marshal(p)
@@ -601,7 +601,7 @@ func TestResponseNewFields(t *testing.T) {
 func TestMediaTypeNewFields(t *testing.T) {
 	t.Run("examples on media type", func(t *testing.T) {
 		mt := MediaType{
-			Schema: &Schema{Type: TypeString("object")},
+			Schema: &Schema{Type: SchemaTypeObject},
 			Examples: map[string]*Example{
 				"sample": {Summary: "Sample", Value: map[string]any{"id": "123"}},
 			},
@@ -616,7 +616,7 @@ func TestMediaTypeNewFields(t *testing.T) {
 
 	t.Run("encoding on media type", func(t *testing.T) {
 		mt := MediaType{
-			Schema: &Schema{Type: TypeString("object")},
+			Schema: &Schema{Type: SchemaTypeObject},
 			Encoding: map[string]*Encoding{
 				"profileImage": {ContentType: "image/png"},
 			},
@@ -641,7 +641,7 @@ func TestHeaderNewFields(t *testing.T) {
 			Style:           "simple",
 			Explode:         &explode,
 			AllowReserved:   true,
-			Schema:          &Schema{Type: TypeString("integer")},
+			Schema:          &Schema{Type: SchemaTypeInteger},
 			Example:         42,
 		}
 		data, err := json.Marshal(h)
@@ -663,7 +663,7 @@ func TestHeaderNewFields(t *testing.T) {
 				"ex1": {Value: "test"},
 			},
 			Content: map[string]*MediaType{
-				"application/json": {Schema: &Schema{Type: TypeString("string")}},
+				"application/json": {Schema: &Schema{Type: SchemaTypeString}},
 			},
 		}
 		data, err := json.Marshal(h)
@@ -699,14 +699,14 @@ func TestComponentsNewFields(t *testing.T) {
 			"https://example.com": &PathItem{Post: &Operation{Summary: "cb"}},
 		}
 		comp := Components{
-			Schemas:   map[string]*Schema{"Pet": {Type: TypeString("object")}},
+			Schemas:   map[string]*Schema{"Pet": {Type: SchemaTypeObject}},
 			Responses: map[string]*Response{"NotFound": {Description: "Not found"}},
 			Parameters: map[string]*Parameter{
-				"pageParam": {Name: "page", In: "query", Schema: &Schema{Type: TypeString("integer")}},
+				"pageParam": {Name: "page", In: "query", Schema: &Schema{Type: SchemaTypeInteger}},
 			},
 			Examples:      map[string]*Example{"ex1": {Summary: "Example", Value: "test"}},
 			RequestBodies: map[string]*RequestBody{"CreatePet": {Description: "Pet to create"}},
-			Headers:       map[string]*Header{"X-Rate-Limit": {Schema: &Schema{Type: TypeString("integer")}}},
+			Headers:       map[string]*Header{"X-Rate-Limit": {Schema: &Schema{Type: SchemaTypeInteger}}},
 			SecuritySchemes: map[string]*SecurityScheme{
 				"bearerAuth": {Type: "http", Scheme: "bearer", BearerFormat: "JWT"},
 			},
@@ -812,7 +812,7 @@ func TestEncodingJSON(t *testing.T) {
 		explode := true
 		enc := Encoding{
 			ContentType:   "image/png",
-			Headers:       map[string]*Header{"X-Custom": {Schema: &Schema{Type: TypeString("string")}}},
+			Headers:       map[string]*Header{"X-Custom": {Schema: &Schema{Type: SchemaTypeString}}},
 			Style:         "form",
 			Explode:       &explode,
 			AllowReserved: true,
@@ -1030,7 +1030,7 @@ func TestSchemaNewFields(t *testing.T) {
 			DynamicAnchor: "meta",
 			Comment:       "This is a comment",
 			Defs: map[string]*Schema{
-				"address": {Type: TypeString("object")},
+				"address": {Type: SchemaTypeObject},
 			},
 		}
 		data, err := json.Marshal(s)
@@ -1048,7 +1048,7 @@ func TestSchemaNewFields(t *testing.T) {
 	t.Run("title and multipleOf", func(t *testing.T) {
 		mul := 0.01
 		s := Schema{
-			Type:       TypeString("number"),
+			Type:       SchemaTypeNumber,
 			Title:      "Price",
 			MultipleOf: &mul,
 		}
@@ -1065,15 +1065,15 @@ func TestSchemaNewFields(t *testing.T) {
 		minItems := 1
 		maxItems := 10
 		s := Schema{
-			Type:        TypeString("array"),
-			Items:       &Schema{Type: TypeString("string")},
-			PrefixItems: []*Schema{{Type: TypeString("integer")}, {Type: TypeString("string")}},
-			Contains:    &Schema{Type: TypeString("integer")},
+			Type:        SchemaTypeArray,
+			Items:       &Schema{Type: SchemaTypeString},
+			PrefixItems: []*Schema{{Type: SchemaTypeInteger}, {Type: SchemaTypeString}},
+			Contains:    &Schema{Type: SchemaTypeInteger},
 			MinItems:    &minItems,
 			MaxItems:    &maxItems,
 			UniqueItems: true,
 			UnevaluatedItems: &Schema{
-				Type: TypeString("boolean"),
+				Type: SchemaTypeBoolean,
 			},
 		}
 		data, err := json.Marshal(s)
@@ -1093,15 +1093,15 @@ func TestSchemaNewFields(t *testing.T) {
 		minProps := 1
 		maxProps := 10
 		s := Schema{
-			Type: TypeString("object"),
+			Type: SchemaTypeObject,
 			Properties: map[string]*Schema{
-				"name": {Type: TypeString("string")},
+				"name": {Type: SchemaTypeString},
 			},
 			PatternProperties: map[string]*Schema{
-				"^x-": {Type: TypeString("string")},
+				"^x-": {Type: SchemaTypeString},
 			},
 			PropertyNames:         &Schema{Pattern: "^[a-z]+$"},
-			UnevaluatedProperties: &Schema{Type: TypeString("boolean")},
+			UnevaluatedProperties: &Schema{Type: SchemaTypeBoolean},
 			MinProperties:         &minProps,
 			MaxProperties:         &maxProps,
 			DependentRequired: map[string][]string{
@@ -1110,7 +1110,7 @@ func TestSchemaNewFields(t *testing.T) {
 			DependentSchemas: map[string]*Schema{
 				"creditCard": {
 					Properties: map[string]*Schema{
-						"billingAddress": {Type: TypeString("string")},
+						"billingAddress": {Type: SchemaTypeString},
 					},
 					Required: []string{"billingAddress"},
 				},
@@ -1132,7 +1132,7 @@ func TestSchemaNewFields(t *testing.T) {
 
 	t.Run("not schema", func(t *testing.T) {
 		s := Schema{
-			Not: &Schema{Type: TypeString("null")},
+			Not: &Schema{Type: SchemaTypeNull},
 		}
 		data, err := json.Marshal(s)
 		require.NoError(t, err)
@@ -1186,7 +1186,7 @@ func TestSchemaNewFields(t *testing.T) {
 		s := Schema{
 			ContentEncoding:  "base64",
 			ContentMediaType: "image/png",
-			ContentSchema:    &Schema{Type: TypeString("string")},
+			ContentSchema:    &Schema{Type: SchemaTypeString},
 		}
 		data, err := json.Marshal(s)
 		require.NoError(t, err)
@@ -1200,7 +1200,7 @@ func TestSchemaNewFields(t *testing.T) {
 
 	t.Run("discriminator and xml", func(t *testing.T) {
 		s := Schema{
-			Type: TypeString("object"),
+			Type: SchemaTypeObject,
 			Discriminator: &Discriminator{
 				PropertyName: "petType",
 				Mapping:      map[string]string{"dog": "#/components/schemas/Dog"},
@@ -1218,7 +1218,7 @@ func TestSchemaNewFields(t *testing.T) {
 
 	t.Run("examples array", func(t *testing.T) {
 		s := Schema{
-			Type:     TypeString("string"),
+			Type:     SchemaTypeString,
 			Examples: []any{"hello", "world"},
 		}
 		data, err := json.Marshal(s)
@@ -1231,7 +1231,7 @@ func TestSchemaNewFields(t *testing.T) {
 	})
 
 	t.Run("omits new empty fields", func(t *testing.T) {
-		s := Schema{Type: TypeString("string")}
+		s := Schema{Type: SchemaTypeString}
 		data, err := json.Marshal(s)
 		require.NoError(t, err)
 
@@ -1277,7 +1277,7 @@ func TestSchemaTypeYAML(t *testing.T) {
 			input    SchemaType
 			expected string
 		}{
-			{"single type marshals as scalar", TypeString("string"), "string\n"},
+			{"single type marshals as scalar", SchemaTypeString, "string\n"},
 			{"multiple types marshal as sequence", TypeArray("string", "null"), "- string\n- \"null\"\n"},
 			{"empty type marshals as null", SchemaType{}, "null\n"},
 		}
@@ -1312,7 +1312,7 @@ func TestSchemaTypeYAML(t *testing.T) {
 
 	t.Run("schema roundtrip through YAML", func(t *testing.T) {
 		s := Schema{
-			Type:   TypeString("object"),
+			Type:   SchemaTypeObject,
 			Format: "test",
 		}
 		data, err := yaml.Marshal(s)
@@ -1321,7 +1321,7 @@ func TestSchemaTypeYAML(t *testing.T) {
 
 		var roundtrip Schema
 		require.NoError(t, yaml.Unmarshal(data, &roundtrip))
-		assert.Equal(t, TypeString("object"), roundtrip.Type)
+		assert.Equal(t, SchemaTypeObject, roundtrip.Type)
 		assert.Equal(t, "test", roundtrip.Format)
 	})
 
@@ -1356,9 +1356,9 @@ func TestSchemaTypeYAML(t *testing.T) {
 			Components: &Components{
 				Schemas: map[string]*Schema{
 					"Pet": {
-						Type: TypeString("object"),
+						Type: SchemaTypeObject,
 						Properties: map[string]*Schema{
-							"name": {Type: TypeString("string")},
+							"name": {Type: SchemaTypeString},
 							"age":  {Type: TypeArray("integer", "null")},
 						},
 					},
@@ -1376,8 +1376,8 @@ func TestSchemaTypeYAML(t *testing.T) {
 		require.NoError(t, yaml.Unmarshal(data, &roundtrip))
 		petSchema := roundtrip.Components.Schemas["Pet"]
 		require.NotNil(t, petSchema)
-		assert.Equal(t, TypeString("object"), petSchema.Type)
-		assert.Equal(t, TypeString("string"), petSchema.Properties["name"].Type)
+		assert.Equal(t, SchemaTypeObject, petSchema.Type)
+		assert.Equal(t, SchemaTypeString, petSchema.Properties["name"].Type)
 		assert.Equal(t, []string{"integer", "null"}, petSchema.Properties["age"].Type.Values())
 	})
 }

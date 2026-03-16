@@ -129,14 +129,14 @@ func TestRouteGroup(t *testing.T) {
 		headerParam := &Parameter{
 			Name:   "X-Tenant-ID",
 			In:     "header",
-			Schema: &Schema{Type: TypeString("string")},
+			Schema: &Schema{Type: SchemaTypeString},
 		}
 		g := spec.Group().Parameter(headerParam)
 
 		queryParam := &Parameter{
 			Name:   "page",
 			In:     "query",
-			Schema: &Schema{Type: TypeString("integer")},
+			Schema: &Schema{Type: SchemaTypeInteger},
 		}
 		g.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
 			Summary("List users").
@@ -528,7 +528,7 @@ func TestRouteGroup(t *testing.T) {
 		g := spec.Group().
 			Response(http.StatusForbidden, ErrResp{}).
 			ResponseHeader(http.StatusForbidden, "X-Request-ID", &Header{
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		g.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).
@@ -581,7 +581,7 @@ func TestRouteGroup(t *testing.T) {
 			DefaultResponse(ErrResp{}).
 			DefaultResponseDescription("Unexpected error").
 			DefaultResponseHeader("X-Request-ID", &Header{
-				Schema: &Schema{Type: TypeString("string"), Format: "uuid"},
+				Schema: &Schema{Type: SchemaTypeString, Format: "uuid"},
 			})
 
 		g.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).

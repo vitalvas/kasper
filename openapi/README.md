@@ -125,12 +125,12 @@ spec.Op("get").
 
 // Binary file upload
 spec.Op("upload").RequestContent("application/octet-stream", &openapi.Schema{
-    Type: openapi.TypeString("string"), Format: "binary",
+    Type: openapi.SchemaTypeString, Format: "binary",
 })
 
 // Image response
 spec.Op("avatar").ResponseContent(http.StatusOK, "image/png", &openapi.Schema{
-    Type: openapi.TypeString("string"), Format: "binary",
+    Type: openapi.SchemaTypeString, Format: "binary",
 })
 
 // Form data
@@ -138,7 +138,7 @@ spec.Op("submit").RequestContent("multipart/form-data", FormInput{})
 
 // Plain text
 spec.Op("text").ResponseContent(http.StatusOK, "text/plain", &openapi.Schema{
-    Type: openapi.TypeString("string"),
+    Type: openapi.SchemaTypeString,
 })
 
 // Vendor-specific type
@@ -181,7 +181,7 @@ spec.Op("listUsers").
     Response(http.StatusOK, []User{}).
     ResponseHeader(http.StatusOK, "X-Total-Count", &openapi.Header{
         Description: "Total number of users",
-        Schema:      &openapi.Schema{Type: openapi.TypeString("integer")},
+        Schema:      &openapi.Schema{Type: openapi.SchemaTypeInteger},
     }).
     ResponseLink(http.StatusOK, "GetNext", &openapi.Link{
         OperationID: "listUsers",
@@ -196,7 +196,7 @@ spec.Op("getUser").
     Response(http.StatusOK, User{}).
     DefaultResponse(ErrorResponse{}).
     DefaultResponseHeader("X-Request-ID", &openapi.Header{
-        Schema: &openapi.Schema{Type: openapi.TypeString("string")},
+        Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
     }).
     DefaultResponseLink("GetError", &openapi.Link{OperationID: "getErrorDetails"})
 ```
@@ -243,11 +243,11 @@ Add custom parameters at the operation level:
 spec.Op("listUsers").
     Parameter(&openapi.Parameter{
         Name: "page", In: "query",
-        Schema: &openapi.Schema{Type: openapi.TypeString("integer")},
+        Schema: &openapi.Schema{Type: openapi.SchemaTypeInteger},
     }).
     Parameter(&openapi.Parameter{
         Name: "X-Request-ID", In: "header",
-        Schema: &openapi.Schema{Type: openapi.TypeString("string")},
+        Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
     })
 ```
 
@@ -258,7 +258,7 @@ Parameters shared across all operations under a path:
 ```go
 spec.AddPathParameter("/users/{id}", &openapi.Parameter{
     Name: "X-Tenant-ID", In: "header",
-    Schema: &openapi.Schema{Type: openapi.TypeString("string")},
+    Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 })
 ```
 
@@ -349,7 +349,7 @@ spec.SetPathSummary("/users/{id}", "Represents a user")
 spec.SetPathDescription("/users/{id}", "Individual user identified by ID.")
 spec.AddPathParameter("/users/{id}", &openapi.Parameter{
     Name: "X-Tenant-ID", In: "header",
-    Schema: &openapi.Schema{Type: openapi.TypeString("string")},
+    Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 })
 ```
 
@@ -363,7 +363,7 @@ spec.AddComponentParameter("pageParam", &openapi.Parameter{Name: "page", In: "qu
 spec.AddComponentExample("sample", &openapi.Example{Summary: "A sample", Value: "test"})
 spec.AddComponentRequestBody("CreatePet", &openapi.RequestBody{Description: "Pet to create"})
 spec.AddComponentHeader("X-Rate-Limit", &openapi.Header{
-    Schema: &openapi.Schema{Type: openapi.TypeString("integer")},
+    Schema: &openapi.Schema{Type: openapi.SchemaTypeInteger},
 })
 spec.AddComponentLink("GetUser", &openapi.Link{OperationID: "getUser"})
 spec.AddComponentCallback("onEvent", &cb)

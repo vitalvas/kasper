@@ -105,7 +105,7 @@ func TestOperationBuilder(t *testing.T) {
 				Name:     "id",
 				In:       "path",
 				Required: true,
-				Schema:   &Schema{Type: TypeString("string"), Format: "uuid"},
+				Schema:   &Schema{Type: SchemaTypeString, Format: "uuid"},
 			},
 		}
 
@@ -123,7 +123,7 @@ func TestOperationBuilder(t *testing.T) {
 			Parameter(&Parameter{
 				Name:   "X-Request-ID",
 				In:     "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		pathParams := []*Parameter{
@@ -145,7 +145,7 @@ func TestOperationBuilder(t *testing.T) {
 				In:          "path",
 				Required:    true,
 				Description: "User UUID",
-				Schema:      &Schema{Type: TypeString("string"), Format: "uuid"},
+				Schema:      &Schema{Type: SchemaTypeString, Format: "uuid"},
 			})
 
 		pathParams := []*Parameter{
@@ -166,7 +166,7 @@ func TestOperationBuilder(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
 				Name: "page", In: "query",
-				Schema: &Schema{Type: TypeString("integer")},
+				Schema: &Schema{Type: SchemaTypeInteger},
 			})
 
 		pathParams := []*Parameter{
@@ -185,7 +185,7 @@ func TestOperationBuilder(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
 				Name: "id", In: "header",
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		pathParams := []*Parameter{
@@ -380,7 +380,7 @@ func TestRequestContent(t *testing.T) {
 	t.Run("binary with explicit schema", func(t *testing.T) {
 		b := newOperationBuilder().
 			RequestContent("application/octet-stream", &Schema{
-				Type:   TypeString("string"),
+				Type:   SchemaTypeString,
 				Format: "binary",
 			})
 
@@ -391,7 +391,7 @@ func TestRequestContent(t *testing.T) {
 		require.Contains(t, op.RequestBody.Content, "application/octet-stream")
 		schema := op.RequestBody.Content["application/octet-stream"].Schema
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Type)
+		assert.Equal(t, SchemaTypeString, schema.Type)
 		assert.Equal(t, "binary", schema.Format)
 	})
 
@@ -454,7 +454,7 @@ func TestResponseContent(t *testing.T) {
 	t.Run("binary response with explicit schema", func(t *testing.T) {
 		b := newOperationBuilder().
 			ResponseContent(200, "image/png", &Schema{
-				Type:   TypeString("string"),
+				Type:   SchemaTypeString,
 				Format: "binary",
 			})
 
@@ -465,14 +465,14 @@ func TestResponseContent(t *testing.T) {
 		require.Contains(t, op.Responses["200"].Content, "image/png")
 		schema := op.Responses["200"].Content["image/png"].Schema
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Type)
+		assert.Equal(t, SchemaTypeString, schema.Type)
 		assert.Equal(t, "binary", schema.Format)
 	})
 
 	t.Run("text plain response", func(t *testing.T) {
 		b := newOperationBuilder().
 			ResponseContent(200, "text/plain", &Schema{
-				Type: TypeString("string"),
+				Type: SchemaTypeString,
 			})
 
 		gen := NewSchemaGenerator()
@@ -485,7 +485,7 @@ func TestResponseContent(t *testing.T) {
 	t.Run("wildcard content type", func(t *testing.T) {
 		b := newOperationBuilder().
 			ResponseContent(200, "image/*", &Schema{
-				Type:   TypeString("string"),
+				Type:   SchemaTypeString,
 				Format: "binary",
 			})
 
@@ -630,7 +630,7 @@ func TestResponseHeader(t *testing.T) {
 					Response(200, nil).
 					ResponseHeader(200, "X-Rate-Limit", &Header{
 						Description: "Rate limit",
-						Schema:      &Schema{Type: TypeString("integer")},
+						Schema:      &Schema{Type: SchemaTypeInteger},
 					})
 			},
 			statusCode:      "200",
@@ -643,10 +643,10 @@ func TestResponseHeader(t *testing.T) {
 				return newOperationBuilder().
 					Response(200, nil).
 					ResponseHeader(200, "X-Rate-Limit", &Header{
-						Schema: &Schema{Type: TypeString("integer")},
+						Schema: &Schema{Type: SchemaTypeInteger},
 					}).
 					ResponseHeader(200, "X-Rate-Remaining", &Header{
-						Schema: &Schema{Type: TypeString("integer")},
+						Schema: &Schema{Type: SchemaTypeInteger},
 					})
 			},
 			statusCode:      "200",
@@ -673,10 +673,10 @@ func TestResponseHeader(t *testing.T) {
 			Response(200, nil).
 			Response(429, nil).
 			ResponseHeader(200, "X-Request-ID", &Header{
-				Schema: &Schema{Type: TypeString("string")},
+				Schema: &Schema{Type: SchemaTypeString},
 			}).
 			ResponseHeader(429, "Retry-After", &Header{
-				Schema: &Schema{Type: TypeString("integer")},
+				Schema: &Schema{Type: SchemaTypeInteger},
 			})
 
 		gen := NewSchemaGenerator()
@@ -724,7 +724,7 @@ func TestResponseLink(t *testing.T) {
 		b := newOperationBuilder().
 			Response(200, nil).
 			ResponseHeader(200, "X-Total", &Header{
-				Schema: &Schema{Type: TypeString("integer")},
+				Schema: &Schema{Type: SchemaTypeInteger},
 			}).
 			ResponseLink(200, "GetNext", &Link{OperationID: "listNext"})
 
@@ -917,7 +917,7 @@ func TestDefaultResponseHeader(t *testing.T) {
 					DefaultResponse(nil).
 					DefaultResponseHeader("X-Request-ID", &Header{
 						Description: "Request tracking ID",
-						Schema:      &Schema{Type: TypeString("string")},
+						Schema:      &Schema{Type: SchemaTypeString},
 					})
 			},
 			expectedHeaders: []string{"X-Request-ID"},
@@ -928,10 +928,10 @@ func TestDefaultResponseHeader(t *testing.T) {
 				return newOperationBuilder().
 					DefaultResponse(nil).
 					DefaultResponseHeader("X-Request-ID", &Header{
-						Schema: &Schema{Type: TypeString("string")},
+						Schema: &Schema{Type: SchemaTypeString},
 					}).
 					DefaultResponseHeader("X-Error-Code", &Header{
-						Schema: &Schema{Type: TypeString("integer")},
+						Schema: &Schema{Type: SchemaTypeInteger},
 					})
 			},
 			expectedHeaders: []string{"X-Request-ID", "X-Error-Code"},
@@ -973,7 +973,7 @@ func TestDefaultResponseLink(t *testing.T) {
 		b := newOperationBuilder().
 			DefaultResponse(nil).
 			DefaultResponseHeader("X-Error-Code", &Header{
-				Schema: &Schema{Type: TypeString("integer")},
+				Schema: &Schema{Type: SchemaTypeInteger},
 			}).
 			DefaultResponseLink("GetError", &Link{OperationID: "getError"})
 
@@ -993,7 +993,7 @@ func TestResolveSchema(t *testing.T) {
 
 	t.Run("explicit schema passed through", func(t *testing.T) {
 		gen := NewSchemaGenerator()
-		s := &Schema{Type: TypeString("string"), Format: "binary"}
+		s := &Schema{Type: SchemaTypeString, Format: "binary"}
 		assert.Same(t, s, resolveSchema(gen, s))
 	})
 

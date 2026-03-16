@@ -354,7 +354,7 @@ func (s *Spec) Build(r *mux.Router) *Document {
 					Name:     name,
 					In:       "header",
 					Required: true,
-					Schema:   &Schema{Type: TypeString("string")},
+					Schema:   &Schema{Type: SchemaTypeString},
 				}
 				if value != "" {
 					p.Schema.Enum = []any{value}
@@ -604,7 +604,7 @@ func parsePath(tpl string) (string, []*Parameter) {
 			Name:     varName,
 			In:       "path",
 			Required: true,
-			Schema:   &Schema{Type: TypeString("string")},
+			Schema:   &Schema{Type: SchemaTypeString},
 		}
 
 		if macroName != "" {

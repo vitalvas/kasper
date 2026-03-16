@@ -18,13 +18,13 @@ func TestGeneratePrimitives(t *testing.T) {
 		expectedType SchemaType
 		expectNil    bool
 	}{
-		{"bool", true, TypeString("boolean"), false},
-		{"int", 0, TypeString("integer"), false},
-		{"int64", int64(0), TypeString("integer"), false},
-		{"uint", uint(0), TypeString("integer"), false},
-		{"float64", 0.0, TypeString("number"), false},
-		{"float32", float32(0), TypeString("number"), false},
-		{"string", "", TypeString("string"), false},
+		{"bool", true, SchemaTypeBoolean, false},
+		{"int", 0, SchemaTypeInteger, false},
+		{"int64", int64(0), SchemaTypeInteger, false},
+		{"uint", uint(0), SchemaTypeInteger, false},
+		{"float64", 0.0, SchemaTypeNumber, false},
+		{"float32", float32(0), SchemaTypeNumber, false},
+		{"string", "", SchemaTypeString, false},
 		{"nil", nil, SchemaType{}, true},
 	}
 
@@ -49,8 +49,8 @@ func TestGenerateSpecialTypes(t *testing.T) {
 		expectedType   SchemaType
 		expectedFormat string
 	}{
-		{"time.Time", time.Time{}, TypeString("string"), "date-time"},
-		{"[]byte", []byte{}, TypeString("string"), "byte"},
+		{"time.Time", time.Time{}, SchemaTypeString, "date-time"},
+		{"[]byte", []byte{}, SchemaTypeString, "byte"},
 	}
 
 	for _, tt := range tests {
@@ -70,9 +70,9 @@ func TestGenerateSliceAndArray(t *testing.T) {
 		input            any
 		expectedItemType SchemaType
 	}{
-		{"[]string", []string{}, TypeString("string")},
-		{"[]int", []int{}, TypeString("integer")},
-		{"[3]string", [3]string{}, TypeString("string")},
+		{"[]string", []string{}, SchemaTypeString},
+		{"[]int", []int{}, SchemaTypeInteger},
+		{"[3]string", [3]string{}, SchemaTypeString},
 	}
 
 	for _, tt := range tests {
@@ -80,7 +80,7 @@ func TestGenerateSliceAndArray(t *testing.T) {
 			g := NewSchemaGenerator()
 			s := g.Generate(tt.input)
 			require.NotNil(t, s)
-			assert.Equal(t, TypeString("array"), s.Type)
+			assert.Equal(t, SchemaTypeArray, s.Type)
 			require.NotNil(t, s.Items)
 			assert.Equal(t, tt.expectedItemType, s.Items.Type)
 		})
@@ -95,9 +95,9 @@ func TestGenerateMap(t *testing.T) {
 		additionalPropsType   SchemaType
 		checkAdditionalNotNil bool
 	}{
-		{"map[string]int", map[string]int{}, true, TypeString("integer"), true},
+		{"map[string]int", map[string]int{}, true, SchemaTypeInteger, true},
 		{"map[string]any", map[string]any{}, true, SchemaType{}, false},
-		{"map[int]string", map[int]string{}, true, TypeString("string"), true},
+		{"map[int]string", map[int]string{}, true, SchemaTypeString, true},
 	}
 
 	for _, tt := range tests {
@@ -105,7 +105,7 @@ func TestGenerateMap(t *testing.T) {
 			g := NewSchemaGenerator()
 			s := g.Generate(tt.input)
 			require.NotNil(t, s)
-			assert.Equal(t, TypeString("object"), s.Type)
+			assert.Equal(t, SchemaTypeObject, s.Type)
 
 			if tt.hasAdditionalProps {
 				require.NotNil(t, s.AdditionalProperties)
@@ -134,7 +134,7 @@ func TestGenerateStruct(t *testing.T) {
 
 		schema := g.Schemas()["SimpleStruct"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("object"), schema.Type)
+		assert.Equal(t, SchemaTypeObject, schema.Type)
 		assert.Contains(t, schema.Properties, "name")
 		assert.Contains(t, schema.Properties, "email")
 		assert.Contains(t, schema.Properties, "age")
@@ -360,7 +360,7 @@ func TestGenerateNullableTypes(t *testing.T) {
 		require.NotNil(t, innerSchema)
 		assert.Len(t, innerSchema.AnyOf, 2)
 		assert.Equal(t, "#/components/schemas/Inner", innerSchema.AnyOf[0].Ref)
-		assert.Equal(t, TypeString("null"), innerSchema.AnyOf[1].Type)
+		assert.Equal(t, SchemaTypeNull, innerSchema.AnyOf[1].Type)
 	})
 
 	t.Run("double pointer to primitive", func(t *testing.T) {
@@ -597,7 +597,7 @@ func TestNamer(t *testing.T) {
 	t.Run("slice of named type", func(t *testing.T) {
 		g := NewSchemaGenerator()
 		s := g.Generate([]NamedType{})
-		assert.Equal(t, TypeString("array"), s.Type)
+		assert.Equal(t, SchemaTypeArray, s.Type)
 		require.NotNil(t, s.Items)
 		assert.Equal(t, "#/components/schemas/CustomName", s.Items.Ref)
 		assert.Contains(t, g.Schemas(), "CustomName")
@@ -606,7 +606,7 @@ func TestNamer(t *testing.T) {
 	t.Run("map value with named type", func(t *testing.T) {
 		g := NewSchemaGenerator()
 		s := g.Generate(map[string]NamedType{})
-		assert.Equal(t, TypeString("object"), s.Type)
+		assert.Equal(t, SchemaTypeObject, s.Type)
 		require.NotNil(t, s.AdditionalProperties)
 		assert.Equal(t, "#/components/schemas/CustomName", s.AdditionalProperties.Ref)
 		assert.Contains(t, g.Schemas(), "CustomName")
@@ -978,7 +978,7 @@ func TestGenerateGenericStruct(t *testing.T) {
 
 		schema := g.Schemas()["ResponseWrapperSimpleStruct"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("object"), schema.Type)
+		assert.Equal(t, SchemaTypeObject, schema.Type)
 		assert.Contains(t, schema.Properties, "success")
 		assert.Contains(t, schema.Properties, "errors")
 		assert.Contains(t, schema.Properties, "messages")
@@ -1003,7 +1003,7 @@ func TestGenerateGenericStruct(t *testing.T) {
 
 		// Result field should be an array of $ref.
 		resultProp := schema.Properties["result"]
-		assert.Equal(t, TypeString("array"), resultProp.Type)
+		assert.Equal(t, SchemaTypeArray, resultProp.Type)
 		require.NotNil(t, resultProp.Items)
 		assert.Equal(t, "#/components/schemas/SimpleStruct", resultProp.Items.Ref)
 	})
@@ -1041,7 +1041,7 @@ func TestGenerateSliceOfStructs(t *testing.T) {
 	t.Run("slice of named structs uses ref", func(t *testing.T) {
 		g := NewSchemaGenerator()
 		s := g.Generate([]SimpleStruct{})
-		assert.Equal(t, TypeString("array"), s.Type)
+		assert.Equal(t, SchemaTypeArray, s.Type)
 		require.NotNil(t, s.Items)
 		assert.Equal(t, "#/components/schemas/SimpleStruct", s.Items.Ref)
 	})
@@ -1083,7 +1083,7 @@ func TestSchemaGeneratorJSON(t *testing.T) {
 func TestSchemaExternalDocs(t *testing.T) {
 	t.Run("serializes externalDocs on schema", func(t *testing.T) {
 		s := &Schema{
-			Type: TypeString("object"),
+			Type: SchemaTypeObject,
 			ExternalDocs: &ExternalDocs{
 				URL:         "https://docs.example.com/user",
 				Description: "User schema docs",
@@ -1215,7 +1215,7 @@ func TestJSONStringTagOverride(t *testing.T) {
 		g.Generate(WithStringInt{})
 		schema := g.Schemas()["WithStringInt"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
+		assert.Equal(t, SchemaTypeString, schema.Properties["count"].Type)
 	})
 
 	t.Run("bool with string tag becomes string type", func(t *testing.T) {
@@ -1226,7 +1226,7 @@ func TestJSONStringTagOverride(t *testing.T) {
 		g.Generate(WithStringBool{})
 		schema := g.Schemas()["WithStringBool"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Properties["active"].Type)
+		assert.Equal(t, SchemaTypeString, schema.Properties["active"].Type)
 	})
 
 	t.Run("float with string tag becomes string type", func(t *testing.T) {
@@ -1237,7 +1237,7 @@ func TestJSONStringTagOverride(t *testing.T) {
 		g.Generate(WithStringFloat{})
 		schema := g.Schemas()["WithStringFloat"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Properties["price"].Type)
+		assert.Equal(t, SchemaTypeString, schema.Properties["price"].Type)
 	})
 
 	t.Run("nullable int with string tag becomes nullable string", func(t *testing.T) {
@@ -1259,7 +1259,7 @@ func TestJSONStringTagOverride(t *testing.T) {
 		g.Generate(WithStringString{})
 		schema := g.Schemas()["WithStringString"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Properties["name"].Type)
+		assert.Equal(t, SchemaTypeString, schema.Properties["name"].Type)
 	})
 
 	t.Run("string tag combined with omitempty", func(t *testing.T) {
@@ -1270,7 +1270,7 @@ func TestJSONStringTagOverride(t *testing.T) {
 		g.Generate(WithStringOmit{})
 		schema := g.Schemas()["WithStringOmit"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
+		assert.Equal(t, SchemaTypeString, schema.Properties["count"].Type)
 		assert.NotContains(t, schema.Required, "count")
 	})
 
@@ -1282,7 +1282,7 @@ func TestJSONStringTagOverride(t *testing.T) {
 		g.Generate(WithStringAndOpenAPI{})
 		schema := g.Schemas()["WithStringAndOpenAPI"]
 		require.NotNil(t, schema)
-		assert.Equal(t, TypeString("string"), schema.Properties["count"].Type)
+		assert.Equal(t, SchemaTypeString, schema.Properties["count"].Type)
 		assert.Equal(t, "Item count", schema.Properties["count"].Description)
 	})
 }
