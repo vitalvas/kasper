@@ -982,6 +982,34 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Accept-Patch Middleware
+
+`AcceptPatchMiddleware` handles OPTIONS requests by responding with `Allow` and
+`Accept-Patch` headers per [RFC 5789](https://www.rfc-editor.org/rfc/rfc5789#section-3.1).
+The `Allow` header is auto-discovered from the router's registered methods for
+the matched path. Non-OPTIONS requests pass through unchanged.
+
+### AcceptPatchConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AcceptPatchTypes` | `[]string` | Content-Type values for Accept-Patch header; `nil` = `application/json`, `application/merge-patch+json`, `application/json-patch+json` |
+| `StatusCode` | `int` | HTTP status for OPTIONS responses; 0 = 204 No Content |
+
+### AcceptPatch Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users/{id}", getUser).Methods(http.MethodGet)
+r.HandleFunc("/api/v1/users/{id}", updateUser).Methods(http.MethodPatch)
+r.HandleFunc("/api/v1/users/{id}", deleteUser).Methods(http.MethodDelete)
+
+mw := muxhandlers.AcceptPatchMiddleware(r, muxhandlers.AcceptPatchConfig{})
+
+r.Use(mw)
+```
+
 ## Patch Routing Middleware
 
 `PatchRoutingMiddleware` validates the `Content-Type` of PATCH requests against
