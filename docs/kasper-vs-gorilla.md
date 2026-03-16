@@ -326,6 +326,7 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | **Security** | | |
 | CORS | Yes | Yes |
 | Basic authentication | No | Yes |
+| Bearer token authentication (RFC 6750) | No | Yes |
 | Security headers (X-Frame-Options, HSTS, CSP) | No | Yes |
 | IP allow list (CIDR support) | No | Yes |
 | Content-Type validation | No | Yes |
@@ -335,13 +336,17 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | Request size limit | No | Yes |
 | Method override (X-HTTP-Method-Override) | No | Yes |
 | Request ID generation (UUID v4/v7) | No | Yes |
+| Content negotiation (RFC 9110) | No | Yes |
 | **Response Processing** | | |
 | Gzip/deflate compression | Yes | Yes |
 | Cache-Control header generation | No | Yes |
 | Server identification header | No | Yes |
+| Early Hints (RFC 8297) | No | Yes |
+| Problem Details (RFC 9457) | No | Yes |
 | **Reliability** | | |
 | Panic recovery | Yes | Yes |
 | Handler timeout | No | Yes |
+| Idempotency (draft-ietf-httpapi-idempotency-key) | No | Yes |
 | **API Lifecycle** | | |
 | Sunset/deprecation headers (RFC 8594) | No | Yes |
 | **Static Files** | | |
