@@ -1074,6 +1074,37 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## Canonical Host Middleware
+
+`CanonicalHostMiddleware` redirects requests to a canonical host URL when
+the incoming scheme or host does not match. The request path and query
+string are preserved. Useful for enforcing a single canonical URL
+(e.g. `example.com` to `www.example.com`, or HTTP to HTTPS).
+
+### CanonicalHostConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `URL` | `string` | Canonical base URL including scheme and host; required |
+| `StatusCode` | `int` | HTTP redirect status code; 0 = 301 Moved Permanently |
+
+### CanonicalHost Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.CanonicalHostMiddleware(muxhandlers.CanonicalHostConfig{
+    URL: "https://www.example.com",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
 ## IP Allow Middleware
 
 `IPAllowMiddleware` restricts access to requests originating from a
