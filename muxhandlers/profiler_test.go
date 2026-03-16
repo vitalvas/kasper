@@ -11,7 +11,7 @@ import (
 
 func TestProfilerHandler(t *testing.T) {
 	r := mux.NewRouter()
-	r.PathPrefix("/debug/pprof").Handler(ProfilerHandler())
+	r.PathPrefix("/debug").Handler(ProfilerHandler())
 
 	tests := []struct {
 		name         string
@@ -52,6 +52,12 @@ func TestProfilerHandler(t *testing.T) {
 			path:         "/debug/pprof/allocs",
 			expectedCode: http.StatusOK,
 			contentType:  "application/octet-stream",
+		},
+		{
+			name:         "expvar",
+			path:         "/debug/vars",
+			expectedCode: http.StatusOK,
+			contentType:  "application/json; charset=utf-8",
 		},
 	}
 

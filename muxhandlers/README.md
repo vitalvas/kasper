@@ -659,6 +659,7 @@ r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
 | `/debug/pprof/profile` | CPU profile (supports `?seconds=N`) |
 | `/debug/pprof/symbol` | Symbol lookup |
 | `/debug/pprof/trace` | Execution trace (supports `?seconds=N`) |
+| `/debug/vars` | Exported variables via `expvar` package |
 
 Named profiles (`allocs`, `block`, `goroutine`, `heap`, `mutex`,
 `threadcreate`) are served by the index handler.
@@ -668,7 +669,7 @@ Named profiles (`allocs`, `block`, `goroutine`, `heap`, `mutex`,
 ```go
 r := mux.NewRouter()
 
-r.PathPrefix("/debug/pprof").Handler(muxhandlers.ProfilerHandler())
+r.PathPrefix("/debug").Handler(muxhandlers.ProfilerHandler())
 ```
 
 ## Sunset Middleware
