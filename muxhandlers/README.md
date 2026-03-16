@@ -574,6 +574,7 @@ no `index.html`, a 404 is returned instead of a file listing. When
 | `FS` | `fs.FS` | File system to serve files from; required |
 | `EnableDirectoryListing` | `bool` | Show directory contents when no `index.html` is present; `false` by default |
 | `SPAFallback` | `bool` | Serve root `index.html` for non-existent paths; requires `index.html` at FS root |
+| `EnableETag` | `bool` | Precompute strong ETags at init; handles `If-None-Match` (304); designed for `embed.FS` |
 
 ### StaticFiles Usage
 
@@ -618,6 +619,23 @@ var staticFS embed.FS
 
 handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
     FS: staticFS,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
+```
+
+### StaticFiles Usage with ETag
+
+```go
+//go:embed static
+var staticFS embed.FS
+
+handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
+    FS:         staticFS,
+    EnableETag: true,
 })
 if err != nil {
     log.Fatal(err)

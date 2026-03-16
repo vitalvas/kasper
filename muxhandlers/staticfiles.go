@@ -2,8 +2,12 @@ package muxhandlers
 
 import (
 	"errors"
+	"fmt"
+	"hash/fnv"
+	"io"
 	"io/fs"
 	"net/http"
+	"strings"
 )
 
 // ErrStaticFilesNoFS is returned when StaticFilesConfig.FS is nil.
@@ -27,6 +31,12 @@ type StaticFilesConfig struct {
 	// not match an existing file. This allows client-side routers to
 	// handle all routes. Requires index.html at the root of FS.
 	SPAFallback bool
+
+	// EnableETag precomputes strong ETags for all files by walking the
+	// FS at init time. Designed for immutable file systems such as
+	// embed.FS. The handler sets the ETag response header and handles
+	// If-None-Match conditional requests (304 Not Modified).
+	EnableETag bool
 }
 
 // noDirListingFS wraps an fs.FS to prevent directory listing.
@@ -105,5 +115,89 @@ func StaticFilesHandler(cfg StaticFilesConfig) (http.Handler, error) {
 		fileSystem = &spaFallbackFS{fs: fileSystem}
 	}
 
-	return http.FileServerFS(fileSystem), nil
+	handler := http.FileServerFS(fileSystem)
+
+	if cfg.EnableETag {
+		etags, err := buildStaticETags(cfg.FS)
+		if err != nil {
+			return nil, err
+		}
+
+		handler = staticETagHandler(handler, etags)
+	}
+
+	return handler, nil
+}
+
+// buildStaticETags walks the FS and precomputes ETags for all files.
+func buildStaticETags(fsys fs.FS) (map[string]string, error) {
+	etags := make(map[string]string)
+
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+
+		f, err := fsys.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		h := fnv.New128a()
+		if _, err := io.Copy(h, f); err != nil {
+			return err
+		}
+
+		etag := fmt.Sprintf(`"%x"`, h.Sum(nil))
+		etags[fmt.Sprintf("/%s", path)] = etag
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return etags, nil
+}
+
+// staticETagHandler wraps a file server handler to set ETag headers and
+// handle If-None-Match conditional requests.
+func staticETagHandler(next http.Handler, etags map[string]string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		etag, ok := etags[r.URL.Path]
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("ETag", etag)
+
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if match := r.Header.Get("If-None-Match"); match != "" {
+				if etagMatches(match, etag) {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// etagMatches checks whether the client's If-None-Match header value
+// contains the server ETag. Supports comma-separated lists and "*".
+func etagMatches(clientHeader, serverETag string) bool {
+	if clientHeader == "*" {
+		return true
+	}
+
+	for val := range strings.SplitSeq(clientHeader, ",") {
+		if strings.TrimSpace(val) == serverETag {
+			return true
+		}
+	}
+
+	return false
 }

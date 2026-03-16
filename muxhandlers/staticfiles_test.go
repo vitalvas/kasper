@@ -3,6 +3,7 @@ package muxhandlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -301,6 +302,187 @@ func TestStaticFilesHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "<html>root</html>")
+	})
+
+	t.Run("etag sets header on response", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		etag := rec.Header().Get("ETag")
+		assert.NotEmpty(t, etag)
+		assert.True(t, strings.HasPrefix(etag, `"`))
+		assert.True(t, strings.HasSuffix(etag, `"`))
+	})
+
+	t.Run("etag is consistent for same file", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, rec1.Header().Get("ETag"), rec2.Header().Get("ETag"))
+	})
+
+	t.Run("etag differs for different files", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/style.css", nil)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.NotEqual(t, rec1.Header().Get("ETag"), rec2.Header().Get("ETag"))
+	})
+
+	t.Run("etag if-none-match returns 304", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		etag := rec1.Header().Get("ETag")
+		require.NotEmpty(t, etag)
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		req2.Header.Set("If-None-Match", etag)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, http.StatusNotModified, rec2.Code)
+		assert.Empty(t, rec2.Body.String())
+	})
+
+	t.Run("etag if-none-match with HEAD returns 304", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		etag := rec1.Header().Get("ETag")
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodHead, "/file.txt", nil)
+		req2.Header.Set("If-None-Match", etag)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, http.StatusNotModified, rec2.Code)
+	})
+
+	t.Run("etag if-none-match mismatch returns 200", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		req.Header.Set("If-None-Match", `"wrong"`)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "hello world", rec.Body.String())
+	})
+
+	t.Run("etag if-none-match wildcard returns 304", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		req.Header.Set("If-None-Match", "*")
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotModified, rec.Code)
+	})
+
+	t.Run("etag if-none-match with multiple values", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		etag := rec1.Header().Get("ETag")
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		req2.Header.Set("If-None-Match", `"other", `+etag+`, "another"`)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, http.StatusNotModified, rec2.Code)
+	})
+
+	t.Run("etag missing file has no etag", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/nonexistent.txt", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Empty(t, rec.Header().Get("ETag"))
+	})
+
+	t.Run("etag with spa fallback", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:          testFS,
+			SPAFallback: true,
+			EnableETag:  true,
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.NotEmpty(t, rec.Header().Get("ETag"))
 	})
 }
 

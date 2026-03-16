@@ -354,6 +354,7 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | **Static Files** | | |
 | Static file serving (`fs.FS`) | No | Yes |
 | SPA fallback | No | Yes |
+| Static file ETag (If-None-Match, 304) | No | Yes |
 | **Debugging** | | |
 | pprof profiler endpoints | No | Yes |
 | **Logging** | | |
