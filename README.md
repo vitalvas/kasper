@@ -100,3 +100,4 @@ HTTP middleware for the mux router.
 | `EarlyHintsMiddleware` | RFC 8297 | Sends 103 Early Hints with Link headers for resource preloading |
 | `SunsetMiddleware` | RFC 8594 | Sets `Sunset`, `Deprecation`, and `Link` response headers for API deprecation |
 | `IPAllowMiddleware` | -- | IP allow list with CIDR support, customizable denied handler |
+| `PatchRoutingMiddleware` | RFC 7396, RFC 6902 | PATCH content type validation and routing, stores resolved type in context |

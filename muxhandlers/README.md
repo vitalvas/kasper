@@ -982,6 +982,52 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Patch Routing Middleware
+
+`PatchRoutingMiddleware` validates the `Content-Type` of PATCH requests against
+a set of allowed patch formats and stores the resolved type in the request
+context. Non-PATCH requests pass through unchanged. Returns 415 Unsupported
+Media Type when the `Content-Type` is missing or unsupported.
+
+### Patch Content Type Constants
+
+| Constant | Value | Spec |
+|----------|-------|------|
+| `PatchTypeJSON` | `application/json` | Implicit merge |
+| `PatchTypeMergePatch` | `application/merge-patch+json` | [RFC 7396](https://www.rfc-editor.org/rfc/rfc7396) |
+| `PatchTypeJSONPatch` | `application/json-patch+json` | [RFC 6902](https://www.rfc-editor.org/rfc/rfc6902) |
+
+### PatchRoutingConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AllowedTypes` | `[]string` | Accepted Content-Type values; `nil` = all three defaults |
+
+### PatchRouting Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users/{id}", updateUser).Methods(http.MethodPatch)
+
+r.Use(muxhandlers.PatchRoutingMiddleware(muxhandlers.PatchRoutingConfig{}))
+```
+
+### Reading the Patch Type from context
+
+```go
+func updateUser(w http.ResponseWriter, r *http.Request) {
+    switch muxhandlers.PatchContentType(r) {
+    case muxhandlers.PatchTypeJSON:
+        // implicit merge: sent fields overwrite, absent fields unchanged
+    case muxhandlers.PatchTypeMergePatch:
+        // RFC 7396: null values mean "remove this field"
+    case muxhandlers.PatchTypeJSONPatch:
+        // RFC 6902: array of add/remove/replace/move/copy/test operations
+    }
+}
+```
+
 ## IP Allow Middleware
 
 `IPAllowMiddleware` restricts access to requests originating from a

@@ -337,6 +337,7 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | Method override (X-HTTP-Method-Override) | No | Yes |
 | Request ID generation (UUID v4/v7) | No | Yes |
 | Content negotiation (RFC 9110) | No | Yes |
+| PATCH content type routing (RFC 7396, RFC 6902) | No | Yes |
 | **Response Processing** | | |
 | Gzip/deflate compression | Yes | Yes |
 | Cache-Control header generation | No | Yes |
