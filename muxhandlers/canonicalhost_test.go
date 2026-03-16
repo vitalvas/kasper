@@ -1,6 +1,7 @@
 package muxhandlers
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -139,6 +140,47 @@ func TestCanonicalHostMiddleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusMovedPermanently, rec.Code)
 		assert.Equal(t, "https://www.example.com:8443/", rec.Header().Get("Location"))
+	})
+	t.Run("TLS request detected as https", func(t *testing.T) {
+		mw, err := CanonicalHostMiddleware(CanonicalHostConfig{
+			URL: "https://www.example.com",
+		})
+		require.NoError(t, err)
+
+		var called bool
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/page", nil)
+		req.Host = "www.example.com"
+		req.TLS = &tls.ConnectionState{}
+		handler.ServeHTTP(rec, req)
+
+		assert.True(t, called)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("TLS request to wrong host redirects with https", func(t *testing.T) {
+		mw, err := CanonicalHostMiddleware(CanonicalHostConfig{
+			URL: "https://www.example.com",
+		})
+		require.NoError(t, err)
+
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/page", nil)
+		req.Host = "other.example.com"
+		req.TLS = &tls.ConnectionState{}
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+		assert.Equal(t, "https://www.example.com/page", rec.Header().Get("Location"))
 	})
 }
 

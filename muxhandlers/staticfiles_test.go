@@ -1,6 +1,8 @@
 package muxhandlers
 
 import (
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -484,6 +486,36 @@ func TestStaticFilesHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.NotEmpty(t, rec.Header().Get("ETag"))
 	})
+
+	t.Run("etag build error propagates", func(t *testing.T) {
+		_, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         &failOpenFS{inner: testFS},
+			EnableETag: true,
+		})
+		assert.Error(t, err)
+	})
+}
+
+// failOpenFS wraps an fs.FS but fails when opening non-directory files.
+type failOpenFS struct {
+	inner fs.FS
+}
+
+func (f *failOpenFS) Open(name string) (fs.File, error) {
+	file, err := f.inner.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if stat.IsDir() {
+		return file, nil
+	}
+	file.Close()
+	return nil, errors.New("simulated open error")
 }
 
 func BenchmarkStaticFilesHandler(b *testing.B) {

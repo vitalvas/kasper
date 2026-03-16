@@ -808,6 +808,319 @@ func TestEncodeForm(t *testing.T) {
 	})
 }
 
+func TestBindQueryAdditionalCoverage(t *testing.T) {
+	t.Run("pointer to text unmarshaler", func(t *testing.T) {
+		type params struct {
+			IP *testIP `query:"ip"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?ip=10.0.0.1", nil)
+		var got params
+		require.NoError(t, BindQuery(req, &got))
+		require.NotNil(t, got.IP)
+		assert.Equal(t, "10.0.0.1", got.IP.val)
+	})
+
+	t.Run("slice of pointer elements", func(t *testing.T) {
+		type params struct {
+			IDs []*int `query:"id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?id=1&id=2", nil)
+		var got params
+		require.NoError(t, BindQuery(req, &got))
+		require.Len(t, got.IDs, 2)
+		assert.Equal(t, 1, *got.IDs[0])
+		assert.Equal(t, 2, *got.IDs[1])
+	})
+
+	t.Run("uint types", func(t *testing.T) {
+		type params struct {
+			A uint8  `query:"a"`
+			B uint16 `query:"b"`
+			C uint32 `query:"c"`
+			D uint64 `query:"d"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?a=1&b=2&c=3&d=4", nil)
+		var got params
+		require.NoError(t, BindQuery(req, &got))
+		assert.Equal(t, uint8(1), got.A)
+		assert.Equal(t, uint16(2), got.B)
+		assert.Equal(t, uint32(3), got.C)
+		assert.Equal(t, uint64(4), got.D)
+	})
+}
+
+func TestEncodeQueryAdditionalCoverage(t *testing.T) {
+	t.Run("encodes uint types", func(t *testing.T) {
+		type params struct {
+			A uint8  `query:"a"`
+			B uint16 `query:"b"`
+		}
+
+		vals, err := EncodeQuery(params{A: 10, B: 20})
+		require.NoError(t, err)
+		assert.Equal(t, "10", vals.Get("a"))
+		assert.Equal(t, "20", vals.Get("b"))
+	})
+
+	t.Run("encodes float32", func(t *testing.T) {
+		type params struct {
+			Val float32 `query:"val"`
+		}
+
+		vals, err := EncodeQuery(params{Val: 2.5})
+		require.NoError(t, err)
+		assert.Equal(t, "2.5", vals.Get("val"))
+	})
+
+	t.Run("encodes bool", func(t *testing.T) {
+		type params struct {
+			Active bool `query:"active"`
+		}
+
+		vals, err := EncodeQuery(params{Active: true})
+		require.NoError(t, err)
+		assert.Equal(t, "true", vals.Get("active"))
+	})
+
+	t.Run("encodes int types", func(t *testing.T) {
+		type params struct {
+			A int8  `query:"a"`
+			B int64 `query:"b"`
+		}
+
+		vals, err := EncodeQuery(params{A: -1, B: 999})
+		require.NoError(t, err)
+		assert.Equal(t, "-1", vals.Get("a"))
+		assert.Equal(t, "999", vals.Get("b"))
+	})
+
+	t.Run("encodes text marshaler", func(t *testing.T) {
+		type params struct {
+			IP testIPMarshal `query:"ip"`
+		}
+
+		vals, err := EncodeQuery(params{IP: testIPMarshal{val: "10.0.0.1"}})
+		require.NoError(t, err)
+		assert.Equal(t, "10.0.0.1", vals.Get("ip"))
+	})
+
+	t.Run("encodes nil pointer in embedded struct", func(t *testing.T) {
+		type Inner struct {
+			Name string `query:"name"`
+		}
+		type params struct {
+			*Inner
+			Age int `query:"age"`
+		}
+
+		vals, err := EncodeQuery(params{Age: 30})
+		require.NoError(t, err)
+		assert.Equal(t, "30", vals.Get("age"))
+		assert.Empty(t, vals.Get("name"))
+	})
+}
+
+func TestEdgeCases(t *testing.T) {
+	t.Run("invalid uint returns error", func(t *testing.T) {
+		type params struct {
+			Val uint `query:"val"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?val=-1", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("invalid float returns error", func(t *testing.T) {
+		type params struct {
+			Val float64 `query:"val"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?val=notfloat", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("unsupported field type returns error", func(t *testing.T) {
+		type params struct {
+			Val complex64 `query:"val"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?val=1", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("non-string map key returns error", func(t *testing.T) {
+		type params struct {
+			Data map[int]string `query:"data"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?data.1=a", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("nested dot in map key is skipped", func(t *testing.T) {
+		type params struct {
+			Meta map[string]string `query:"meta"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?meta.a.b=val", nil)
+		var got params
+		require.NoError(t, BindQuery(req, &got))
+		assert.Nil(t, got.Meta)
+	})
+
+	t.Run("non-numeric slice index is skipped", func(t *testing.T) {
+		type item struct {
+			Name string `query:"name"`
+		}
+		type params struct {
+			Items []item `query:"items"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?items.abc.name=test", nil)
+		var got params
+		require.NoError(t, BindQuery(req, &got))
+		assert.Empty(t, got.Items)
+	})
+
+	t.Run("error propagates from nested struct decode", func(t *testing.T) {
+		type inner struct {
+			Val int `query:"val,required"`
+		}
+		type params struct {
+			Inner inner `query:"inner"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?inner.other=1", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("error propagates from embedded struct decode", func(t *testing.T) {
+		type Embedded struct {
+			Val int `query:"val,required"`
+		}
+		type params struct {
+			Embedded
+		}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("error propagates from slice of struct decode", func(t *testing.T) {
+		type item struct {
+			Val int `query:"val,required"`
+		}
+		type params struct {
+			Items []item `query:"items"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?items.0.other=x", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("error propagates from map decode invalid value", func(t *testing.T) {
+		type params struct {
+			Scores map[string]int `query:"scores"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?scores.math=notint", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("error propagates from map slice decode invalid value", func(t *testing.T) {
+		type params struct {
+			Nums map[string][]int `query:"nums"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?nums.a=notint", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("invalid pointer field value returns error", func(t *testing.T) {
+		type params struct {
+			Val *int `query:"val"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?val=bad", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("slice element parse error", func(t *testing.T) {
+		type params struct {
+			IDs []int `query:"id"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?id=1&id=bad", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("pointer slice element parse error", func(t *testing.T) {
+		type params struct {
+			IDs []*int `query:"id"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?id=bad", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("text unmarshaler error propagates through pointer", func(t *testing.T) {
+		type params struct {
+			IP *testIPFail `query:"ip"`
+		}
+		req := httptest.NewRequest(http.MethodGet, "/?ip=bad", nil)
+		var got params
+		assert.Error(t, BindQuery(req, &got))
+	})
+
+	t.Run("encode non-string map key skipped", func(t *testing.T) {
+		type params struct {
+			Data map[int]string `query:"data"`
+		}
+		vals, err := EncodeQuery(params{Data: map[int]string{1: "a"}})
+		require.NoError(t, err)
+		assert.Empty(t, vals)
+	})
+
+	t.Run("encode empty slice of structs", func(t *testing.T) {
+		type item struct {
+			Name string `query:"name"`
+		}
+		type params struct {
+			Items []item `query:"items"`
+		}
+		vals, err := EncodeQuery(params{})
+		require.NoError(t, err)
+		assert.Empty(t, vals)
+	})
+
+	t.Run("map field with empty values entry skips value", func(t *testing.T) {
+		type params struct {
+			Meta map[string]string `query:"meta"`
+		}
+		src := map[string][]string{"meta.key": {}}
+		var got params
+		require.NoError(t, decodeValues(src, &got, "query"))
+		assert.Empty(t, got.Meta["key"])
+	})
+}
+
+// testIPMarshal implements encoding.TextMarshaler for testing.
+type testIPMarshal struct {
+	val string
+}
+
+func (ip testIPMarshal) MarshalText() ([]byte, error) {
+	return []byte(ip.val), nil
+}
+
+// testIPFail implements encoding.TextUnmarshaler that always fails.
+type testIPFail struct{}
+
+func (ip *testIPFail) UnmarshalText(_ []byte) error {
+	return fmt.Errorf("unmarshal failed")
+}
+
 func BenchmarkBindQuery(b *testing.B) {
 	type params struct {
 		Name   string  `query:"name"`

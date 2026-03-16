@@ -128,6 +128,44 @@ func TestAcceptPatchMiddleware(t *testing.T) {
 		assert.Contains(t, allow, http.MethodPatch)
 		assert.Contains(t, allow, http.MethodDelete)
 	})
+
+	t.Run("non-OPTIONS method not allowed uses previous handler", func(t *testing.T) {
+		r := mux.NewRouter()
+
+		var prevCalled bool
+		r.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			prevCalled = true
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		})
+
+		r.HandleFunc("/users/{id}", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodGet)
+
+		AcceptPatchMiddleware(r, AcceptPatchConfig{})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/users/1", nil)
+		r.ServeHTTP(rec, req)
+
+		assert.True(t, prevCalled)
+		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	})
+
+	t.Run("non-OPTIONS method not allowed without previous handler", func(t *testing.T) {
+		r := mux.NewRouter()
+		r.HandleFunc("/users/{id}", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodGet)
+
+		AcceptPatchMiddleware(r, AcceptPatchConfig{})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/users/1", nil)
+		r.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	})
 }
 
 func BenchmarkAcceptPatchMiddleware(b *testing.B) {

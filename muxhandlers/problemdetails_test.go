@@ -122,6 +122,19 @@ func TestWriteProblemDetails(t *testing.T) {
 		assert.Equal(t, "Original Title", body["title"])
 		assert.Equal(t, "value", body["extra"])
 	})
+
+	t.Run("marshal error returns 500", func(t *testing.T) {
+		w := httptest.NewRecorder()
+
+		WriteProblemDetails(w, ProblemDetails{
+			Status: http.StatusBadRequest,
+			Extensions: map[string]any{
+				"bad": func() {},
+			},
+		})
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
 }
 
 func TestNewProblemDetails(t *testing.T) {
