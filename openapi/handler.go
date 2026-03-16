@@ -61,6 +61,14 @@ type HandleConfig struct {
 	// DisableDocs disables the interactive HTML docs UI endpoint.
 	DisableDocs bool
 
+	// DisableETag disables ETag and If-None-Match conditional request
+	// handling on the schema endpoints (JSON, YAML). When enabled
+	// (the default), the endpoints compute an ETag from the response
+	// body and return 304 Not Modified when If-None-Match matches.
+	//
+	// See: https://www.rfc-editor.org/rfc/rfc7232
+	DisableETag bool
+
 	// SwaggerUIConfig provides additional SwaggerUIBundle configuration options.
 	// These are rendered as JavaScript object properties alongside the url and
 	// dom_id defaults. For example, {"docExpansion": "none"} produces:
@@ -141,12 +149,12 @@ func (s *Spec) Handle(r *mux.Router, basePath string, cfg *HandleConfig) {
 
 	if jsonFile != SchemaDisabled {
 		jsonPath = resolvePath(basePath, jsonFile)
-		s.registerJSON(r, jsonPath)
+		s.registerJSON(r, jsonPath, cfg)
 	}
 
 	if yamlFile != SchemaDisabled {
 		yamlPath = resolvePath(basePath, yamlFile)
-		s.registerYAML(r, yamlPath)
+		s.registerYAML(r, yamlPath, cfg)
 	}
 
 	if !cfg.DisableDocs {
@@ -166,13 +174,14 @@ func (s *Spec) Handle(r *mux.Router, basePath string, cfg *HandleConfig) {
 // registerJSON registers a handler that serves the OpenAPI Document as JSON.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#openapi-document
-func (s *Spec) registerJSON(r *mux.Router, path string) {
+func (s *Spec) registerJSON(r *mux.Router, path string, cfg *HandleConfig) {
 	var (
 		once     sync.Once
 		data     []byte
+		etag     string
 		buildErr error
 	)
-	r.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+	r.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
 		once.Do(func() {
 			defer func() {
 				if rv := recover(); rv != nil {
@@ -181,10 +190,20 @@ func (s *Spec) registerJSON(r *mux.Router, path string) {
 			}()
 			doc := s.Build(r)
 			data, buildErr = json.MarshalIndent(doc, "", "  ")
+			if buildErr == nil && !cfg.DisableETag {
+				etag = computeETag(data)
+			}
 		})
 		if buildErr != nil {
 			http.Error(w, "failed to serialize OpenAPI spec as JSON", http.StatusInternalServerError)
 			return
+		}
+		if etag != "" {
+			w.Header().Set("ETag", etag)
+			if etagMatch(req.Header.Get("If-None-Match"), etag) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", mux.ContentTypeApplicationJSON)
 		w.WriteHeader(http.StatusOK)
@@ -195,13 +214,14 @@ func (s *Spec) registerJSON(r *mux.Router, path string) {
 // registerYAML registers a handler that serves the OpenAPI Document as YAML.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#openapi-document
-func (s *Spec) registerYAML(r *mux.Router, path string) {
+func (s *Spec) registerYAML(r *mux.Router, path string, cfg *HandleConfig) {
 	var (
 		once     sync.Once
 		data     []byte
+		etag     string
 		buildErr error
 	)
-	r.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+	r.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
 		once.Do(func() {
 			defer func() {
 				if rv := recover(); rv != nil {
@@ -210,10 +230,20 @@ func (s *Spec) registerYAML(r *mux.Router, path string) {
 			}()
 			doc := s.Build(r)
 			data, buildErr = yaml.Marshal(doc)
+			if buildErr == nil && !cfg.DisableETag {
+				etag = computeETag(data)
+			}
 		})
 		if buildErr != nil {
 			http.Error(w, "failed to serialize OpenAPI spec as YAML", http.StatusInternalServerError)
 			return
+		}
+		if etag != "" {
+			w.Header().Set("ETag", etag)
+			if etagMatch(req.Header.Get("If-None-Match"), etag) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", mux.ContentTypeApplicationYAML)
 		w.WriteHeader(http.StatusOK)
