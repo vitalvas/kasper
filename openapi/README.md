@@ -540,7 +540,17 @@ Schema name mapping:
 
 ## Serving
 
-`Handle` registers all endpoints under a single base path. The config parameter is optional -- pass `nil` for defaults:
+`Handle` registers all endpoints under a single base path. The config parameter is optional -- pass `nil` for defaults.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `UI` | `DocsUI` | Interactive docs UI; default `DocsSwaggerUI` |
+| `Title` | `string` | HTML page title; default = spec `info.title` |
+| `JSONFilename` | `string` | JSON spec endpoint path; default `"schema.json"`; `SchemaDisabled` to disable |
+| `YAMLFilename` | `string` | YAML spec endpoint path; default `SchemaDisabled` |
+| `DisableDocs` | `bool` | Disable interactive HTML docs UI |
+| `DisableETag` | `bool` | Disable ETag and If-None-Match on schema endpoints; enabled by default |
+| `SwaggerUIConfig` | `map[string]any` | Additional SwaggerUIBundle options; only for `DocsSwaggerUI` |
 
 ```go
 // Swagger UI (default) at /swagger/, schema at /swagger/schema.json (YAML disabled by default)
@@ -563,6 +573,9 @@ spec.Handle(r, "/swagger", &openapi.HandleConfig{JSONFilename: openapi.SchemaDis
 
 // Disable interactive docs, serve only spec files
 spec.Handle(r, "/swagger", &openapi.HandleConfig{DisableDocs: true})
+
+// Disable ETag on schema endpoints
+spec.Handle(r, "/swagger", &openapi.HandleConfig{DisableETag: true})
 ```
 
 ### Swagger UI configuration
