@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/vitalvas/kasper/compare/v0.7.0...v0.8.0) (2026-03-17)
+
+
+### Features
+
+* **muxhandlers:** add RedirectMiddleware for path-based redirects ([38ce3d3](https://github.com/vitalvas/kasper/commit/38ce3d3cf4c62972fa85858c29d3b20a21f2e9d7))
+* **openapi:** add constants for Format, Parameter, Security, and OpenAPI version ([78eaed3](https://github.com/vitalvas/kasper/commit/78eaed3289a75fb05d9341d59dfd015193657a27))
+* **openapi:** add SchemaType constants and use them across codebase ([e427620](https://github.com/vitalvas/kasper/commit/e427620dc8f171ef57a42da22081d2ac8497a142))
+
 ## [0.7.0](https://github.com/vitalvas/kasper/compare/v0.6.0...v0.7.0) (2026-03-16)
 
 
