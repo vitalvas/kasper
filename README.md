@@ -103,4 +103,5 @@ HTTP middleware for the mux router.
 | `IPAllowMiddleware` | -- | IP allow list with CIDR support, customizable denied handler |
 | `PatchRoutingMiddleware` | RFC 7396, RFC 6902 | PATCH content type validation and routing, stores resolved type in context |
 | `AcceptPatchMiddleware` | RFC 5789 | OPTIONS handler with Allow and Accept-Patch headers, auto-discovers methods from router |
+| `RedirectMiddleware` | -- | Path-based redirects with exact and wildcard matching, HTML meta-refresh body |
 | `CanonicalHostMiddleware` | -- | Redirects requests to canonical scheme and host, preserves path and query |

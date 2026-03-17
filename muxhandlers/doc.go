@@ -368,6 +368,28 @@
 //	}
 //	r.Use(mw)
 //
+// # Redirect Middleware
+//
+// RedirectMiddleware redirects requests based on path matching rules. It
+// supports exact path matching and prefix matching with a trailing wildcard
+// ("*"). The first matching rule wins. Non-matching requests pass through.
+// The redirect response includes a Location header and an HTML body with a
+// <meta http-equiv="refresh"> tag for clients that do not follow the
+// Location header automatically.
+//
+//	mw, err := muxhandlers.RedirectMiddleware(muxhandlers.RedirectConfig{
+//	    Rules: []muxhandlers.RedirectRule{
+//	        {From: "/", To: "/swagger/"},
+//	        {From: "/old-page", To: "/new-page"},
+//	        {From: "/blog/2023/*", To: "/archive/2023/"},
+//	        {From: "/github", To: "https://github.com/example", StatusCode: http.StatusTemporaryRedirect},
+//	    },
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
 // # IP Allow Middleware
 //
 // IPAllowMiddleware restricts access to requests originating from a configured

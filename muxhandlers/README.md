@@ -1075,6 +1075,53 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## Redirect Middleware
+
+`RedirectMiddleware` redirects requests based on path matching rules. It
+supports exact path matching and prefix matching with a trailing wildcard
+(`*`). The first matching rule wins. Non-matching requests pass through.
+The redirect response includes a `Location` header and an HTML body with
+a `<meta http-equiv="refresh">` tag for clients that do not follow the
+`Location` header automatically.
+
+### RedirectRule
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `From` | `string` | Path to match; must start with `/`; trailing `*` enables prefix matching |
+| `To` | `string` | Redirect target; suffix appended for wildcard rules; can be an absolute URL |
+| `StatusCode` | `int` | Per-rule HTTP redirect status code; 0 = use config default |
+
+### RedirectConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Rules` | `[]RedirectRule` | Ordered list of rules; first match wins; required |
+| `StatusCode` | `int` | Default HTTP redirect status code; 0 = 307 Temporary Redirect |
+
+### Redirect Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/swagger/", swaggerHandler).Methods(http.MethodGet)
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.RedirectMiddleware(muxhandlers.RedirectConfig{
+    Rules: []muxhandlers.RedirectRule{
+        {From: "/", To: "/swagger/"},
+        {From: "/old-page", To: "/new-page"},
+        {From: "/blog/2023/*", To: "/archive/2023/"},
+        {From: "/github", To: "https://github.com/example", StatusCode: http.StatusMovedPermanently},
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
 ## Canonical Host Middleware
 
 `CanonicalHostMiddleware` redirects requests to a canonical host URL when

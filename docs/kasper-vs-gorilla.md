@@ -380,6 +380,7 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | Custom log formatting | Yes | No |
 | **Other** | | |
 | Canonical host redirect | Yes | Yes |
+| Path-based redirects (exact + wildcard) | No | Yes |
 
 ### API Style Difference
 
