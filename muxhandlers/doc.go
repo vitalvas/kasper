@@ -257,11 +257,13 @@
 //
 // # Profiler Handler
 //
-// ProfilerHandler returns an http.Handler that serves the standard
-// net/http/pprof endpoints. It is not middleware — it returns an
-// http.Handler that serves profiling data directly.
+// RegisterProfiler registers the standard net/http/pprof and expvar
+// endpoints on the given router. It is not middleware — it registers
+// routes directly. Endpoints use the standard /debug/pprof/ and
+// /debug/vars paths. Mount with any prefix using Route:
 //
-//	r.PathPrefix("/debug/pprof").Handler(muxhandlers.ProfilerHandler())
+//	r.Route("/_internal", muxhandlers.RegisterProfiler)
+//	// serves /_internal/debug/pprof/, /_internal/debug/vars, etc.
 //
 // # Sunset Middleware
 //

@@ -4,38 +4,55 @@ import (
 	"expvar"
 	"net/http"
 	"net/http/pprof"
+	"strings"
+
+	"github.com/vitalvas/kasper/mux"
 )
 
-// ProfilerHandler returns an http.Handler that serves the standard
-// net/http/pprof and expvar endpoints. Mount it with a PathPrefix on
-// the router:
+// RegisterProfiler registers the standard net/http/pprof and expvar
+// endpoints on the given router. Mount using Route or PathPrefix:
 //
-//	r.PathPrefix("/debug").Handler(muxhandlers.ProfilerHandler())
+//	r.Route("/debug", muxhandlers.RegisterProfiler)
+//	r.Route("/_internal", muxhandlers.RegisterProfiler)
 //
 // Registered endpoints (relative to the mount path):
 //
-//	/              - pprof index page
-//	/cmdline       - running program command line
-//	/profile       - CPU profile (supports ?seconds=N)
-//	/symbol        - symbol lookup
-//	/trace         - execution trace (supports ?seconds=N)
+//	/debug/pprof/        - pprof index page
+//	/debug/pprof/cmdline - running program command line
+//	/debug/pprof/profile - CPU profile (supports ?seconds=N)
+//	/debug/pprof/symbol  - symbol lookup
+//	/debug/pprof/trace   - execution trace (supports ?seconds=N)
+//	/debug/vars          - exported variables via the expvar package
 //
 // Named profiles (allocs, block, goroutine, heap, mutex, threadcreate)
 // are served by the index handler.
 //
-// Additionally, /debug/vars serves exported variables via the expvar package.
-//
 // See: https://pkg.go.dev/net/http/pprof
 // See: https://pkg.go.dev/expvar
-func ProfilerHandler() http.Handler {
-	mux := http.NewServeMux()
+func RegisterProfiler(r *mux.Router) {
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline).Methods(http.MethodGet)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile).Methods(http.MethodGet)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol).Methods(http.MethodGet, http.MethodPost)
+	r.HandleFunc("/debug/pprof/trace", pprof.Trace).Methods(http.MethodGet)
+	r.Handle("/debug/vars", expvar.Handler()).Methods(http.MethodGet)
+	r.PathPrefix("/debug/pprof/").HandlerFunc(pprofIndex).Methods(http.MethodGet)
+}
 
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	mux.Handle("/debug/vars", expvar.Handler())
+// pprofIndex wraps pprof.Index by rewriting r.URL.Path to the
+// "/debug/pprof/" prefix that the stdlib handler expects internally.
+func pprofIndex(w http.ResponseWriter, r *http.Request) {
+	const marker = "/debug/pprof/"
 
-	return mux
+	path := r.URL.Path
+	if idx := strings.Index(path, marker); idx >= 0 {
+		path = path[idx:]
+	}
+
+	r2 := new(http.Request)
+	*r2 = *r
+	u := *r.URL
+	u.Path = path
+	r2.URL = &u
+
+	pprof.Index(w, r2)
 }

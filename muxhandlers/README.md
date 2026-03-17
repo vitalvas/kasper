@@ -646,14 +646,15 @@ r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
 
 ## Profiler Handler
 
-`ProfilerHandler` returns an `http.Handler` that serves the standard
-`net/http/pprof` endpoints. It is not middleware — it returns an
-`http.Handler` that serves profiling data directly.
+`RegisterProfiler` registers the standard `net/http/pprof` and `expvar`
+endpoints on the given router. It is not middleware — it registers
+routes directly. Endpoints use the standard `/debug/pprof/` and
+`/debug/vars` paths. Mount with any prefix using `Route`:
 
 ### Registered Endpoints
 
-| Path | Description |
-|------|-------------|
+| Suffix | Description |
+|--------|-------------|
 | `/debug/pprof/` | Index page with links to all profiles |
 | `/debug/pprof/cmdline` | Running program command line |
 | `/debug/pprof/profile` | CPU profile (supports `?seconds=N`) |
@@ -669,7 +670,17 @@ Named profiles (`allocs`, `block`, `goroutine`, `heap`, `mutex`,
 ```go
 r := mux.NewRouter()
 
-r.PathPrefix("/debug").Handler(muxhandlers.ProfilerHandler())
+RegisterProfiler(r)
+// serves /debug/pprof/, /debug/vars, etc.
+```
+
+### Profiler Usage with custom prefix
+
+```go
+r := mux.NewRouter()
+
+r.Route("/_internal", muxhandlers.RegisterProfiler)
+// serves /_internal/debug/pprof/, /_internal/debug/vars, etc.
 ```
 
 ## Sunset Middleware
