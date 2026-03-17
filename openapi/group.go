@@ -193,12 +193,12 @@ func (g *RouteGroup) DefaultResponse(body any) *RouteGroup {
 		g.defaults.responseContents = make(map[string]map[string]any)
 	}
 	if body != nil {
-		if g.defaults.responseContents["default"] == nil {
-			g.defaults.responseContents["default"] = make(map[string]any)
+		if g.defaults.responseContents[ResponseDefault] == nil {
+			g.defaults.responseContents[ResponseDefault] = make(map[string]any)
 		}
-		g.defaults.responseContents["default"][mux.ContentTypeApplicationJSON] = body
-	} else if g.defaults.responseContents["default"] == nil {
-		g.defaults.responseContents["default"] = nil
+		g.defaults.responseContents[ResponseDefault][mux.ContentTypeApplicationJSON] = body
+	} else if g.defaults.responseContents[ResponseDefault] == nil {
+		g.defaults.responseContents[ResponseDefault] = nil
 	}
 	return g
 }
@@ -211,7 +211,7 @@ func (g *RouteGroup) DefaultResponseDescription(desc string) *RouteGroup {
 	if g.defaults.responseDescriptions == nil {
 		g.defaults.responseDescriptions = make(map[string]string)
 	}
-	g.defaults.responseDescriptions["default"] = desc
+	g.defaults.responseDescriptions[ResponseDefault] = desc
 	return g
 }
 
@@ -223,10 +223,10 @@ func (g *RouteGroup) DefaultResponseHeader(name string, h *Header) *RouteGroup {
 	if g.defaults.responseHeaders == nil {
 		g.defaults.responseHeaders = make(map[string]map[string]*Header)
 	}
-	if g.defaults.responseHeaders["default"] == nil {
-		g.defaults.responseHeaders["default"] = make(map[string]*Header)
+	if g.defaults.responseHeaders[ResponseDefault] == nil {
+		g.defaults.responseHeaders[ResponseDefault] = make(map[string]*Header)
 	}
-	g.defaults.responseHeaders["default"][name] = h
+	g.defaults.responseHeaders[ResponseDefault][name] = h
 	return g
 }
 

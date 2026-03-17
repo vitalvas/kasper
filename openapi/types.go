@@ -182,6 +182,77 @@ type Header struct {
 	Content         map[string]*MediaType `json:"content,omitempty"`
 }
 
+// OpenAPIVersion is the OpenAPI specification version used by this package.
+//
+// See: https://spec.openapis.org/oas/v3.1.0
+const OpenAPIVersion = "3.1.0"
+
+// Parameter location constants for the Parameter.In field.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
+const (
+	ParameterInQuery  = "query"
+	ParameterInPath   = "path"
+	ParameterInHeader = "header"
+	ParameterInCookie = "cookie"
+)
+
+// Security scheme type constants for the SecurityScheme.Type field.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#security-scheme-object
+const (
+	SecurityTypeHTTP          = "http"
+	SecurityTypeAPIKey        = "apiKey"
+	SecurityTypeOAuth2        = "oauth2"
+	SecurityTypeOpenIDConnect = "openIdConnect"
+)
+
+// Security scheme location constants for the SecurityScheme.In field.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#security-scheme-object
+const (
+	SecurityInHeader = "header"
+	SecurityInQuery  = "query"
+	SecurityInCookie = "cookie"
+)
+
+// HTTP authentication scheme constants for the SecurityScheme.Scheme field.
+//
+// See: https://www.iana.org/assignments/http-authschemes
+const (
+	SchemeBearer = "bearer"
+	SchemeBasic  = "basic"
+)
+
+// ResponseDefault is the key used for default/catch-all responses in OpenAPI.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#responses-object
+const ResponseDefault = "default"
+
+// Common Format constants for JSON Schema / OpenAPI 3.1 format values.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-validation#section-7.3
+// See: https://spec.openapis.org/oas/v3.1.0#data-types
+const (
+	FormatDateTime = "date-time"
+	FormatDate     = "date"
+	FormatTime     = "time"
+	FormatDuration = "duration"
+	FormatEmail    = "email"
+	FormatHostname = "hostname"
+	FormatIPv4     = "ipv4"
+	FormatIPv6     = "ipv6"
+	FormatURI      = "uri"
+	FormatUUID     = "uuid"
+	FormatByte     = "byte"
+	FormatBinary   = "binary"
+	FormatInt32    = "int32"
+	FormatInt64    = "int64"
+	FormatFloat    = "float"
+	FormatDouble   = "double"
+	FormatPassword = "password"
+)
+
 // SchemaType represents a JSON Schema type that can be a single string
 // or an array of strings (per JSON Schema Draft 2020-12, section 6.1.1).
 //

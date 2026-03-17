@@ -53,7 +53,7 @@ func TestHandle(t *testing.T) {
 
 		var doc Document
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &doc))
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 		assert.Equal(t, "Test API", doc.Info.Title)
 		assert.Contains(t, doc.Paths, "/items")
 		assert.Contains(t, doc.Paths, "/items/{id}")
@@ -78,7 +78,7 @@ func TestHandle(t *testing.T) {
 
 		var doc map[string]any
 		require.NoError(t, yaml.Unmarshal(w.Body.Bytes(), &doc))
-		assert.Equal(t, "3.1.0", doc["openapi"])
+		assert.Equal(t, OpenAPIVersion, doc["openapi"])
 	})
 
 	t.Run("docs UI at /swagger/", func(t *testing.T) {

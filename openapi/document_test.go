@@ -12,7 +12,7 @@ import (
 func TestDocumentExportJSON(t *testing.T) {
 	t.Run("serializes to valid JSON", func(t *testing.T) {
 		doc := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Test", Version: "1.0.0"},
 			Paths: map[string]*PathItem{
 				"/users": {Get: &Operation{Summary: "List users"}},
@@ -24,14 +24,14 @@ func TestDocumentExportJSON(t *testing.T) {
 
 		var parsed map[string]any
 		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "3.1.0", parsed["openapi"])
+		assert.Equal(t, OpenAPIVersion, parsed["openapi"])
 		info := parsed["info"].(map[string]any)
 		assert.Equal(t, "Test", info["title"])
 	})
 
 	t.Run("roundtrip via DocumentFromJSON", func(t *testing.T) {
 		original := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "RT", Version: "2.0.0"},
 			Components: &Components{
 				Schemas: map[string]*Schema{
@@ -53,7 +53,7 @@ func TestDocumentExportJSON(t *testing.T) {
 
 	t.Run("omits empty fields", func(t *testing.T) {
 		doc := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Minimal", Version: "1.0.0"},
 		}
 
@@ -71,7 +71,7 @@ func TestDocumentExportJSON(t *testing.T) {
 func TestDocumentExportYAML(t *testing.T) {
 	t.Run("serializes to valid YAML", func(t *testing.T) {
 		doc := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Test", Version: "1.0.0"},
 			Tags:    []Tag{{Name: "users", Description: "User ops"}},
 		}
@@ -81,7 +81,7 @@ func TestDocumentExportYAML(t *testing.T) {
 
 		parsed, err := DocumentFromYAML(data)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", parsed.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, parsed.OpenAPI)
 		assert.Equal(t, "Test", parsed.Info.Title)
 		require.Len(t, parsed.Tags, 1)
 		assert.Equal(t, "users", parsed.Tags[0].Name)
@@ -89,7 +89,7 @@ func TestDocumentExportYAML(t *testing.T) {
 
 	t.Run("roundtrip via DocumentFromYAML", func(t *testing.T) {
 		original := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "RT", Version: "3.0.0"},
 			Paths: map[string]*PathItem{
 				"/health": {Get: &Operation{Summary: "Health"}},
@@ -109,7 +109,7 @@ func TestDocumentExportYAML(t *testing.T) {
 
 	t.Run("minimal document", func(t *testing.T) {
 		doc := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Minimal", Version: "1.0.0"},
 		}
 
@@ -118,7 +118,7 @@ func TestDocumentExportYAML(t *testing.T) {
 
 		parsed, err := DocumentFromYAML(data)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", parsed.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, parsed.OpenAPI)
 		assert.Equal(t, "Minimal", parsed.Info.Title)
 	})
 }
@@ -136,7 +136,7 @@ func TestDocumentFromJSON(t *testing.T) {
 		}`)
 		doc, err := DocumentFromJSON(data)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 		assert.Equal(t, "Test", doc.Info.Title)
 		assert.Equal(t, "1.0.0", doc.Info.Version)
 		require.Contains(t, doc.Paths, "/users")
@@ -157,7 +157,7 @@ func TestDocumentFromJSON(t *testing.T) {
 
 	t.Run("roundtrip", func(t *testing.T) {
 		original := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Roundtrip", Version: "2.0.0"},
 			Paths: map[string]*PathItem{
 				"/health": {Get: &Operation{Summary: "Health check"}},
@@ -198,7 +198,7 @@ paths:
 `)
 		doc, err := DocumentFromYAML(data)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 		assert.Equal(t, "Test", doc.Info.Title)
 		assert.Equal(t, "1.0.0", doc.Info.Version)
 		require.Contains(t, doc.Paths, "/users")
@@ -219,7 +219,7 @@ paths:
 
 	t.Run("roundtrip", func(t *testing.T) {
 		original := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Roundtrip", Version: "2.0.0"},
 			Tags:    []Tag{{Name: "users", Description: "User operations"}},
 		}

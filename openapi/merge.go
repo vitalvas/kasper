@@ -26,7 +26,7 @@ import (
 // See: https://spec.openapis.org/oas/v3.1.0#openapi-object
 func MergeDocuments(info Info, docs ...*Document) (*Document, error) {
 	result := &Document{
-		OpenAPI: "3.1.0",
+		OpenAPI: OpenAPIVersion,
 		Info:    info,
 	}
 

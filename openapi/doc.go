@@ -109,8 +109,8 @@
 // Register security schemes and apply them at document or operation level:
 //
 //	spec.AddSecurityScheme("bearerAuth", &openapi.SecurityScheme{
-//	    Type:         "http",
-//	    Scheme:       "bearer",
+//	    Type:         openapi.SecurityTypeHTTP,
+//	    Scheme:       openapi.SchemeBearer,
 //	    BearerFormat: "JWT",
 //	})
 //	spec.SetSecurity(openapi.SecurityRequirement{"bearerAuth": {}})
@@ -151,7 +151,7 @@
 // Register reusable objects in components:
 //
 //	spec.AddComponentResponse("NotFound", &openapi.Response{Description: "Not found"})
-//	spec.AddComponentParameter("pageParam", &openapi.Parameter{Name: "page", In: "query"})
+//	spec.AddComponentParameter("pageParam", &openapi.Parameter{Name: "page", In: openapi.ParameterInQuery})
 //	spec.AddComponentExample("sample", &openapi.Example{Summary: "A sample", Value: "test"})
 //	spec.AddComponentRequestBody("CreatePet", &openapi.RequestBody{Description: "Pet to create"})
 //	spec.AddComponentHeader("X-Rate-Limit", &openapi.Header{Schema: &openapi.Schema{Type: openapi.SchemaTypeInteger}})
@@ -165,7 +165,7 @@
 //	spec.SetPathSummary("/users/{id}", "Represents a user")
 //	spec.SetPathDescription("/users/{id}", "Individual user identified by ID.")
 //	spec.AddPathParameter("/users/{id}", &openapi.Parameter{
-//	    Name: "X-Tenant-ID", In: "header",
+//	    Name: "X-Tenant-ID", In: openapi.ParameterInHeader,
 //	    Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 //	})
 //
@@ -211,12 +211,12 @@
 //
 //	// Binary file upload
 //	spec.Op("upload").RequestContent("application/octet-stream", &openapi.Schema{
-//	    Type: openapi.SchemaTypeString, Format: "binary",
+//	    Type: openapi.SchemaTypeString, Format: openapi.FormatBinary,
 //	})
 //
 //	// Image response
 //	spec.Op("avatar").ResponseContent(http.StatusOK, "image/png", &openapi.Schema{
-//	    Type: openapi.SchemaTypeString, Format: "binary",
+//	    Type: openapi.SchemaTypeString, Format: openapi.FormatBinary,
 //	})
 //
 //	// Form data

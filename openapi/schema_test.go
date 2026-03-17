@@ -1294,7 +1294,7 @@ func TestSchemaGeneratorDocument(t *testing.T) {
 		g.Generate(ExampleUser{})
 
 		doc := g.Document(Info{Title: "Test API", Version: "1.0.0"})
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 		assert.Equal(t, "Test API", doc.Info.Title)
 		assert.Equal(t, "1.0.0", doc.Info.Version)
 		require.NotNil(t, doc.Components)
@@ -1305,7 +1305,7 @@ func TestSchemaGeneratorDocument(t *testing.T) {
 	t.Run("no schemas produces nil components", func(t *testing.T) {
 		g := NewSchemaGenerator()
 		doc := g.Document(Info{Title: "Empty", Version: "0.0.1"})
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 		assert.Nil(t, doc.Components)
 	})
 
@@ -1319,7 +1319,7 @@ func TestSchemaGeneratorDocument(t *testing.T) {
 
 		parsed, err := DocumentFromJSON(data)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", parsed.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, parsed.OpenAPI)
 		assert.Equal(t, "JSON Export", parsed.Info.Title)
 		require.NotNil(t, parsed.Components)
 		assert.Contains(t, parsed.Components.Schemas, "SimpleStruct")
@@ -1335,7 +1335,7 @@ func TestSchemaGeneratorDocument(t *testing.T) {
 
 		parsed, err := DocumentFromYAML(data)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", parsed.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, parsed.OpenAPI)
 		assert.Equal(t, "YAML Export", parsed.Info.Title)
 		require.NotNil(t, parsed.Components)
 		assert.Contains(t, parsed.Components.Schemas, "SimpleStruct")

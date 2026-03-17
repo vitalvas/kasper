@@ -167,12 +167,12 @@ func (b *OperationBuilder) ResponseContent(statusCode int, contentType string, b
 // See: https://spec.openapis.org/oas/v3.1.0#responses-object (default)
 func (b *OperationBuilder) DefaultResponse(body any) *OperationBuilder {
 	if body != nil {
-		if b.meta.responseContents["default"] == nil {
-			b.meta.responseContents["default"] = make(map[string]any)
+		if b.meta.responseContents[ResponseDefault] == nil {
+			b.meta.responseContents[ResponseDefault] = make(map[string]any)
 		}
-		b.meta.responseContents["default"][mux.ContentTypeApplicationJSON] = body
+		b.meta.responseContents[ResponseDefault][mux.ContentTypeApplicationJSON] = body
 	} else {
-		b.meta.responseContents["default"] = nil
+		b.meta.responseContents[ResponseDefault] = nil
 	}
 	return b
 }
@@ -183,10 +183,10 @@ func (b *OperationBuilder) DefaultResponse(body any) *OperationBuilder {
 // See: https://spec.openapis.org/oas/v3.1.0#responses-object (default)
 // See: https://spec.openapis.org/oas/v3.1.0#media-type-object
 func (b *OperationBuilder) DefaultResponseContent(contentType string, body any) *OperationBuilder {
-	if b.meta.responseContents["default"] == nil {
-		b.meta.responseContents["default"] = make(map[string]any)
+	if b.meta.responseContents[ResponseDefault] == nil {
+		b.meta.responseContents[ResponseDefault] = make(map[string]any)
 	}
-	b.meta.responseContents["default"][contentType] = body
+	b.meta.responseContents[ResponseDefault][contentType] = body
 	return b
 }
 
@@ -229,10 +229,10 @@ func (b *OperationBuilder) DefaultResponseHeader(name string, h *Header) *Operat
 	if b.meta.responseHeaders == nil {
 		b.meta.responseHeaders = make(map[string]map[string]*Header)
 	}
-	if b.meta.responseHeaders["default"] == nil {
-		b.meta.responseHeaders["default"] = make(map[string]*Header)
+	if b.meta.responseHeaders[ResponseDefault] == nil {
+		b.meta.responseHeaders[ResponseDefault] = make(map[string]*Header)
 	}
-	b.meta.responseHeaders["default"][name] = h
+	b.meta.responseHeaders[ResponseDefault][name] = h
 	return b
 }
 
@@ -244,10 +244,10 @@ func (b *OperationBuilder) DefaultResponseLink(name string, l *Link) *OperationB
 	if b.meta.responseLinks == nil {
 		b.meta.responseLinks = make(map[string]map[string]*Link)
 	}
-	if b.meta.responseLinks["default"] == nil {
-		b.meta.responseLinks["default"] = make(map[string]*Link)
+	if b.meta.responseLinks[ResponseDefault] == nil {
+		b.meta.responseLinks[ResponseDefault] = make(map[string]*Link)
 	}
-	b.meta.responseLinks["default"][name] = l
+	b.meta.responseLinks[ResponseDefault][name] = l
 	return b
 }
 
@@ -272,7 +272,7 @@ func (b *OperationBuilder) DefaultResponseDescription(desc string) *OperationBui
 	if b.meta.responseDescriptions == nil {
 		b.meta.responseDescriptions = make(map[string]string)
 	}
-	b.meta.responseDescriptions["default"] = desc
+	b.meta.responseDescriptions[ResponseDefault] = desc
 	return b
 }
 
@@ -333,7 +333,7 @@ func (b *OperationBuilder) Server(server Server) *OperationBuilder {
 // See: https://spec.openapis.org/oas/v3.1.0#operation-object (parameters)
 func paramKey(p *Parameter) [2]string {
 	name := p.Name
-	if p.In == "header" {
+	if p.In == ParameterInHeader {
 		name = http.CanonicalHeaderKey(name)
 	}
 	return [2]string{name, p.In}
@@ -388,7 +388,7 @@ func resolveSchema(gen *SchemaGenerator, body any) *Schema {
 //
 // See: https://spec.openapis.org/oas/v3.1.0#response-object (description)
 func responseDescription(key string) string {
-	if key == "default" {
+	if key == ResponseDefault {
 		return "Default response"
 	}
 	code, err := strconv.Atoi(key)

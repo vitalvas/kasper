@@ -25,7 +25,7 @@ func TestMergeDocuments(t *testing.T) {
 
 		result, err := MergeDocuments(info, doc1, doc2)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", result.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, result.OpenAPI)
 		assert.Equal(t, info, result.Info)
 		assert.Contains(t, result.Paths, "/users")
 		assert.Contains(t, result.Paths, "/billing")
@@ -114,11 +114,11 @@ func TestMergeDocuments(t *testing.T) {
 			Components: &Components{
 				Schemas:         map[string]*Schema{"S1": {Type: SchemaTypeObject}},
 				Responses:       map[string]*Response{"R1": {Description: "OK"}},
-				Parameters:      map[string]*Parameter{"P1": {Name: "p1", In: "query"}},
+				Parameters:      map[string]*Parameter{"P1": {Name: "p1", In: ParameterInQuery}},
 				Examples:        map[string]*Example{"E1": {Summary: "ex1"}},
 				RequestBodies:   map[string]*RequestBody{"RB1": {Description: "body1"}},
 				Headers:         map[string]*Header{"H1": {Description: "header1"}},
-				SecuritySchemes: map[string]*SecurityScheme{"SS1": {Type: "http", Scheme: "bearer"}},
+				SecuritySchemes: map[string]*SecurityScheme{"SS1": {Type: SecurityTypeHTTP, Scheme: SchemeBearer}},
 				Links:           map[string]*Link{"L1": {OperationID: "op1"}},
 				Callbacks:       map[string]*Callback{"C1": {"url": &PathItem{}}},
 				PathItems:       map[string]*PathItem{"PI1": {Summary: "pi1"}},
@@ -128,11 +128,11 @@ func TestMergeDocuments(t *testing.T) {
 			Components: &Components{
 				Schemas:         map[string]*Schema{"S2": {Type: SchemaTypeString}},
 				Responses:       map[string]*Response{"R2": {Description: "Created"}},
-				Parameters:      map[string]*Parameter{"P2": {Name: "p2", In: "header"}},
+				Parameters:      map[string]*Parameter{"P2": {Name: "p2", In: ParameterInHeader}},
 				Examples:        map[string]*Example{"E2": {Summary: "ex2"}},
 				RequestBodies:   map[string]*RequestBody{"RB2": {Description: "body2"}},
 				Headers:         map[string]*Header{"H2": {Description: "header2"}},
-				SecuritySchemes: map[string]*SecurityScheme{"SS2": {Type: "apiKey", Name: "key", In: "header"}},
+				SecuritySchemes: map[string]*SecurityScheme{"SS2": {Type: SecurityTypeAPIKey, Name: "key", In: SecurityInHeader}},
 				Links:           map[string]*Link{"L2": {OperationID: "op2"}},
 				Callbacks:       map[string]*Callback{"C2": {"url2": &PathItem{}}},
 				PathItems:       map[string]*PathItem{"PI2": {Summary: "pi2"}},
@@ -233,7 +233,7 @@ func TestMergeDocuments(t *testing.T) {
 	t.Run("empty docs", func(t *testing.T) {
 		result, err := MergeDocuments(info)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", result.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, result.OpenAPI)
 		assert.Equal(t, info, result.Info)
 		assert.Nil(t, result.Paths)
 		assert.Nil(t, result.Components)
@@ -379,7 +379,7 @@ func TestMergeDocuments(t *testing.T) {
 
 	t.Run("accepts 3.1.x versions", func(t *testing.T) {
 		doc1 := &Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Paths:   map[string]*PathItem{"/a": {Get: &Operation{Summary: "A"}}},
 		}
 		doc2 := &Document{
@@ -399,7 +399,7 @@ func TestMergeDocuments(t *testing.T) {
 
 		result, err := MergeDocuments(info, doc1)
 		require.NoError(t, err)
-		assert.Equal(t, "3.1.0", result.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, result.OpenAPI)
 	})
 
 	t.Run("jsonSchemaDialect preserved when identical", func(t *testing.T) {

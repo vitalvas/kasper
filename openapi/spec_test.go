@@ -161,7 +161,7 @@ func TestParsePath(t *testing.T) {
 
 			for i, expected := range tt.params {
 				assert.Equal(t, expected.name, params[i].Name)
-				assert.Equal(t, "path", params[i].In)
+				assert.Equal(t, ParameterInPath, params[i].In)
 				assert.True(t, params[i].Required)
 				assert.Equal(t, expected.schemaType, params[i].Schema.Type)
 				if expected.format != "" {
@@ -207,7 +207,7 @@ func TestBuildVariantB(t *testing.T) {
 
 		doc := spec.Build(r)
 
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 		assert.Equal(t, "User API", doc.Info.Title)
 
 		// Check paths.
@@ -404,7 +404,7 @@ func TestBuildDocumentJSON(t *testing.T) {
 
 		var parsed map[string]any
 		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "3.1.0", parsed["openapi"])
+		assert.Equal(t, OpenAPIVersion, parsed["openapi"])
 
 		paths := parsed["paths"].(map[string]any)
 		assert.Contains(t, paths, "/users/{id}")
@@ -440,7 +440,7 @@ func TestSpecBuilderMethods(t *testing.T) {
 
 	t.Run("AddSecurityScheme", func(t *testing.T) {
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: "http", Scheme: "bearer"})
+			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: SecurityTypeHTTP, Scheme: SchemeBearer})
 		require.NotNil(t, spec.securitySchemes)
 		assert.Contains(t, spec.securitySchemes, "bearerAuth")
 	})
@@ -454,7 +454,7 @@ func TestSpecBuilderMethods(t *testing.T) {
 
 	t.Run("AddComponentParameter", func(t *testing.T) {
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddComponentParameter("pageParam", &Parameter{Name: "page", In: "query"})
+			AddComponentParameter("pageParam", &Parameter{Name: "page", In: ParameterInQuery})
 		require.NotNil(t, spec.compParameters)
 		assert.Contains(t, spec.compParameters, "pageParam")
 	})
@@ -507,9 +507,9 @@ func TestSpecBuilderMethods(t *testing.T) {
 			SetExternalDocs("https://docs.example.com", "Docs").
 			SetSecurity(SecurityRequirement{"bearerAuth": {}}).
 			AddTag(Tag{Name: "users"}).
-			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: "http", Scheme: "bearer"}).
+			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: SecurityTypeHTTP, Scheme: SchemeBearer}).
 			AddComponentResponse("NotFound", &Response{Description: "Not found"}).
-			AddComponentParameter("page", &Parameter{Name: "page", In: "query"}).
+			AddComponentParameter("page", &Parameter{Name: "page", In: ParameterInQuery}).
 			AddComponentExample("sample", &Example{Value: "test"}).
 			AddComponentRequestBody("Create", &RequestBody{Description: "Create"}).
 			AddComponentHeader("X-Rate", &Header{}).
@@ -601,7 +601,7 @@ func TestBuildSecurity(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			SetSecurity(SecurityRequirement{"bearerAuth": {}}).
-			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: "http", Scheme: "bearer"})
+			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: SecurityTypeHTTP, Scheme: SchemeBearer})
 
 		spec.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
 			Summary("List users").
@@ -630,8 +630,8 @@ func TestBuildSecuritySchemes(t *testing.T) {
 	t.Run("in doc.Components.SecuritySchemes", func(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "JWT"}).
-			AddSecurityScheme("apiKey", &SecurityScheme{Type: "apiKey", Name: "X-API-Key", In: "header"})
+			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: SecurityTypeHTTP, Scheme: SchemeBearer, BearerFormat: "JWT"}).
+			AddSecurityScheme("apiKey", &SecurityScheme{Type: SecurityTypeAPIKey, Name: "X-API-Key", In: SecurityInHeader})
 
 		spec.Route(r.HandleFunc("/health", dummyHandler).Methods(http.MethodGet)).
 			Summary("Health").
@@ -708,7 +708,7 @@ func TestBuildComponents(t *testing.T) {
 		{
 			name: "parameters in components",
 			setup: func(s *Spec) {
-				s.AddComponentParameter("pageParam", &Parameter{Name: "page", In: "query", Schema: &Schema{Type: SchemaTypeInteger}})
+				s.AddComponentParameter("pageParam", &Parameter{Name: "page", In: ParameterInQuery, Schema: &Schema{Type: SchemaTypeInteger}})
 			},
 			checkFunc: func(t *testing.T, c *Components) {
 				assert.Contains(t, c.Parameters, "pageParam")
@@ -794,7 +794,7 @@ func TestBuildComponents(t *testing.T) {
 		}
 
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: "http", Scheme: "bearer"})
+			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: SecurityTypeHTTP, Scheme: SchemeBearer})
 
 		spec.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).
 			Summary("List items").
@@ -1004,7 +1004,7 @@ func TestBuildPathParameters(t *testing.T) {
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/users", &Parameter{
 				Name:   "X-Tenant-ID",
-				In:     "header",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
@@ -1018,18 +1018,18 @@ func TestBuildPathParameters(t *testing.T) {
 		require.Contains(t, doc.Paths, "/users")
 		require.Len(t, doc.Paths["/users"].Parameters, 1)
 		assert.Equal(t, "X-Tenant-ID", doc.Paths["/users"].Parameters[0].Name)
-		assert.Equal(t, "header", doc.Paths["/users"].Parameters[0].In)
+		assert.Equal(t, ParameterInHeader, doc.Paths["/users"].Parameters[0].In)
 	})
 
 	t.Run("multiple path parameters", func(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/items", &Parameter{
-				Name: "X-Tenant-ID", In: "header",
+				Name: "X-Tenant-ID", In: ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			}).
 			AddPathParameter("/items", &Parameter{
-				Name: "Accept-Language", In: "header",
+				Name: "Accept-Language", In: ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
@@ -1047,7 +1047,7 @@ func TestBuildPathParameters(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/users/{id}", &Parameter{
-				Name: "X-Request-ID", In: "header",
+				Name: "X-Request-ID", In: ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
@@ -1064,7 +1064,7 @@ func TestBuildPathParameters(t *testing.T) {
 	t.Run("unmatched path parameter ignored", func(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddPathParameter("/nonexistent", &Parameter{Name: "x", In: "header"})
+			AddPathParameter("/nonexistent", &Parameter{Name: "x", In: ParameterInHeader})
 
 		spec.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
 			Summary("List users")
@@ -1082,7 +1082,7 @@ func TestBuildPathParameters(t *testing.T) {
 			SetPathDescription("/users/{id}", "A single user resource.").
 			AddPathServer("/users/{id}", Server{URL: "https://users.example.com"}).
 			AddPathParameter("/users/{id}", &Parameter{
-				Name: "X-Trace-ID", In: "header",
+				Name: "X-Trace-ID", In: ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
@@ -1531,7 +1531,7 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 		require.Len(t, doc.Paths["/tenant"].Get.Parameters, 1)
 		param := doc.Paths["/tenant"].Get.Parameters[0]
 		assert.Equal(t, "X-Tenant-Id", param.Name)
-		assert.Equal(t, "header", param.In)
+		assert.Equal(t, ParameterInHeader, param.In)
 		assert.True(t, param.Required)
 		assert.Equal(t, SchemaTypeString, param.Schema.Type)
 		assert.Nil(t, param.Schema.Enum)
@@ -1553,7 +1553,7 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 		require.Len(t, doc.Paths["/json-only"].Get.Parameters, 1)
 		param := doc.Paths["/json-only"].Get.Parameters[0]
 		assert.Equal(t, "Content-Type", param.Name)
-		assert.Equal(t, "header", param.In)
+		assert.Equal(t, ParameterInHeader, param.In)
 		assert.True(t, param.Required)
 		require.Len(t, param.Schema.Enum, 1)
 		assert.Equal(t, "application/json", param.Schema.Enum[0])
@@ -1594,7 +1594,7 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 					Summary("Override test").
 					Parameter(&Parameter{
 						Name:        tt.paramName,
-						In:          "header",
+						In:          ParameterInHeader,
 						Description: tt.paramDesc,
 						Required:    false,
 						Schema:      &Schema{Type: SchemaTypeString},
@@ -1631,8 +1631,8 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 
 		// Path param should be first (from parsePath), header param appended.
 		assert.Equal(t, "id", params[0].Name)
-		assert.Equal(t, "path", params[0].In)
+		assert.Equal(t, ParameterInPath, params[0].In)
 		assert.Equal(t, "X-Tenant-Id", params[1].Name)
-		assert.Equal(t, "header", params[1].In)
+		assert.Equal(t, ParameterInHeader, params[1].In)
 	})
 }

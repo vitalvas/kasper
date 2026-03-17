@@ -103,9 +103,9 @@ func TestOperationBuilder(t *testing.T) {
 		pathParams := []*Parameter{
 			{
 				Name:     "id",
-				In:       "path",
+				In:       ParameterInPath,
 				Required: true,
-				Schema:   &Schema{Type: SchemaTypeString, Format: "uuid"},
+				Schema:   &Schema{Type: SchemaTypeString, Format: FormatUUID},
 			},
 		}
 
@@ -114,7 +114,7 @@ func TestOperationBuilder(t *testing.T) {
 
 		require.Len(t, op.Parameters, 1)
 		assert.Equal(t, "id", op.Parameters[0].Name)
-		assert.Equal(t, "path", op.Parameters[0].In)
+		assert.Equal(t, ParameterInPath, op.Parameters[0].In)
 		assert.True(t, op.Parameters[0].Required)
 	})
 
@@ -122,12 +122,12 @@ func TestOperationBuilder(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
 				Name:   "X-Request-ID",
-				In:     "header",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		pathParams := []*Parameter{
-			{Name: "id", In: "path", Required: true},
+			{Name: "id", In: ParameterInPath, Required: true},
 		}
 
 		gen := NewSchemaGenerator()
@@ -142,14 +142,14 @@ func TestOperationBuilder(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
 				Name:        "id",
-				In:          "path",
+				In:          ParameterInPath,
 				Required:    true,
 				Description: "User UUID",
-				Schema:      &Schema{Type: SchemaTypeString, Format: "uuid"},
+				Schema:      &Schema{Type: SchemaTypeString, Format: FormatUUID},
 			})
 
 		pathParams := []*Parameter{
-			{Name: "id", In: "path", Required: true},
+			{Name: "id", In: ParameterInPath, Required: true},
 		}
 
 		gen := NewSchemaGenerator()
@@ -165,12 +165,12 @@ func TestOperationBuilder(t *testing.T) {
 	t.Run("non-overlapping custom params are appended", func(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
-				Name: "page", In: "query",
+				Name: "page", In: ParameterInQuery,
 				Schema: &Schema{Type: SchemaTypeInteger},
 			})
 
 		pathParams := []*Parameter{
-			{Name: "id", In: "path", Required: true},
+			{Name: "id", In: ParameterInPath, Required: true},
 		}
 
 		gen := NewSchemaGenerator()
@@ -184,12 +184,12 @@ func TestOperationBuilder(t *testing.T) {
 	t.Run("same name different in location are not deduplicated", func(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
-				Name: "id", In: "header",
+				Name: "id", In: ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
 		pathParams := []*Parameter{
-			{Name: "id", In: "path", Required: true},
+			{Name: "id", In: ParameterInPath, Required: true},
 		}
 
 		gen := NewSchemaGenerator()
@@ -197,8 +197,8 @@ func TestOperationBuilder(t *testing.T) {
 
 		// Both should exist: id in path and id in header.
 		require.Len(t, op.Parameters, 2)
-		assert.Equal(t, "path", op.Parameters[0].In)
-		assert.Equal(t, "header", op.Parameters[1].In)
+		assert.Equal(t, ParameterInPath, op.Parameters[0].In)
+		assert.Equal(t, ParameterInHeader, op.Parameters[1].In)
 	})
 
 	t.Run("no parameters when none provided", func(t *testing.T) {
@@ -381,7 +381,7 @@ func TestRequestContent(t *testing.T) {
 		b := newOperationBuilder().
 			RequestContent("application/octet-stream", &Schema{
 				Type:   SchemaTypeString,
-				Format: "binary",
+				Format: FormatBinary,
 			})
 
 		gen := NewSchemaGenerator()
@@ -455,7 +455,7 @@ func TestResponseContent(t *testing.T) {
 		b := newOperationBuilder().
 			ResponseContent(200, "image/png", &Schema{
 				Type:   SchemaTypeString,
-				Format: "binary",
+				Format: FormatBinary,
 			})
 
 		gen := NewSchemaGenerator()
@@ -486,7 +486,7 @@ func TestResponseContent(t *testing.T) {
 		b := newOperationBuilder().
 			ResponseContent(200, "image/*", &Schema{
 				Type:   SchemaTypeString,
-				Format: "binary",
+				Format: FormatBinary,
 			})
 
 		gen := NewSchemaGenerator()
@@ -604,12 +604,12 @@ func TestDefaultResponse(t *testing.T) {
 			op := tt.build().buildOperation(gen, "op", nil)
 
 			require.Len(t, op.Responses, tt.totalResponses)
-			require.Contains(t, op.Responses, "default")
+			require.Contains(t, op.Responses, ResponseDefault)
 
 			if tt.hasContent {
-				require.Contains(t, op.Responses["default"].Content, tt.contentType)
+				require.Contains(t, op.Responses[ResponseDefault].Content, tt.contentType)
 			} else {
-				assert.Nil(t, op.Responses["default"].Content)
+				assert.Nil(t, op.Responses[ResponseDefault].Content)
 			}
 		})
 	}
@@ -807,7 +807,7 @@ func TestResponseDescription(t *testing.T) {
 	}{
 		{"200 OK", "200", "OK"},
 		{"404 Not Found", "404", "Not Found"},
-		{"default key", "default", "Default response"},
+		{"default key", ResponseDefault, "Default response"},
 		{"unknown code", "999", "999"},
 	}
 
@@ -876,7 +876,7 @@ func TestCustomResponseDescription(t *testing.T) {
 					DefaultResponse(nil).
 					DefaultResponseDescription("Unexpected error")
 			},
-			key:          "default",
+			key:          ResponseDefault,
 			expectedDesc: "Unexpected error",
 		},
 	}
@@ -943,10 +943,10 @@ func TestDefaultResponseHeader(t *testing.T) {
 			gen := NewSchemaGenerator()
 			op := tt.build().buildOperation(gen, "op", nil)
 
-			require.Contains(t, op.Responses, "default")
-			require.Len(t, op.Responses["default"].Headers, len(tt.expectedHeaders))
+			require.Contains(t, op.Responses, ResponseDefault)
+			require.Len(t, op.Responses[ResponseDefault].Headers, len(tt.expectedHeaders))
 			for _, h := range tt.expectedHeaders {
-				assert.Contains(t, op.Responses["default"].Headers, h)
+				assert.Contains(t, op.Responses[ResponseDefault].Headers, h)
 			}
 		})
 	}
@@ -964,9 +964,9 @@ func TestDefaultResponseLink(t *testing.T) {
 		gen := NewSchemaGenerator()
 		op := b.buildOperation(gen, "op", nil)
 
-		require.Contains(t, op.Responses, "default")
-		require.Contains(t, op.Responses["default"].Links, "GetError")
-		assert.Equal(t, "getErrorDetails", op.Responses["default"].Links["GetError"].OperationID)
+		require.Contains(t, op.Responses, ResponseDefault)
+		require.Contains(t, op.Responses[ResponseDefault].Links, "GetError")
+		assert.Equal(t, "getErrorDetails", op.Responses[ResponseDefault].Links["GetError"].OperationID)
 	})
 
 	t.Run("headers and links on default response", func(t *testing.T) {
@@ -980,8 +980,8 @@ func TestDefaultResponseLink(t *testing.T) {
 		gen := NewSchemaGenerator()
 		op := b.buildOperation(gen, "op", nil)
 
-		require.Contains(t, op.Responses["default"].Headers, "X-Error-Code")
-		require.Contains(t, op.Responses["default"].Links, "GetError")
+		require.Contains(t, op.Responses[ResponseDefault].Headers, "X-Error-Code")
+		require.Contains(t, op.Responses[ResponseDefault].Links, "GetError")
 	})
 }
 
@@ -993,7 +993,7 @@ func TestResolveSchema(t *testing.T) {
 
 	t.Run("explicit schema passed through", func(t *testing.T) {
 		gen := NewSchemaGenerator()
-		s := &Schema{Type: SchemaTypeString, Format: "binary"}
+		s := &Schema{Type: SchemaTypeString, Format: FormatBinary}
 		assert.Same(t, s, resolveSchema(gen, s))
 	})
 

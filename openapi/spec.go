@@ -309,7 +309,7 @@ func (s *Spec) Route(route *mux.Route) *OperationBuilder {
 func (s *Spec) Build(r *mux.Router) *Document {
 	gen := NewSchemaGenerator()
 	doc := &Document{
-		OpenAPI:      "3.1.0",
+		OpenAPI:      OpenAPIVersion,
 		Info:         s.info,
 		Servers:      s.servers,
 		Paths:        make(map[string]*PathItem),
@@ -352,7 +352,7 @@ func (s *Spec) Build(r *mux.Router) *Document {
 			for name, value := range headers {
 				p := &Parameter{
 					Name:     name,
-					In:       "header",
+					In:       ParameterInHeader,
 					Required: true,
 					Schema:   &Schema{Type: SchemaTypeString},
 				}
@@ -602,7 +602,7 @@ func parsePath(tpl string) (string, []*Parameter) {
 
 		param := &Parameter{
 			Name:     varName,
-			In:       "path",
+			In:       ParameterInPath,
 			Required: true,
 			Schema:   &Schema{Type: SchemaTypeString},
 		}

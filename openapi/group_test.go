@@ -128,14 +128,14 @@ func TestRouteGroup(t *testing.T) {
 
 		headerParam := &Parameter{
 			Name:   "X-Tenant-ID",
-			In:     "header",
+			In:     ParameterInHeader,
 			Schema: &Schema{Type: SchemaTypeString},
 		}
 		g := spec.Group().Parameter(headerParam)
 
 		queryParam := &Parameter{
 			Name:   "page",
-			In:     "query",
+			In:     ParameterInQuery,
 			Schema: &Schema{Type: SchemaTypeInteger},
 		}
 		g.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
@@ -237,7 +237,7 @@ func TestRouteGroup(t *testing.T) {
 		}
 
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
-			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: "http", Scheme: "bearer"}).
+			AddSecurityScheme("bearerAuth", &SecurityScheme{Type: SecurityTypeHTTP, Scheme: SchemeBearer}).
 			SetSecurity(SecurityRequirement{"bearerAuth": {}})
 
 		users := spec.Group().Tags("users")
@@ -258,7 +258,7 @@ func TestRouteGroup(t *testing.T) {
 
 		doc := spec.Build(r)
 
-		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, OpenAPIVersion, doc.OpenAPI)
 
 		require.Contains(t, doc.Paths, "/users")
 		require.Contains(t, doc.Paths, "/users/{id}")
@@ -383,7 +383,7 @@ func TestRouteGroup(t *testing.T) {
 			Security(SecurityRequirement{"basic": {}}).
 			Deprecated().
 			Server(Server{URL: "https://api.example.com", Description: "Main"}).
-			Parameter(&Parameter{Name: "X-Tenant", In: "header"}).
+			Parameter(&Parameter{Name: "X-Tenant", In: ParameterInHeader}).
 			ExternalDocs("https://docs.example.com", "Docs")
 
 		assert.Equal(t, []string{"users"}, g.defaults.tags)
@@ -581,7 +581,7 @@ func TestRouteGroup(t *testing.T) {
 			DefaultResponse(ErrResp{}).
 			DefaultResponseDescription("Unexpected error").
 			DefaultResponseHeader("X-Request-ID", &Header{
-				Schema: &Schema{Type: SchemaTypeString, Format: "uuid"},
+				Schema: &Schema{Type: SchemaTypeString, Format: FormatUUID},
 			})
 
 		g.Route(r.HandleFunc("/items", dummyHandler).Methods(http.MethodGet)).
@@ -592,10 +592,10 @@ func TestRouteGroup(t *testing.T) {
 
 		op := doc.Paths["/items"].Get
 		require.NotNil(t, op)
-		require.Contains(t, op.Responses, "default")
-		assert.Equal(t, "Unexpected error", op.Responses["default"].Description)
-		assert.Contains(t, op.Responses["default"].Content, "application/json")
-		assert.Contains(t, op.Responses["default"].Headers, "X-Request-ID")
+		require.Contains(t, op.Responses, ResponseDefault)
+		assert.Equal(t, "Unexpected error", op.Responses[ResponseDefault].Description)
+		assert.Contains(t, op.Responses[ResponseDefault].Content, "application/json")
+		assert.Contains(t, op.Responses[ResponseDefault].Headers, "X-Request-ID")
 	})
 
 	t.Run("operation response nil overrides group response", func(t *testing.T) {
@@ -641,8 +641,8 @@ func TestRouteGroup(t *testing.T) {
 
 		op := doc.Paths["/items"].Get
 		require.NotNil(t, op)
-		require.Contains(t, op.Responses, "default")
-		assert.Nil(t, op.Responses["default"].Content)
+		require.Contains(t, op.Responses, ResponseDefault)
+		assert.Nil(t, op.Responses[ResponseDefault].Content)
 	})
 
 	t.Run("shared responses do not leak between groups", func(t *testing.T) {

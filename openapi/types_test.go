@@ -66,7 +66,7 @@ func TestSchemaType(t *testing.T) {
 func TestDocumentJSON(t *testing.T) {
 	t.Run("minimal document", func(t *testing.T) {
 		doc := Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info: Info{
 				Title:   "Test API",
 				Version: "1.0.0",
@@ -77,7 +77,7 @@ func TestDocumentJSON(t *testing.T) {
 
 		var parsed map[string]any
 		require.NoError(t, json.Unmarshal(data, &parsed))
-		assert.Equal(t, "3.1.0", parsed["openapi"])
+		assert.Equal(t, OpenAPIVersion, parsed["openapi"])
 		assert.Equal(t, "Test API", parsed["info"].(map[string]any)["title"])
 		assert.Equal(t, "1.0.0", parsed["info"].(map[string]any)["version"])
 	})
@@ -85,7 +85,7 @@ func TestDocumentJSON(t *testing.T) {
 	t.Run("full document roundtrip", func(t *testing.T) {
 		minLen := 1
 		doc := Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info: Info{
 				Title:       "Pet Store",
 				Description: "A sample pet store API",
@@ -247,7 +247,7 @@ func TestOperationJSON(t *testing.T) {
 			Parameters: []*Parameter{
 				{
 					Name:     "X-Request-ID",
-					In:       "header",
+					In:       ParameterInHeader,
 					Required: false,
 					Schema:   &Schema{Type: SchemaTypeString},
 				},
@@ -317,7 +317,7 @@ func TestDocumentNewFields(t *testing.T) {
 		{
 			name: "jsonSchemaDialect",
 			doc: Document{
-				OpenAPI:           "3.1.0",
+				OpenAPI:           OpenAPIVersion,
 				Info:              Info{Title: "Test", Version: "1.0.0"},
 				JSONSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
 			},
@@ -328,7 +328,7 @@ func TestDocumentNewFields(t *testing.T) {
 		{
 			name: "webhooks",
 			doc: Document{
-				OpenAPI: "3.1.0",
+				OpenAPI: OpenAPIVersion,
 				Info:    Info{Title: "Test", Version: "1.0.0"},
 				Webhooks: map[string]*PathItem{
 					"newPet": {Post: &Operation{Summary: "New pet notification"}},
@@ -342,7 +342,7 @@ func TestDocumentNewFields(t *testing.T) {
 		{
 			name: "externalDocs",
 			doc: Document{
-				OpenAPI:      "3.1.0",
+				OpenAPI:      OpenAPIVersion,
 				Info:         Info{Title: "Test", Version: "1.0.0"},
 				ExternalDocs: &ExternalDocs{URL: "https://docs.example.com", Description: "Full docs"},
 			},
@@ -517,7 +517,7 @@ func TestParameterNewFields(t *testing.T) {
 		explode := true
 		p := Parameter{
 			Name:    "ids",
-			In:      "query",
+			In:      ParameterInQuery,
 			Style:   "form",
 			Explode: &explode,
 			Schema:  &Schema{Type: SchemaTypeArray, Items: &Schema{Type: SchemaTypeString}},
@@ -534,7 +534,7 @@ func TestParameterNewFields(t *testing.T) {
 	t.Run("allowEmptyValue and allowReserved", func(t *testing.T) {
 		p := Parameter{
 			Name:            "q",
-			In:              "query",
+			In:              ParameterInQuery,
 			AllowEmptyValue: true,
 			AllowReserved:   true,
 		}
@@ -550,7 +550,7 @@ func TestParameterNewFields(t *testing.T) {
 	t.Run("examples on parameter", func(t *testing.T) {
 		p := Parameter{
 			Name: "id",
-			In:   "path",
+			In:   ParameterInPath,
 			Examples: map[string]*Example{
 				"example1": {Summary: "First example", Value: "abc"},
 			},
@@ -566,7 +566,7 @@ func TestParameterNewFields(t *testing.T) {
 	t.Run("content on parameter", func(t *testing.T) {
 		p := Parameter{
 			Name: "filter",
-			In:   "query",
+			In:   ParameterInQuery,
 			Content: map[string]*MediaType{
 				"application/json": {Schema: &Schema{Type: SchemaTypeObject}},
 			},
@@ -702,13 +702,13 @@ func TestComponentsNewFields(t *testing.T) {
 			Schemas:   map[string]*Schema{"Pet": {Type: SchemaTypeObject}},
 			Responses: map[string]*Response{"NotFound": {Description: "Not found"}},
 			Parameters: map[string]*Parameter{
-				"pageParam": {Name: "page", In: "query", Schema: &Schema{Type: SchemaTypeInteger}},
+				"pageParam": {Name: "page", In: ParameterInQuery, Schema: &Schema{Type: SchemaTypeInteger}},
 			},
 			Examples:      map[string]*Example{"ex1": {Summary: "Example", Value: "test"}},
 			RequestBodies: map[string]*RequestBody{"CreatePet": {Description: "Pet to create"}},
 			Headers:       map[string]*Header{"X-Rate-Limit": {Schema: &Schema{Type: SchemaTypeInteger}}},
 			SecuritySchemes: map[string]*SecurityScheme{
-				"bearerAuth": {Type: "http", Scheme: "bearer", BearerFormat: "JWT"},
+				"bearerAuth": {Type: SecurityTypeHTTP, Scheme: SchemeBearer, BearerFormat: "JWT"},
 			},
 			Links:     map[string]*Link{"GetUser": {OperationID: "getUser"}},
 			Callbacks: map[string]*Callback{"onEvent": &cb},
@@ -878,34 +878,34 @@ func TestSecuritySchemeJSON(t *testing.T) {
 		{
 			name: "http bearer",
 			scheme: SecurityScheme{
-				Type:         "http",
-				Scheme:       "bearer",
+				Type:         SecurityTypeHTTP,
+				Scheme:       SchemeBearer,
 				BearerFormat: "JWT",
 				Description:  "Bearer token auth",
 			},
 			checkFunc: func(t *testing.T, parsed map[string]any) {
-				assert.Equal(t, "http", parsed["type"])
-				assert.Equal(t, "bearer", parsed["scheme"])
+				assert.Equal(t, SecurityTypeHTTP, parsed["type"])
+				assert.Equal(t, SchemeBearer, parsed["scheme"])
 				assert.Equal(t, "JWT", parsed["bearerFormat"])
 			},
 		},
 		{
 			name: "apiKey",
 			scheme: SecurityScheme{
-				Type: "apiKey",
+				Type: SecurityTypeAPIKey,
 				Name: "X-API-Key",
-				In:   "header",
+				In:   SecurityInHeader,
 			},
 			checkFunc: func(t *testing.T, parsed map[string]any) {
-				assert.Equal(t, "apiKey", parsed["type"])
+				assert.Equal(t, SecurityTypeAPIKey, parsed["type"])
 				assert.Equal(t, "X-API-Key", parsed["name"])
-				assert.Equal(t, "header", parsed["in"])
+				assert.Equal(t, SecurityInHeader, parsed["in"])
 			},
 		},
 		{
 			name: "oauth2",
 			scheme: SecurityScheme{
-				Type: "oauth2",
+				Type: SecurityTypeOAuth2,
 				Flows: &OAuthFlows{
 					AuthorizationCode: &OAuthFlow{
 						AuthorizationURL: "https://example.com/oauth/authorize",
@@ -915,7 +915,7 @@ func TestSecuritySchemeJSON(t *testing.T) {
 				},
 			},
 			checkFunc: func(t *testing.T, parsed map[string]any) {
-				assert.Equal(t, "oauth2", parsed["type"])
+				assert.Equal(t, SecurityTypeOAuth2, parsed["type"])
 				flows := parsed["flows"].(map[string]any)
 				assert.Contains(t, flows, "authorizationCode")
 			},
@@ -923,11 +923,11 @@ func TestSecuritySchemeJSON(t *testing.T) {
 		{
 			name: "openIdConnect",
 			scheme: SecurityScheme{
-				Type:             "openIdConnect",
+				Type:             SecurityTypeOpenIDConnect,
 				OpenIDConnectURL: "https://example.com/.well-known/openid-configuration",
 			},
 			checkFunc: func(t *testing.T, parsed map[string]any) {
-				assert.Equal(t, "openIdConnect", parsed["type"])
+				assert.Equal(t, SecurityTypeOpenIDConnect, parsed["type"])
 				assert.Equal(t, "https://example.com/.well-known/openid-configuration", parsed["openIdConnectUrl"])
 			},
 		},
@@ -1339,7 +1339,7 @@ func TestSchemaTypeYAML(t *testing.T) {
 
 	t.Run("empty type omitted from YAML schema", func(t *testing.T) {
 		s := Schema{
-			Format: "uuid",
+			Format: FormatUUID,
 		}
 		data, err := yaml.Marshal(s)
 		require.NoError(t, err)
@@ -1351,7 +1351,7 @@ func TestSchemaTypeYAML(t *testing.T) {
 
 	t.Run("full document YAML serialization preserves schema types", func(t *testing.T) {
 		doc := Document{
-			OpenAPI: "3.1.0",
+			OpenAPI: OpenAPIVersion,
 			Info:    Info{Title: "Test", Version: "1.0.0"},
 			Components: &Components{
 				Schemas: map[string]*Schema{

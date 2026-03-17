@@ -125,12 +125,12 @@ spec.Op("get").
 
 // Binary file upload
 spec.Op("upload").RequestContent("application/octet-stream", &openapi.Schema{
-    Type: openapi.SchemaTypeString, Format: "binary",
+    Type: openapi.SchemaTypeString, Format: openapi.FormatBinary,
 })
 
 // Image response
 spec.Op("avatar").ResponseContent(http.StatusOK, "image/png", &openapi.Schema{
-    Type: openapi.SchemaTypeString, Format: "binary",
+    Type: openapi.SchemaTypeString, Format: openapi.FormatBinary,
 })
 
 // Form data
@@ -242,11 +242,11 @@ Add custom parameters at the operation level:
 ```go
 spec.Op("listUsers").
     Parameter(&openapi.Parameter{
-        Name: "page", In: "query",
+        Name: "page", In: openapi.ParameterInQuery,
         Schema: &openapi.Schema{Type: openapi.SchemaTypeInteger},
     }).
     Parameter(&openapi.Parameter{
-        Name: "X-Request-ID", In: "header",
+        Name: "X-Request-ID", In: openapi.ParameterInHeader,
         Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
     })
 ```
@@ -257,7 +257,7 @@ Parameters shared across all operations under a path:
 
 ```go
 spec.AddPathParameter("/users/{id}", &openapi.Parameter{
-    Name: "X-Tenant-ID", In: "header",
+    Name: "X-Tenant-ID", In: openapi.ParameterInHeader,
     Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 })
 ```
@@ -268,8 +268,8 @@ Register security schemes and apply them at the document or operation level:
 
 ```go
 spec.AddSecurityScheme("bearerAuth", &openapi.SecurityScheme{
-    Type:         "http",
-    Scheme:       "bearer",
+    Type:         openapi.SecurityTypeHTTP,
+    Scheme:       openapi.SchemeBearer,
     BearerFormat: "JWT",
 })
 spec.SetSecurity(openapi.SecurityRequirement{"bearerAuth": {}})
@@ -348,7 +348,7 @@ Set summary, description, and shared parameters on a path. These apply to all op
 spec.SetPathSummary("/users/{id}", "Represents a user")
 spec.SetPathDescription("/users/{id}", "Individual user identified by ID.")
 spec.AddPathParameter("/users/{id}", &openapi.Parameter{
-    Name: "X-Tenant-ID", In: "header",
+    Name: "X-Tenant-ID", In: openapi.ParameterInHeader,
     Schema: &openapi.Schema{Type: openapi.SchemaTypeString},
 })
 ```
@@ -359,7 +359,7 @@ Register reusable objects in `components`:
 
 ```go
 spec.AddComponentResponse("NotFound", &openapi.Response{Description: "Not found"})
-spec.AddComponentParameter("pageParam", &openapi.Parameter{Name: "page", In: "query"})
+spec.AddComponentParameter("pageParam", &openapi.Parameter{Name: "page", In: openapi.ParameterInQuery})
 spec.AddComponentExample("sample", &openapi.Example{Summary: "A sample", Value: "test"})
 spec.AddComponentRequestBody("CreatePet", &openapi.RequestBody{Description: "Pet to create"})
 spec.AddComponentHeader("X-Rate-Limit", &openapi.Header{
