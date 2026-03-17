@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/vitalvas/kasper/compare/v0.8.0...v0.8.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* **muxhandlers:** replace ProfilerHandler with RegisterProfiler for custom mount prefix support ([311413e](https://github.com/vitalvas/kasper/commit/311413ef06c663e0c8e0f8ddbffe7adf6f9f3cae))
+
 ## [0.8.0](https://github.com/vitalvas/kasper/compare/v0.7.0...v0.8.0) (2026-03-17)
 
 
