@@ -57,7 +57,6 @@ func putFlateReader(fr io.ReadCloser) {
 	flateReaderPool.Put(fr)
 }
 
-
 type compressedReader struct {
 	fr io.ReadCloser
 	r  io.Reader

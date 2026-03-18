@@ -13,6 +13,10 @@ import (
 // ErrStaticFilesNoFS is returned when StaticFilesConfig.FS is nil.
 var ErrStaticFilesNoFS = errors.New("static files: file system must not be nil")
 
+// ErrStaticFilesAliasTargetNotFound is returned when an alias target file
+// does not exist in the file system.
+var ErrStaticFilesAliasTargetNotFound = errors.New("static files: alias target file not found")
+
 // ErrStaticFilesNoIndexHTML is returned when SPAFallback is enabled
 // but the file system does not contain an index.html at the root.
 var ErrStaticFilesNoIndexHTML = errors.New("static files: index.html is required when SPA fallback is enabled")
@@ -37,6 +41,24 @@ type StaticFilesConfig struct {
 	// embed.FS. The handler sets the ETag response header and handles
 	// If-None-Match conditional requests (304 Not Modified).
 	EnableETag bool
+
+	// PathPrefix is the URL path prefix under which the handler is
+	// mounted. The handler strips this prefix before looking up files
+	// in the FS, replacing the need for http.StripPrefix.
+	PathPrefix string
+
+	// Aliases maps URL paths to file paths in the FS. Keys are
+	// relative to PathPrefix (the prefix is stripped before matching).
+	// Alias targets are validated at init time. ETag support applies
+	// to aliased paths.
+	//
+	// Example:
+	//
+	//	Aliases: map[string]string{
+	//	    "/policy-builder/":    "policy-builder.html",
+	//	    "/policy-playground/": "policy-playground.html",
+	//	}
+	Aliases map[string]string
 }
 
 // noDirListingFS wraps an fs.FS to prevent directory listing.
@@ -105,6 +127,13 @@ func StaticFilesHandler(cfg StaticFilesConfig) (http.Handler, error) {
 		}
 	}
 
+	// Validate alias targets exist in the FS.
+	for _, target := range cfg.Aliases {
+		if _, err := fs.Stat(cfg.FS, target); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrStaticFilesAliasTargetNotFound, target)
+		}
+	}
+
 	fileSystem := cfg.FS
 
 	if !cfg.EnableDirectoryListing {
@@ -123,10 +152,43 @@ func StaticFilesHandler(cfg StaticFilesConfig) (http.Handler, error) {
 			return nil, err
 		}
 
+		// Map alias paths to the target file's ETag.
+		for alias, target := range cfg.Aliases {
+			if etag, ok := etags[fmt.Sprintf("/%s", target)]; ok {
+				etags[alias] = etag
+			}
+		}
+
 		handler = staticETagHandler(handler, etags)
 	}
 
+	if len(cfg.Aliases) > 0 {
+		handler = staticAliasHandler(handler, cfg.Aliases)
+	}
+
+	if cfg.PathPrefix != "" {
+		handler = http.StripPrefix(cfg.PathPrefix, handler)
+	}
+
 	return handler, nil
+}
+
+// staticAliasHandler wraps a file server handler to rewrite request
+// paths that match an alias to the target file path.
+func staticAliasHandler(next http.Handler, aliases map[string]string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if target, ok := aliases[r.URL.Path]; ok {
+			r2 := new(http.Request)
+			*r2 = *r
+			u := *r.URL
+			u.Path = fmt.Sprintf("/%s", target)
+			r2.URL = &u
+			next.ServeHTTP(w, r2)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // buildStaticETags walks the FS and precomputes ETags for all files.

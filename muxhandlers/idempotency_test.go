@@ -1200,7 +1200,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, statusCode int) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, http.StatusText(statusCode))))
+				fmt.Fprintf(w, `{"error":"%s"}`, http.StatusText(statusCode))
 			},
 		})
 		require.NoError(t, err)
@@ -1227,7 +1227,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, statusCode int) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, http.StatusText(statusCode))))
+				fmt.Fprintf(w, `{"error":"%s"}`, http.StatusText(statusCode))
 			},
 		})
 		require.NoError(t, err)
@@ -1273,7 +1273,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, statusCode int) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, http.StatusText(statusCode))))
+				fmt.Fprintf(w, `{"error":"%s"}`, http.StatusText(statusCode))
 			},
 		})
 		require.NoError(t, err)

@@ -495,6 +495,218 @@ func TestStaticFilesHandler(t *testing.T) {
 		})
 		assert.Error(t, err)
 	})
+
+	t.Run("alias serves target file", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS: testFS,
+			Aliases: map[string]string{
+				"/builder/": "page.html",
+			},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/builder/", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "<html>page</html>")
+	})
+
+	t.Run("alias non-matching path falls through", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS: testFS,
+			Aliases: map[string]string{
+				"/builder/": "page.html",
+			},
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "hello world", rec.Body.String())
+	})
+
+	t.Run("alias target not found returns error", func(t *testing.T) {
+		_, err := StaticFilesHandler(StaticFilesConfig{
+			FS: testFS,
+			Aliases: map[string]string{
+				"/missing/": "nonexistent.html",
+			},
+		})
+		assert.ErrorIs(t, err, ErrStaticFilesAliasTargetNotFound)
+	})
+
+	t.Run("alias with etag returns correct etag", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+			Aliases: map[string]string{
+				"/builder/": "page.html",
+			},
+		})
+		require.NoError(t, err)
+
+		// Get ETag via alias path.
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/builder/", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		assert.Equal(t, http.StatusOK, rec1.Code)
+		aliasETag := rec1.Header().Get("ETag")
+		assert.NotEmpty(t, aliasETag)
+
+		// Get ETag via direct file path.
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/page.html", nil)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, aliasETag, rec2.Header().Get("ETag"))
+	})
+
+	t.Run("alias with etag if-none-match returns 304", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			EnableETag: true,
+			Aliases: map[string]string{
+				"/builder/": "page.html",
+			},
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/builder/", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		etag := rec1.Header().Get("ETag")
+		require.NotEmpty(t, etag)
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/builder/", nil)
+		req2.Header.Set("If-None-Match", etag)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, http.StatusNotModified, rec2.Code)
+	})
+
+	t.Run("multiple aliases", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS: testFS,
+			Aliases: map[string]string{
+				"/builder/":    "page.html",
+				"/playground/": "file.txt",
+			},
+		})
+		require.NoError(t, err)
+
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/builder/", nil)
+		handler.ServeHTTP(rec1, req1)
+		assert.Equal(t, http.StatusOK, rec1.Code)
+		assert.Contains(t, rec1.Body.String(), "<html>page</html>")
+
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/playground/", nil)
+		handler.ServeHTTP(rec2, req2)
+		assert.Equal(t, http.StatusOK, rec2.Code)
+		assert.Equal(t, "hello world", rec2.Body.String())
+	})
+
+	t.Run("path prefix strips prefix for file serving", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			PathPrefix: "/ui",
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/ui/file.txt", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "hello world", rec.Body.String())
+	})
+
+	t.Run("path prefix with alias", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			PathPrefix: "/ui",
+			Aliases: map[string]string{
+				"/policy-builder/": "page.html",
+			},
+		})
+		require.NoError(t, err)
+
+		// Alias path works.
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/ui/policy-builder/", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		assert.Equal(t, http.StatusOK, rec1.Code)
+		assert.Contains(t, rec1.Body.String(), "<html>page</html>")
+
+		// Regular file still works.
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/ui/style.css", nil)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, http.StatusOK, rec2.Code)
+		assert.Contains(t, rec2.Body.String(), "body{}")
+	})
+
+	t.Run("path prefix with alias and etag", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			PathPrefix: "/ui",
+			EnableETag: true,
+			Aliases: map[string]string{
+				"/policy-builder/": "page.html",
+			},
+		})
+		require.NoError(t, err)
+
+		// Alias path has ETag.
+		rec1 := httptest.NewRecorder()
+		req1 := httptest.NewRequest(http.MethodGet, "/ui/policy-builder/", nil)
+		handler.ServeHTTP(rec1, req1)
+
+		assert.Equal(t, http.StatusOK, rec1.Code)
+		aliasETag := rec1.Header().Get("ETag")
+		assert.NotEmpty(t, aliasETag)
+
+		// Direct file has same ETag.
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/ui/page.html", nil)
+		handler.ServeHTTP(rec2, req2)
+
+		assert.Equal(t, aliasETag, rec2.Header().Get("ETag"))
+
+		// If-None-Match works on alias.
+		rec3 := httptest.NewRecorder()
+		req3 := httptest.NewRequest(http.MethodGet, "/ui/policy-builder/", nil)
+		req3.Header.Set("If-None-Match", aliasETag)
+		handler.ServeHTTP(rec3, req3)
+
+		assert.Equal(t, http.StatusNotModified, rec3.Code)
+	})
+
+	t.Run("path prefix without leading slash", func(t *testing.T) {
+		handler, err := StaticFilesHandler(StaticFilesConfig{
+			FS:         testFS,
+			PathPrefix: "/static",
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/static/file.txt", nil)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "hello world", rec.Body.String())
+	})
 }
 
 // failOpenFS wraps an fs.FS but fails when opening non-directory files.

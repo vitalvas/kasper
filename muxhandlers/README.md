@@ -575,6 +575,8 @@ no `index.html`, a 404 is returned instead of a file listing. When
 | `EnableDirectoryListing` | `bool` | Show directory contents when no `index.html` is present; `false` by default |
 | `SPAFallback` | `bool` | Serve root `index.html` for non-existent paths; requires `index.html` at FS root |
 | `EnableETag` | `bool` | Precompute strong ETags at init; handles `If-None-Match` (304); designed for `embed.FS` |
+| `PathPrefix` | `string` | URL path prefix to strip internally; replaces `http.StripPrefix` |
+| `Aliases` | `map[string]string` | Maps URL paths (relative to PathPrefix) to file paths in the FS; targets validated at init; ETag support applies |
 
 ### StaticFiles Usage
 
@@ -642,6 +644,28 @@ if err != nil {
 }
 
 r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", handler))
+```
+
+### StaticFiles Usage with PathPrefix and Aliases
+
+```go
+handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
+    FS:         staticFS,
+    PathPrefix: "/ui",
+    EnableETag: true,
+    Aliases: map[string]string{
+        "/policy-builder/":    "policy-builder.html",
+        "/policy-playground/": "policy-playground.html",
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.PathPrefix("/ui/").Handler(handler)
+// /ui/policy-builder/    -> policy-builder.html
+// /ui/policy-playground/ -> policy-playground.html
+// /ui/style.css          -> style.css
 ```
 
 ## Profiler Handler

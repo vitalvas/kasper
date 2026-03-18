@@ -245,15 +245,22 @@
 // has no index.html, a 404 is returned instead of a file listing.
 // When SPAFallback is enabled, requests for non-existent paths serve
 // the root index.html, allowing client-side routers to handle routing.
+// PathPrefix strips the URL prefix internally, replacing http.StripPrefix.
+// Aliases map custom URL paths to specific files in the FS.
 //
 //	handler, err := muxhandlers.StaticFilesHandler(muxhandlers.StaticFilesConfig{
-//	    FS:          os.DirFS("./public"),
-//	    SPAFallback: true,
+//	    FS:         staticFS,
+//	    PathPrefix: "/ui",
+//	    EnableETag: true,
+//	    Aliases: map[string]string{
+//	        "/policy-builder/":    "policy-builder.html",
+//	        "/policy-playground/": "policy-playground.html",
+//	    },
 //	})
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//	r.PathPrefix("/").Handler(handler)
+//	r.PathPrefix("/ui/").Handler(handler)
 //
 // # Profiler Handler
 //
