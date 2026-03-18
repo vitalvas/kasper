@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/vitalvas/kasper/compare/v0.8.1...v0.9.0) (2026-03-18)
+
+
+### Features
+
+* **muxhandlers:** add PathPrefix and Aliases to StaticFilesHandler ([c3f94da](https://github.com/vitalvas/kasper/commit/c3f94daeccf3bdc23939d2572fd76d7f4710d8a3))
+
+
+### Bug Fixes
+
+* replace string concatenation with fmt.Sprintf and remove stdlib wrappers ([f3af66e](https://github.com/vitalvas/kasper/commit/f3af66e51a0c9fedcb5354c0bcda029d64ead68d))
+
 ## [0.8.1](https://github.com/vitalvas/kasper/compare/v0.8.0...v0.8.1) (2026-03-17)
 
 
