@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -382,7 +383,7 @@ func (s *Spec) Build(r *mux.Router) *Document {
 		for _, method := range methods {
 			opID := baseID
 			if len(methods) > 1 && opID != "" {
-				opID = opID + strings.ToUpper(method[:1]) + strings.ToLower(method[1:])
+				opID = fmt.Sprintf("%s%s%s", opID, strings.ToUpper(method[:1]), strings.ToLower(method[1:]))
 			}
 			op := builder.buildOperation(gen, opID, pathParams)
 
@@ -394,7 +395,7 @@ func (s *Spec) Build(r *mux.Router) *Document {
 			if len(schemes) > 0 && len(builder.meta.servers) == 0 &&
 				len(s.pathServers[openAPIPath]) == 0 && len(s.servers) == 0 {
 				for _, scheme := range schemes {
-					op.Servers = append(op.Servers, Server{URL: scheme + "://"})
+					op.Servers = append(op.Servers, Server{URL: fmt.Sprintf("%s://", scheme)})
 				}
 			}
 
@@ -617,7 +618,7 @@ func parsePath(tpl string) (string, []*Parameter) {
 		}
 
 		params = append(params, param)
-		return "{" + varName + "}"
+		return fmt.Sprintf("{%s}", varName)
 	})
 
 	return openAPIPath, params

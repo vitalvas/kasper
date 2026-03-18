@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -207,7 +208,7 @@ func TestEqualASCIIFold(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.s+"_"+tt.t, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s_%s", tt.s, tt.t), func(t *testing.T) {
 			result := equalASCIIFold(tt.s, tt.t)
 			assert.Equal(t, tt.expected, result)
 		})

@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,7 +70,7 @@ func TestNewTransport(t *testing.T) {
 			Transport: NewTransport(nil, SignConfig{Signer: signer}),
 		}
 
-		resp, err := client.Get(server.URL + "/api/items")
+		resp, err := client.Get(fmt.Sprintf("%s/api/items", server.URL))
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -95,7 +96,7 @@ func TestNewTransport(t *testing.T) {
 			Transport: NewTransport(nil, SignConfig{Signer: signer}),
 		}
 
-		req, err := http.NewRequest(http.MethodGet, server.URL+"/test", nil)
+		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/test", server.URL), nil)
 		require.NoError(t, err)
 
 		origSig := req.Header.Get("Signature")
@@ -122,7 +123,7 @@ func TestNewTransport(t *testing.T) {
 		}
 
 		bodyContent := "test body content"
-		req, err := http.NewRequest(http.MethodPost, server.URL+"/test", strings.NewReader(bodyContent))
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/test", server.URL), strings.NewReader(bodyContent))
 		require.NoError(t, err)
 
 		resp, err := client.Do(req)

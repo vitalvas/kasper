@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,7 @@ import (
 )
 
 func basicAuthHeader(username, password string) string {
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	return fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", username, password))))
 }
 
 func TestBasicAuth(t *testing.T) {
@@ -73,7 +74,7 @@ func TestBasicAuth(t *testing.T) {
 		{
 			name:       "malformed credentials no colon",
 			config:     BasicAuthConfig{Credentials: map[string]string{"admin": "secret"}},
-			authHeader: "Basic " + base64.StdEncoding.EncodeToString([]byte("nocolon")),
+			authHeader: fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte("nocolon"))),
 			wantCode:   http.StatusUnauthorized,
 		},
 		{

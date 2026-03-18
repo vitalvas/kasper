@@ -92,7 +92,7 @@ func TestRouterWith(t *testing.T) {
 			})
 		})
 		r.With(mw).HandleFunc("/users/{id}", func(w http.ResponseWriter, req *http.Request) {
-			fmt.Fprint(w, "user:"+Vars(req)["id"])
+			fmt.Fprintf(w, "user:%s", Vars(req)["id"])
 		})
 
 		w := httptest.NewRecorder()

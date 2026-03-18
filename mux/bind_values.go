@@ -277,7 +277,7 @@ func decodeSliceOfStructs(src map[string][]string, fv reflect.Value, tagName, pr
 // prefix. Returns sorted unique indices.
 func collectSliceIndices(src map[string][]string, prefix string) []int {
 	seen := make(map[int]struct{})
-	dotPrefix := prefix + "."
+	dotPrefix := fmt.Sprintf("%s.", prefix)
 
 	for key := range src {
 		if !strings.HasPrefix(key, dotPrefix) {
@@ -310,7 +310,7 @@ func decodeMapField(src map[string][]string, fv reflect.Value, prefix string) er
 		return fmt.Errorf("bind: map field %q must have string keys", prefix)
 	}
 
-	dotPrefix := prefix + "."
+	dotPrefix := fmt.Sprintf("%s.", prefix)
 	elemType := mapType.Elem()
 
 	for key, vals := range src {
@@ -353,7 +353,7 @@ func decodeMapField(src map[string][]string, fv reflect.Value, prefix string) er
 
 // hasPrefixedKeys reports whether src contains any key starting with prefix + ".".
 func hasPrefixedKeys(src map[string][]string, prefix string) bool {
-	dotPrefix := prefix + "."
+	dotPrefix := fmt.Sprintf("%s.", prefix)
 	for key := range src {
 		if strings.HasPrefix(key, dotPrefix) {
 			return true

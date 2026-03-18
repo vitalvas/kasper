@@ -3,6 +3,7 @@ package httpsig
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -119,7 +120,7 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 
 	// Append to existing headers (supports multiple signatures).
 	appendDictMember(r, "Signature-Input", label, sigParamsStr)
-	appendDictMember(r, "Signature", label, ":"+encoded+":")
+	appendDictMember(r, "Signature", label, fmt.Sprintf(":%s:", encoded))
 
 	return nil
 }
@@ -129,11 +130,11 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 // with a comma separator.
 func appendDictMember(r *http.Request, header, key, value string) {
 	existing := r.Header.Get(header)
-	entry := key + "=" + value
+	entry := fmt.Sprintf("%s=%s", key, value)
 
 	if existing == "" {
 		r.Header.Set(header, entry)
 	} else {
-		r.Header.Set(header, existing+", "+entry)
+		r.Header.Set(header, fmt.Sprintf("%s, %s", existing, entry))
 	}
 }

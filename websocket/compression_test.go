@@ -2,6 +2,8 @@ package websocket
 
 import (
 	"bytes"
+	"compress/flate"
+	"fmt"
 	"io"
 	"testing"
 
@@ -62,7 +64,7 @@ func TestCompressionLevels(t *testing.T) {
 	input := bytes.Repeat([]byte("test data for compression "), 50)
 
 	for level := minCompressionLevel; level <= maxCompressionLevel; level++ {
-		t.Run("level_"+string(rune('0'+level)), func(t *testing.T) {
+		t.Run(fmt.Sprintf("level_%c", rune('0'+level)), func(t *testing.T) {
 			compressed, err := compressData(input, level)
 			require.NoError(t, err)
 
@@ -168,10 +170,10 @@ func TestFlateReaderPool(t *testing.T) {
 	})
 }
 
-func TestGetFlateWriter(t *testing.T) {
+func TestFlateNewWriter(t *testing.T) {
 	t.Run("Create writer", func(t *testing.T) {
 		buf := new(bytes.Buffer)
-		fw, err := getFlateWriter(buf, defaultCompressionLevel)
+		fw, err := flate.NewWriter(buf, defaultCompressionLevel)
 		require.NoError(t, err)
 		require.NotNil(t, fw)
 
@@ -183,7 +185,7 @@ func TestGetFlateWriter(t *testing.T) {
 
 	t.Run("Invalid level returns error", func(t *testing.T) {
 		buf := new(bytes.Buffer)
-		_, err := getFlateWriter(buf, 100)
+		_, err := flate.NewWriter(buf, 100)
 		assert.Error(t, err)
 	})
 }
@@ -451,7 +453,7 @@ func BenchmarkCompression(b *testing.B) {
 	}
 
 	for _, size := range sizes {
-		b.Run("Compress_"+size.name, func(b *testing.B) {
+		b.Run(fmt.Sprintf("Compress_%s", size.name), func(b *testing.B) {
 			b.SetBytes(int64(len(size.data)))
 
 			for b.Loop() {
@@ -461,7 +463,7 @@ func BenchmarkCompression(b *testing.B) {
 
 		compressed, _ := compressData(size.data, defaultCompressionLevel)
 
-		b.Run("Decompress_"+size.name, func(b *testing.B) {
+		b.Run(fmt.Sprintf("Decompress_%s", size.name), func(b *testing.B) {
 			b.SetBytes(int64(len(compressed)))
 
 			for b.Loop() {

@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -450,7 +451,7 @@ func TestStaticFilesHandler(t *testing.T) {
 
 		rec2 := httptest.NewRecorder()
 		req2 := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
-		req2.Header.Set("If-None-Match", `"other", `+etag+`, "another"`)
+		req2.Header.Set("If-None-Match", fmt.Sprintf(`"other", %s, "another"`, etag))
 		handler.ServeHTTP(rec2, req2)
 
 		assert.Equal(t, http.StatusNotModified, rec2.Code)

@@ -105,9 +105,9 @@ func resolvePath(basePath, filename string) string {
 		return filename
 	}
 	if basePath == "" {
-		return "/" + filename
+		return fmt.Sprintf("/%s", filename)
 	}
-	return basePath + "/" + filename
+	return fmt.Sprintf("%s/%s", basePath, filename)
 }
 
 // Handle registers OpenAPI endpoints under the given base path on the router.
@@ -284,7 +284,7 @@ func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg *HandleConfig, s
 		r.HandleFunc("/", handler)
 	} else {
 		r.HandleFunc(basePath, handler)
-		r.HandleFunc(basePath+"/", handler)
+		r.HandleFunc(fmt.Sprintf("%s/", basePath), handler)
 	}
 }
 

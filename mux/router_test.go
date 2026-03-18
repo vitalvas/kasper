@@ -500,10 +500,10 @@ func TestRouterComplexRouting(t *testing.T) {
 	t.Run("path variables with multiple routes", func(t *testing.T) {
 		r := NewRouter()
 		r.HandleFunc("/users/{id:[0-9]+}", func(w http.ResponseWriter, req *http.Request) {
-			fmt.Fprint(w, "user:"+Vars(req)["id"])
+			fmt.Fprintf(w, "user:%s", Vars(req)["id"])
 		})
 		r.HandleFunc("/users/{name:[a-z]+}", func(w http.ResponseWriter, req *http.Request) {
-			fmt.Fprint(w, "name:"+Vars(req)["name"])
+			fmt.Fprintf(w, "name:%s", Vars(req)["name"])
 		})
 
 		w := httptest.NewRecorder()
@@ -537,7 +537,7 @@ func TestRouterComplexRouting(t *testing.T) {
 		r := NewRouter()
 		api := r.PathPrefix("/api/v1").Subrouter()
 		api.HandleFunc("/users/{id}", func(w http.ResponseWriter, req *http.Request) {
-			fmt.Fprint(w, "user:"+Vars(req)["id"])
+			fmt.Fprintf(w, "user:%s", Vars(req)["id"])
 		})
 
 		w := httptest.NewRecorder()
@@ -572,7 +572,7 @@ func TestRouterBuildVarsFunc(t *testing.T) {
 	t.Run("creates route with build vars function", func(t *testing.T) {
 		r := NewRouter()
 		route := r.BuildVarsFunc(func(m map[string]string) map[string]string {
-			m["id"] = "modified-" + m["id"]
+			m["id"] = fmt.Sprintf("modified-%s", m["id"])
 			return m
 		}).Path("/users/{id}").Name("user")
 
@@ -1248,7 +1248,7 @@ func TestRouterRoute(t *testing.T) {
 		r := NewRouter()
 		r.Route("/users/{id}", func(sub *Router) {
 			sub.HandleFunc("/profile", func(w http.ResponseWriter, req *http.Request) {
-				fmt.Fprint(w, "user:"+Vars(req)["id"])
+				fmt.Fprintf(w, "user:%s", Vars(req)["id"])
 			})
 		})
 

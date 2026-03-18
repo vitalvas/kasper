@@ -678,7 +678,7 @@ func TestEncodeQuery(t *testing.T) {
 		vals, err := EncodeQuery(original)
 		require.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodGet, "/?"+vals.Encode(), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/?%s", vals.Encode()), nil)
 		var decoded params
 		require.NoError(t, BindQuery(req, &decoded))
 
@@ -724,7 +724,7 @@ func TestEncodeQuery(t *testing.T) {
 		vals, err := EncodeQuery(original)
 		require.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodGet, "/?"+vals.Encode(), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/?%s", vals.Encode()), nil)
 		var decoded params
 		require.NoError(t, BindQuery(req, &decoded))
 
@@ -786,7 +786,7 @@ func TestEncodeQuery(t *testing.T) {
 		vals, err := EncodeQuery(original)
 		require.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodGet, "/?"+vals.Encode(), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/?%s", vals.Encode()), nil)
 		var decoded params
 		require.NoError(t, BindQuery(req, &decoded))
 

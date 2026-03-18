@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -110,7 +111,7 @@ func parseOrigins(origins []string) ([]string, []wildcardPattern, error) {
 		if strings.Contains(lower, "*") {
 			parts := strings.SplitN(lower, "*", 2)
 			if strings.Contains(parts[1], "*") {
-				return nil, nil, errors.New("origin pattern contains multiple wildcards: " + o)
+				return nil, nil, fmt.Errorf("origin pattern contains multiple wildcards: %s", o)
 			}
 
 			patterns = append(patterns, wildcardPattern{

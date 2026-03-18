@@ -173,8 +173,7 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 	// (?:...) are fine.
 	if reg.NumSubexp() != len(varsN) {
 		return nil, fmt.Errorf(
-			"mux: route %q contains capture groups in its regexp; "+
-				"use non-capturing groups instead: e.g. (?:pattern) instead of (pattern)",
+			"mux: route %q contains capture groups in its regexp; use non-capturing groups instead: e.g. (?:pattern) instead of (pattern)",
 			tpl,
 		)
 	}

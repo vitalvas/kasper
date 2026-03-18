@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -263,7 +264,7 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 	}
 
 	if compress {
-		w.Header().Set("Sec-WebSocket-Extensions", "permessage-deflate"+compressionParams)
+		w.Header().Set("Sec-WebSocket-Extensions", fmt.Sprintf("permessage-deflate%s", compressionParams))
 	}
 
 	// RFC 8441: Response is 200 OK, not 101 Switching Protocols.
@@ -311,7 +312,7 @@ func checkSameOrigin(r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
-	return equalASCIIFold(origin, "http://"+r.Host) || equalASCIIFold(origin, "https://"+r.Host)
+	return equalASCIIFold(origin, fmt.Sprintf("http://%s", r.Host)) || equalASCIIFold(origin, fmt.Sprintf("https://%s", r.Host))
 }
 
 func equalASCIIFold(s, t string) bool {
@@ -439,7 +440,7 @@ func negotiateCompressionParams(clientParams map[string]string) string {
 		} else {
 			bits, err := strconv.Atoi(v)
 			if err == nil && bits >= 8 && bits <= 15 {
-				params = append(params, "server_max_window_bits="+v)
+				params = append(params, fmt.Sprintf("server_max_window_bits=%s", v))
 			}
 		}
 	}
@@ -447,5 +448,5 @@ func negotiateCompressionParams(clientParams map[string]string) string {
 	if len(params) == 0 {
 		return ""
 	}
-	return "; " + strings.Join(params, "; ")
+	return fmt.Sprintf("; %s", strings.Join(params, "; "))
 }

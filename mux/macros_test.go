@@ -105,12 +105,12 @@ func TestRouteMacroPatterns(t *testing.T) {
 		{name: "domain matches single char", path: "/sites/{d:domain}", requestPath: "/sites/a", shouldMatch: true},
 		{name: "domain matches single char label with TLD", path: "/sites/{d:domain}", requestPath: "/sites/a.b", shouldMatch: true},
 		{name: "domain matches single label", path: "/sites/{d:domain}", requestPath: "/sites/localhost", shouldMatch: true},
-		{name: "domain matches 63-char label", path: "/sites/{d:domain}", requestPath: "/sites/a" + strings.Repeat("b", 61) + "c.com", shouldMatch: true},
-		{name: "domain rejects 64-char label", path: "/sites/{d:domain}", requestPath: "/sites/a" + strings.Repeat("b", 62) + "c.com", shouldMatch: false},
+		{name: "domain matches 63-char label", path: "/sites/{d:domain}", requestPath: fmt.Sprintf("/sites/a%sc.com", strings.Repeat("b", 61)), shouldMatch: true},
+		{name: "domain rejects 64-char label", path: "/sites/{d:domain}", requestPath: fmt.Sprintf("/sites/a%sc.com", strings.Repeat("b", 62)), shouldMatch: false},
 		{name: "domain rejects leading hyphen", path: "/sites/{d:domain}", requestPath: "/sites/-bad.com", shouldMatch: false},
 		{name: "domain rejects trailing hyphen", path: "/sites/{d:domain}", requestPath: "/sites/bad-.com", shouldMatch: false},
-		{name: "domain matches 253-char total", path: "/sites/{d:domain}", requestPath: "/sites/" + strings.Repeat("a.", 126) + "b", shouldMatch: true},
-		{name: "domain rejects 254-char total", path: "/sites/{d:domain}", requestPath: "/sites/" + strings.Repeat("a.", 126) + "bb", shouldMatch: false},
+		{name: "domain matches 253-char total", path: "/sites/{d:domain}", requestPath: fmt.Sprintf("/sites/%sb", strings.Repeat("a.", 126)), shouldMatch: true},
+		{name: "domain rejects 254-char total", path: "/sites/{d:domain}", requestPath: fmt.Sprintf("/sites/%sbb", strings.Repeat("a.", 126)), shouldMatch: false},
 		{name: "raw regex still works", path: "/items/{id:[0-9]+}", requestPath: "/items/123", shouldMatch: true},
 	}
 

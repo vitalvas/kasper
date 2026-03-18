@@ -16,7 +16,7 @@ func cleanPath(p string) string {
 		return "/"
 	}
 	if p[0] != '/' {
-		p = "/" + p
+		p = fmt.Sprintf("/%s", p)
 	}
 	if isCleanPath(p) {
 		return p

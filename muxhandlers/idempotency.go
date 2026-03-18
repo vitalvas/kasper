@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -188,11 +189,6 @@ type idempotencyResponse struct {
 
 const defaultKeyMaxLength = 64
 
-// buildCacheKey creates a cache key scoped to the request method and path.
-func buildCacheKey(method, path, key string) string {
-	return method + ":" + path + ":" + key
-}
-
 // idempotencyWriteError writes an error response using the custom ErrorHandler
 // if set, otherwise falls back to http.Error.
 func idempotencyWriteError(w http.ResponseWriter, r *http.Request, statusCode int, errorHandler func(http.ResponseWriter, *http.Request, int)) {
@@ -311,7 +307,7 @@ func IdempotencyMiddleware(cfg IdempotencyConfig) (mux.MiddlewareFunc, error) {
 			if cacheKeyFunc != nil {
 				cacheKey = cacheKeyFunc(r, key)
 			} else {
-				cacheKey = buildCacheKey(r.Method, r.URL.Path, key)
+				cacheKey = fmt.Sprintf("%s:%s:%s", r.Method, r.URL.Path, key)
 			}
 
 			var fingerprint string

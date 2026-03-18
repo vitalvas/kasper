@@ -1,6 +1,7 @@
 package httpsig
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -25,10 +26,7 @@ func TestBuildSignatureBase(t *testing.T) {
 		base, sigParams, err := buildSignatureBase(req, params)
 		require.NoError(t, err)
 
-		expected := "\"@method\": POST\n" +
-			"\"@authority\": example.com\n" +
-			"\"@path\": /api/items\n" +
-			"\"@signature-params\": " + sigParams
+		expected := fmt.Sprintf("\"@method\": POST\n\"@authority\": example.com\n\"@path\": /api/items\n\"@signature-params\": %s", sigParams)
 
 		assert.Equal(t, expected, string(base))
 		assert.Contains(t, sigParams, "(\"@method\" \"@authority\" \"@path\")")

@@ -50,7 +50,7 @@ func derivedComponentValue(id string, r *http.Request) (string, error) {
 
 	case ComponentQuery:
 		q := r.URL.RawQuery
-		return "?" + q, nil
+		return fmt.Sprintf("?%s", q), nil
 
 	case ComponentTargetURI:
 		return targetURI(r), nil
@@ -121,9 +121,9 @@ func targetURI(r *http.Request) string {
 		path = "/"
 	}
 
-	uri := s + "://" + a + path
+	uri := fmt.Sprintf("%s://%s%s", s, a, path)
 	if r.URL.RawQuery != "" {
-		uri += "?" + r.URL.RawQuery
+		uri = fmt.Sprintf("%s?%s", uri, r.URL.RawQuery)
 	}
 
 	return uri
@@ -137,7 +137,7 @@ func requestTarget(r *http.Request) string {
 	}
 
 	if r.URL.RawQuery != "" {
-		return path + "?" + r.URL.RawQuery
+		return fmt.Sprintf("%s?%s", path, r.URL.RawQuery)
 	}
 
 	return path

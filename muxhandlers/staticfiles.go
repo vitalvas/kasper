@@ -62,7 +62,7 @@ func (n *noDirListingFS) Open(name string) (fs.File, error) {
 		return f, nil
 	}
 
-	indexPath := name + "/index.html"
+	indexPath := fmt.Sprintf("%s/index.html", name)
 	if name == "." {
 		indexPath = "index.html"
 	}

@@ -57,9 +57,6 @@ func putFlateReader(fr io.ReadCloser) {
 	flateReaderPool.Put(fr)
 }
 
-func getFlateWriter(w io.Writer, level int) (*flate.Writer, error) {
-	return flate.NewWriter(w, level)
-}
 
 type compressedReader struct {
 	fr io.ReadCloser
@@ -129,7 +126,7 @@ func newCompressedWriter(c *Conn, level int) *compressedWriter {
 
 func (cw *compressedWriter) Write(p []byte) (int, error) {
 	if cw.fw == nil {
-		fw, err := getFlateWriter(&bufferWriter{cw: cw}, cw.level)
+		fw, err := flate.NewWriter(&bufferWriter{cw: cw}, cw.level)
 		if err != nil {
 			return 0, err
 		}

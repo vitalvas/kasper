@@ -2,6 +2,7 @@ package mux
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,7 @@ func TestHandleJSON(t *testing.T) {
 	t.Run("successful round-trip", func(t *testing.T) {
 		handler := HandleJSON(
 			func(_ http.ResponseWriter, _ *http.Request, in reqBody) (respBody, error) {
-				return respBody{Greeting: "hello " + in.Name}, nil
+				return respBody{Greeting: fmt.Sprintf("hello %s", in.Name)}, nil
 			},
 			func(w http.ResponseWriter, _ *http.Request, err error) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -87,7 +88,7 @@ func TestHandleJSON(t *testing.T) {
 			func(_ http.ResponseWriter, r *http.Request, in reqBody) (respBody, error) {
 				id, ok := VarGet(r, "id")
 				require.True(t, ok)
-				return respBody{Greeting: in.Name + ":" + id}, nil
+				return respBody{Greeting: fmt.Sprintf("%s:%s", in.Name, id)}, nil
 			},
 			func(w http.ResponseWriter, _ *http.Request, err error) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -224,7 +225,7 @@ func TestHandleJSONResponse(t *testing.T) {
 			func(_ http.ResponseWriter, r *http.Request) (respBody, error) {
 				id, ok := VarGet(r, "id")
 				require.True(t, ok)
-				return respBody{Greeting: "item:" + id}, nil
+				return respBody{Greeting: fmt.Sprintf("item:%s", id)}, nil
 			},
 			func(w http.ResponseWriter, _ *http.Request, err error) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -77,7 +78,7 @@ type CloseError struct {
 }
 
 func (e *CloseError) Error() string {
-	return "websocket: close " + closeCodeString(e.Code) + " " + e.Text
+	return fmt.Sprintf("websocket: close %s %s", closeCodeString(e.Code), e.Text)
 }
 
 func closeCodeString(code int) string {

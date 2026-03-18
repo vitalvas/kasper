@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -142,7 +143,7 @@ func TestDialerHandshakeTimeout(t *testing.T) {
 		}
 
 		addr := listener.Addr().String()
-		_, _, err = d.Dial("ws://"+addr, nil)
+		_, _, err = d.Dial(fmt.Sprintf("ws://%s", addr), nil)
 		require.Error(t, err)
 	})
 
@@ -173,7 +174,7 @@ func TestDialerHandshakeTimeout(t *testing.T) {
 		}
 
 		addr := listener.Addr().String()
-		_, _, err = d.Dial("ws://"+addr, nil)
+		_, _, err = d.Dial(fmt.Sprintf("ws://%s", addr), nil)
 		require.Error(t, err)
 	})
 }
@@ -198,7 +199,7 @@ func TestDialerWithServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Successful connection and echo", func(t *testing.T) {
 		d := &Dialer{}
@@ -273,7 +274,7 @@ func TestDialerWithSubprotocols(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Subprotocol negotiation", func(t *testing.T) {
 		d := &Dialer{
@@ -336,7 +337,7 @@ func TestDialerBadHandshakeResponse(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 
-			wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+			wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 			d := &Dialer{}
 
 			_, resp, err := d.Dial(wsURL, nil)
@@ -366,7 +367,7 @@ func TestDialerWithCompression(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Compression negotiation", func(t *testing.T) {
 		d := &Dialer{
@@ -422,7 +423,7 @@ func TestDialerWithTLSServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
+	wsURL := fmt.Sprintf("wss%s", strings.TrimPrefix(server.URL, "https"))
 
 	t.Run("Connect to TLS server via http.Client", func(t *testing.T) {
 		d := &Dialer{
@@ -506,7 +507,7 @@ func TestDialerNilHTTPClient(t *testing.T) {
 		}))
 		defer server.Close()
 
-		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 		d := &Dialer{
 			HTTPClient: nil, // Explicitly nil
@@ -685,7 +686,7 @@ func TestDialerWithProxy(t *testing.T) {
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 
 	t.Run("Connect through proxy", func(t *testing.T) {
 		transport := &http.Transport{
@@ -757,7 +758,7 @@ func TestConnUnderlyingConn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	d := &Dialer{}
 	conn, _, err := d.Dial(wsURL, nil)
@@ -790,7 +791,7 @@ func TestConnCloseWithBufferPool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	d := &Dialer{}
 	conn, _, err := d.Dial(wsURL, nil)
@@ -818,7 +819,7 @@ func TestDialerDoHandshakeWithTransport(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("With subprotocol", func(t *testing.T) {
 		transport := &http.Transport{
@@ -855,7 +856,7 @@ func TestDialerDoHandshakeWithTransport(t *testing.T) {
 		}))
 		defer compressionServer.Close()
 
-		wsURL := "ws" + strings.TrimPrefix(compressionServer.URL, "http")
+		wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(compressionServer.URL, "http"))
 
 		transport := &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -1270,7 +1271,7 @@ func TestDialerBadSubprotocolInDoHandshake(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -1347,7 +1348,7 @@ func TestDialerTLSClientConfig(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
+	wsURL := fmt.Sprintf("wss%s", strings.TrimPrefix(server.URL, "https"))
 
 	t.Run("d.TLSClientConfig takes precedence over transport", func(t *testing.T) {
 		serverTransport := server.Client().Transport.(*http.Transport)
@@ -1396,7 +1397,7 @@ func TestDialerProxyField(t *testing.T) {
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 
 	t.Run("d.Proxy used for proxy detection", func(t *testing.T) {
 		d := &Dialer{
@@ -1434,7 +1435,7 @@ func TestDialerDefaultPathPreservesNetConn(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	d := &Dialer{}
 	conn, _, err := d.Dial(wsURL, nil)
@@ -1479,7 +1480,7 @@ func TestDialerRespBodySafeClose(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	d := &Dialer{}
 	conn, resp, err := d.Dial(wsURL, nil)
@@ -1584,7 +1585,7 @@ func TestDoHandshakePreservesBufferedData(t *testing.T) {
 		}))
 		defer server.Close()
 
-		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 		d := &Dialer{}
 		conn, _, err := d.Dial(wsURL, nil)
@@ -1666,7 +1667,7 @@ func TestDialDirectHandshakeTimeoutSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	d := &Dialer{
 		HandshakeTimeout: 5 * time.Second,
@@ -1710,7 +1711,7 @@ func TestDialWithProxyHandshakeTimeout(t *testing.T) {
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 
 	t.Run("Successful with timeout", func(t *testing.T) {
 		d := &Dialer{
@@ -1739,7 +1740,7 @@ func TestDialWithProxyHandshakeTimeout(t *testing.T) {
 		}))
 		defer badServer.Close()
 
-		badWsURL := "ws" + strings.TrimPrefix(badServer.URL, "http")
+		badWsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(badServer.URL, "http"))
 
 		d := &Dialer{
 			Proxy: func(_ *http.Request) (*url.URL, error) {
@@ -1809,7 +1810,7 @@ func TestDialProxyAuth(t *testing.T) {
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
 	proxyURL.User = url.UserPassword("user", "pass")
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 
 	d := &Dialer{
 		Proxy: func(_ *http.Request) (*url.URL, error) {
@@ -1842,7 +1843,7 @@ func TestDialProxyNetDialContext(t *testing.T) {
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 
 	netDialCalled := false
 	d := &Dialer{
@@ -1886,7 +1887,7 @@ func TestDialProxyWSSConnection(t *testing.T) {
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
-	wsURL := "wss" + strings.TrimPrefix(wsServer.URL, "https")
+	wsURL := fmt.Sprintf("wss%s", strings.TrimPrefix(wsServer.URL, "https"))
 
 	serverTransport := wsServer.Client().Transport.(*http.Transport)
 
@@ -1966,7 +1967,7 @@ func TestDoHandshakeCookieJar(t *testing.T) {
 	defer server.Close()
 
 	serverURL, _ := url.Parse(server.URL)
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	jar := &testCookieJar{
 		cookies: map[string][]*http.Cookie{
@@ -2175,7 +2176,7 @@ func TestDialTLSHandshakeFailure(t *testing.T) {
 	}()
 
 	d := &Dialer{}
-	_, _, err = d.Dial("wss://"+listener.Addr().String(), nil)
+	_, _, err = d.Dial(fmt.Sprintf("wss://%s", listener.Addr().String()), nil)
 	require.Error(t, err)
 }
 
@@ -2210,7 +2211,7 @@ func TestDialProxyTransportDialContext(t *testing.T) {
 	defer proxyServer.Close()
 
 	proxyURL, _ := url.Parse(proxyServer.URL)
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 
 	transportDialCalled := false
 	d := &Dialer{
@@ -2318,7 +2319,7 @@ func TestDialDirectSetDeadlineErrors(t *testing.T) {
 			},
 		}
 
-		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 		_, _, err := d.Dial(wsURL, nil)
 		require.ErrorIs(t, err, errMockSetDeadline)
 	})
@@ -2348,7 +2349,7 @@ func TestDialWithProxySetDeadlineErrors(t *testing.T) {
 			},
 		}
 
-		wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+		wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 		_, _, err := d.Dial(wsURL, nil)
 		require.ErrorIs(t, err, errMockSetDeadline)
 	})
@@ -2381,7 +2382,7 @@ func TestDialWithProxySetDeadlineErrors(t *testing.T) {
 			},
 		}
 
-		wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+		wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(wsServer.URL, "http"))
 		_, _, err := d.Dial(wsURL, nil)
 		require.ErrorIs(t, err, errMockSetDeadline)
 	})

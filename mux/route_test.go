@@ -2,6 +2,7 @@ package mux
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -733,7 +734,7 @@ func TestRouteBuildVarsFunc(t *testing.T) {
 		route := router.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {}).
 			Name("user").
 			BuildVarsFunc(func(m map[string]string) map[string]string {
-				m["id"] = "prefix-" + m["id"]
+				m["id"] = fmt.Sprintf("prefix-%s", m["id"])
 				return m
 			})
 
@@ -747,11 +748,11 @@ func TestRouteBuildVarsFunc(t *testing.T) {
 		route := router.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {}).
 			Name("user").
 			BuildVarsFunc(func(m map[string]string) map[string]string {
-				m["id"] = "a-" + m["id"]
+				m["id"] = fmt.Sprintf("a-%s", m["id"])
 				return m
 			}).
 			BuildVarsFunc(func(m map[string]string) map[string]string {
-				m["id"] = "b-" + m["id"]
+				m["id"] = fmt.Sprintf("b-%s", m["id"])
 				return m
 			})
 
@@ -766,7 +767,7 @@ func TestRouteMatchWithBuildVarsFunc(t *testing.T) {
 		router := NewRouter()
 		router.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {}).
 			BuildVarsFunc(func(m map[string]string) map[string]string {
-				m["id"] = "modified-" + m["id"]
+				m["id"] = fmt.Sprintf("modified-%s", m["id"])
 				return m
 			})
 
@@ -965,7 +966,7 @@ func TestRouteBuildVarsDirect(t *testing.T) {
 	t.Run("applies buildVarsFunc in buildVars", func(t *testing.T) {
 		route := &Route{
 			buildVarsFunc: func(m map[string]string) map[string]string {
-				m["id"] = "modified-" + m["id"]
+				m["id"] = fmt.Sprintf("modified-%s", m["id"])
 				return m
 			},
 		}

@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -453,7 +454,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 		mw, err := IdempotencyMiddleware(IdempotencyConfig{
 			Store: store,
 			CacheKeyFunc: func(r *http.Request, key string) string {
-				return r.Header.Get("X-User-ID") + ":" + key
+				return fmt.Sprintf("%s:%s", r.Header.Get("X-User-ID"), key)
 			},
 		})
 		require.NoError(t, err)
@@ -487,7 +488,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 		mw, err := IdempotencyMiddleware(IdempotencyConfig{
 			Store: store,
 			CacheKeyFunc: func(r *http.Request, key string) string {
-				return r.Header.Get("X-User-ID") + ":" + key
+				return fmt.Sprintf("%s:%s", r.Header.Get("X-User-ID"), key)
 			},
 		})
 		require.NoError(t, err)
@@ -1199,7 +1200,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, statusCode int) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(`{"error":"` + http.StatusText(statusCode) + `"}`))
+				w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, http.StatusText(statusCode))))
 			},
 		})
 		require.NoError(t, err)
@@ -1226,7 +1227,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, statusCode int) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(`{"error":"` + http.StatusText(statusCode) + `"}`))
+				w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, http.StatusText(statusCode))))
 			},
 		})
 		require.NoError(t, err)
@@ -1272,7 +1273,7 @@ func TestIdempotencyMiddleware(t *testing.T) {
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, statusCode int) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(`{"error":"` + http.StatusText(statusCode) + `"}`))
+				w.Write([]byte(fmt.Sprintf(`{"error":"%s"}`, http.StatusText(statusCode))))
 			},
 		})
 		require.NoError(t, err)

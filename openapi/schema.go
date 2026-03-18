@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -147,7 +148,7 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 				g.schemas[name] = schema
 			}
 
-			ref := &Schema{Ref: "#/components/schemas/" + name}
+			ref := &Schema{Ref: fmt.Sprintf("#/components/schemas/%s", name)}
 			if nullable {
 				return &Schema{
 					AnyOf: []*Schema{

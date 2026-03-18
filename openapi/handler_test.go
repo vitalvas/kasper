@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -250,7 +251,7 @@ func TestHandleDocsUI(t *testing.T) {
 			r, spec := setupTestRouter()
 			spec.Handle(r, tt.basePath, tt.config)
 
-			w := serveRequest(r, http.MethodGet, tt.basePath+"/")
+			w := serveRequest(r, http.MethodGet, fmt.Sprintf("%s/", tt.basePath))
 			body := w.Body.String()
 			for _, substr := range tt.bodyContains {
 				assert.Contains(t, body, substr)

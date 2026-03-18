@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -827,7 +828,7 @@ func TestInvalidCloseCodeValidation(t *testing.T) {
 	invalidCodes := []int{1004, 1005, 1006, 1015, 999, 2999}
 
 	for _, code := range invalidCodes {
-		t.Run("Invalid close code "+strconv.Itoa(code), func(t *testing.T) {
+		t.Run(fmt.Sprintf("Invalid close code %s", strconv.Itoa(code)), func(t *testing.T) {
 			mock := newMockConn()
 			closePayload := []byte{byte(code >> 8), byte(code)}
 			mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), closePayload, true))
@@ -842,7 +843,7 @@ func TestInvalidCloseCodeValidation(t *testing.T) {
 	validCodes := []int{1000, 1001, 1002, 1003, 1007, 1008, 1011, 3000, 4000, 4999}
 
 	for _, code := range validCodes {
-		t.Run("Valid close code "+strconv.Itoa(code), func(t *testing.T) {
+		t.Run(fmt.Sprintf("Valid close code %s", strconv.Itoa(code)), func(t *testing.T) {
 			mock := newMockConn()
 			closePayload := []byte{byte(code >> 8), byte(code)}
 			mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), closePayload, true))
@@ -1537,7 +1538,7 @@ func BenchmarkWriteMessage(b *testing.B) {
 			data[i] = byte(i % 256)
 		}
 
-		b.Run("Text_"+size.name, func(b *testing.B) {
+		b.Run(fmt.Sprintf("Text_%s", size.name), func(b *testing.B) {
 			mock := &benchMockConn{buf: make([]byte, 0, size.size*2)}
 			conn := newConn(mock, true, 0, 0)
 
@@ -1550,7 +1551,7 @@ func BenchmarkWriteMessage(b *testing.B) {
 			}
 		})
 
-		b.Run("Binary_"+size.name, func(b *testing.B) {
+		b.Run(fmt.Sprintf("Binary_%s", size.name), func(b *testing.B) {
 			mock := &benchMockConn{buf: make([]byte, 0, size.size*2)}
 			conn := newConn(mock, true, 0, 0)
 
@@ -1700,14 +1701,14 @@ func (m *benchMockConn) Reset()                             { m.buf = m.buf[:0] 
 func byteCountSI(b int) string {
 	const unit = 1024
 	if b < unit {
-		return string(rune('0'+b/100)) + string(rune('0'+(b/10)%10)) + string(rune('0'+b%10)) + "B"
+		return fmt.Sprintf("%c%c%cB", rune('0'+b/100), rune('0'+(b/10)%10), rune('0'+b%10))
 	}
 	div, exp := unit, 0
 	for n := b / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	return string(rune('0'+b/div)) + string([]rune{'K', 'M', 'G', 'T', 'P'}[exp]) + "B"
+	return fmt.Sprintf("%c%cB", rune('0'+b/div), []rune{'K', 'M', 'G', 'T', 'P'}[exp])
 }
 
 func FuzzReadFrame(f *testing.F) {

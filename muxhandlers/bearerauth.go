@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -88,6 +89,6 @@ func extractBearerToken(r *http.Request) (string, bool) {
 // bearerUnauthorized writes a 401 response with the WWW-Authenticate: Bearer
 // header per RFC 6750 Section 3 and an empty body.
 func bearerUnauthorized(w http.ResponseWriter, realm string) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s"`, realm))
 	w.WriteHeader(http.StatusUnauthorized)
 }

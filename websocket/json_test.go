@@ -3,6 +3,7 @@ package websocket
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,7 +40,7 @@ func TestJSONReadWrite(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Write and read JSON", func(t *testing.T) {
 		d := &Dialer{}
@@ -109,7 +110,7 @@ func TestReadJSONErrors(t *testing.T) {
 			}))
 			defer server.Close()
 
-			wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+			wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 			d := &Dialer{}
 			conn, _, err := d.Dial(wsURL, nil)
@@ -137,7 +138,7 @@ func TestWriteJSONError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Write to closed connection", func(t *testing.T) {
 		d := &Dialer{}
@@ -172,7 +173,7 @@ func TestJSONWithArrays(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Array of objects", func(t *testing.T) {
 		d := &Dialer{}
@@ -217,7 +218,7 @@ func TestJSONWithMap(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Map object", func(t *testing.T) {
 		d := &Dialer{}
@@ -256,7 +257,7 @@ func TestWriteJSONEncodingError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	t.Run("Unencodable value", func(t *testing.T) {
 		d := &Dialer{}
@@ -353,7 +354,7 @@ func BenchmarkJSON(b *testing.B) {
 	}))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
 
 	b.Run("WriteJSON", func(b *testing.B) {
 		d := &Dialer{}

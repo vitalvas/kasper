@@ -171,7 +171,7 @@ func (r *Route) addRegexpMatcher(tpl string, typ regexpType) error {
 	if typ == regexpTypeHost {
 		if r.parent != nil {
 			if g := r.parent.getRegexpGroup(); g != nil && g.host != nil {
-				tpl = tpl + "." + g.host.template
+				tpl = fmt.Sprintf("%s.%s", tpl, g.host.template)
 			}
 		}
 	}
@@ -332,7 +332,7 @@ func (r *Route) Queries(pairs ...string) *Route {
 		return r
 	}
 	for i := 0; i < length; i++ {
-		if r.err = r.addRegexpMatcher(pairs[i*2]+"="+pairs[i*2+1], regexpTypeQuery); r.err != nil {
+		if r.err = r.addRegexpMatcher(fmt.Sprintf("%s=%s", pairs[i*2], pairs[i*2+1]), regexpTypeQuery); r.err != nil {
 			return r
 		}
 	}
@@ -522,7 +522,7 @@ func (r *Route) URL(pairs ...string) (*url.URL, error) {
 			if qErr != nil {
 				return nil, qErr
 			}
-			queryParts = append(queryParts, q.queryKey+"="+qv)
+			queryParts = append(queryParts, fmt.Sprintf("%s=%s", q.queryKey, qv))
 		}
 		rawQuery = strings.Join(queryParts, "&")
 	}
@@ -670,7 +670,7 @@ func (r *Route) GetQueriesTemplates() ([]string, error) {
 	}
 	templates := make([]string, len(r.regexp.queries))
 	for i, q := range r.regexp.queries {
-		templates[i] = q.queryKey + "=" + q.template
+		templates[i] = fmt.Sprintf("%s=%s", q.queryKey, q.template)
 	}
 	return templates, nil
 }

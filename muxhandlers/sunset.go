@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -50,7 +51,7 @@ func SunsetMiddleware(cfg SunsetConfig) (mux.MiddlewareFunc, error) {
 
 	var linkValue string
 	if cfg.Link != "" {
-		linkValue = `<` + cfg.Link + `>; rel="sunset"`
+		linkValue = fmt.Sprintf(`<%s>; rel="sunset"`, cfg.Link)
 	}
 
 	return func(next http.Handler) http.Handler {

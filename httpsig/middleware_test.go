@@ -3,6 +3,7 @@ package httpsig
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -156,7 +157,7 @@ func TestMiddleware(t *testing.T) {
 			}),
 		}
 
-		resp, err := client.Post(server.URL+"/api/data", "application/json", strings.NewReader(`{"key":"value"}`))
+		resp, err := client.Post(fmt.Sprintf("%s/api/data", server.URL), "application/json", strings.NewReader(`{"key":"value"}`))
 		require.NoError(t, err)
 		defer resp.Body.Close()
 

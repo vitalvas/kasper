@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -340,8 +341,8 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 	if proxyURL.User != nil {
 		username := proxyURL.User.Username()
 		password, _ := proxyURL.User.Password()
-		auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
-		connectReq.Header.Set("Proxy-Authorization", "Basic "+auth)
+		auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", username, password)))
+		connectReq.Header.Set("Proxy-Authorization", fmt.Sprintf("Basic %s", auth))
 	}
 
 	if err := connectReq.Write(proxyConn); err != nil {
@@ -360,7 +361,7 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 
 	if resp.StatusCode != http.StatusOK {
 		proxyConn.Close()
-		return nil, errors.New("websocket: proxy CONNECT failed: " + resp.Status)
+		return nil, fmt.Errorf("websocket: proxy CONNECT failed: %s", resp.Status)
 	}
 
 	// For wss://, upgrade to TLS.
