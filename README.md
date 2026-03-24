@@ -73,6 +73,23 @@ HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530).
 
 ---
 
+## blindrsa
+
+RSA Blind Signatures (RFC 9474 / RSABSSA) for privacy-preserving tokens.
+
+| Feature | Standard | Details |
+|---------|----------|---------|
+| Blind | RFC 9474 | `Prepare` + `Blind` produce a blinded message and blinding state |
+| Sign | RFC 9474 | `BlindSign` signs a blinded message without learning its content |
+| Finalize | RFC 9474 | `Finalize` unblinds and verifies the signature |
+| Verify | RFC 9474 | `Verify` checks a standard RSA-PSS signature |
+| Issuer Handler | RFC 9474 | `http.Handler` for blind token issuance |
+| Client | RFC 9474 | HTTP client for obtaining blind signatures |
+| Verify Middleware | RFC 9474 | `mux.MiddlewareFunc` for token verification |
+| Variants | RFC 9474 | SHA384-PSS, SHA384-PSSZERO, Randomized, Deterministic |
+
+---
+
 ## muxhandlers
 
 HTTP middleware for the mux router.
