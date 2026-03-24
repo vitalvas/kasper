@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/vitalvas/kasper/compare/v0.9.0...v0.10.0) (2026-03-24)
+
+
+### Features
+
+* **blindrsa:** add RSA Blind Signatures package (RFC 9474) ([9a79c85](https://github.com/vitalvas/kasper/commit/9a79c85ed4cb024479afb9b9749c2d9406048de8))
+
 ## [0.9.0](https://github.com/vitalvas/kasper/compare/v0.8.1...v0.9.0) (2026-03-18)
 
 
