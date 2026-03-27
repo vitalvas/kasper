@@ -1,5 +1,3 @@
-// Compression support for WebSocket permessage-deflate extension (RFC 7692).
-// This extension uses the DEFLATE algorithm (RFC 1951) to compress message payloads.
 package websocket
 
 import (
