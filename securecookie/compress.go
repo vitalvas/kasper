@@ -14,6 +14,11 @@ import (
 // 6.5 bits/byte ~ base64-encoded random data.
 const entropyThreshold = 6.5
 
+// newFlateWriter creates a new deflate writer. Tests may override it.
+var newFlateWriter = func(w io.Writer) (io.WriteCloser, error) {
+	return flate.NewWriter(w, flate.BestCompression)
+}
+
 // maybeCompress tries deflate compression on data. Returns a prefixed result:
 // prefixDeflated + compressed bytes if compression saves space, or
 // prefixRaw + original bytes otherwise.
@@ -33,7 +38,7 @@ func maybeCompress(data []byte) []byte {
 	var buf bytes.Buffer
 	buf.WriteByte(prefixDeflated)
 
-	w, err := flate.NewWriter(&buf, flate.BestCompression)
+	w, err := newFlateWriter(&buf)
 	if err != nil {
 		raw := make([]byte, 0, 1+len(data))
 		raw = append(raw, prefixRaw)

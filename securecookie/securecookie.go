@@ -56,6 +56,16 @@ type SecureCookie struct {
 	aad        []byte // additional authenticated data; nil = no AAD (default)
 }
 
+// newAESGCM creates an AES-GCM cipher from a key. Tests may override it.
+var newAESGCM = func(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	return cipher.NewGCM(block)
+}
+
 // New creates a [SecureCookie] with the given AES key.
 // The key must be 16 bytes (AES-128), 24 bytes (AES-192), or 32 bytes (AES-256).
 func New(key []byte) (*SecureCookie, error) {
@@ -63,12 +73,7 @@ func New(key []byte) (*SecureCookie, error) {
 		return nil, ErrInvalidKey
 	}
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidKey, err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newAESGCM(key)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidKey, err)
 	}

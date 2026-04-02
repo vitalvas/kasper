@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -193,4 +195,44 @@ func TestShannonEntropy(t *testing.T) {
 		assert.Greater(t, h, 3.0)
 		assert.Less(t, h, 6.0)
 	})
+}
+
+func TestMaybeCompressFlateNewWriterError(t *testing.T) {
+	orig := newFlateWriter
+	defer func() { newFlateWriter = orig }()
+
+	newFlateWriter = func(_ io.Writer) (io.WriteCloser, error) {
+		return nil, errors.New("flate init failed")
+	}
+
+	data := bytes.Repeat([]byte("abcdefghij"), 10) // low entropy, >= 32 bytes
+	compressed := maybeCompress(data)
+
+	assert.Equal(t, byte(prefixRaw), compressed[0])
+	assert.Equal(t, data, compressed[1:])
+}
+
+func TestMaybeCompressFlateWriteError(t *testing.T) {
+	orig := newFlateWriter
+	defer func() { newFlateWriter = orig }()
+
+	newFlateWriter = func(_ io.Writer) (io.WriteCloser, error) {
+		return &failWriteCloser{}, nil
+	}
+
+	data := bytes.Repeat([]byte("abcdefghij"), 10)
+	compressed := maybeCompress(data)
+
+	assert.Equal(t, byte(prefixRaw), compressed[0])
+	assert.Equal(t, data, compressed[1:])
+}
+
+type failWriteCloser struct{}
+
+func (failWriteCloser) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+func (failWriteCloser) Close() error {
+	return nil
 }

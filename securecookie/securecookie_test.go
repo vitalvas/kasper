@@ -1,6 +1,7 @@
 package securecookie
 
 import (
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -52,6 +53,18 @@ func TestNew(t *testing.T) {
 
 	t.Run("17 bytes rejected", func(t *testing.T) {
 		_, err := New(make([]byte, 17))
+		assert.ErrorIs(t, err, ErrInvalidKey)
+	})
+
+	t.Run("cipher init failure", func(t *testing.T) {
+		orig := newAESGCM
+		defer func() { newAESGCM = orig }()
+
+		newAESGCM = func(_ []byte) (cipher.AEAD, error) {
+			return nil, errors.New("cipher init failed")
+		}
+
+		_, err := New(make([]byte, 32))
 		assert.ErrorIs(t, err, ErrInvalidKey)
 	})
 }
