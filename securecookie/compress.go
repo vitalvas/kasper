@@ -33,8 +33,23 @@ func maybeCompress(data []byte) []byte {
 	var buf bytes.Buffer
 	buf.WriteByte(prefixDeflated)
 
-	w, _ := flate.NewWriter(&buf, flate.BestCompression)
-	w.Write(data)
+	w, err := flate.NewWriter(&buf, flate.BestCompression)
+	if err != nil {
+		raw := make([]byte, 0, 1+len(data))
+		raw = append(raw, prefixRaw)
+		raw = append(raw, data...)
+
+		return raw
+	}
+
+	if _, err := w.Write(data); err != nil {
+		raw := make([]byte, 0, 1+len(data))
+		raw = append(raw, prefixRaw)
+		raw = append(raw, data...)
+
+		return raw
+	}
+
 	w.Close()
 
 	// Use compressed only if strictly smaller than raw + prefix.

@@ -132,7 +132,7 @@ Authenticated and encrypted cookie values using AES-GCM.
 | Feature | Details |
 |---------|---------|
 | Encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM |
-| AAD | Cookie name (default), custom context, or disabled |
+| AAD | Optional binding to user ID, cookie name, tenant, etc. |
 | Timestamps | MaxAge, MinAge, future-timestamp rejection (5 min skew) |
 | Key rotation | Multi-codec encode/decode via `CodecsFromKeys` |
 | Serialization | JSON (default), pluggable `Serializer` interface |

@@ -20,11 +20,11 @@ func TestCompression(t *testing.T) {
 
 	t.Run("small payload not compressed", func(t *testing.T) {
 		src := "hi"
-		encoded, err := sc.Encode("s", src)
+		encoded, err := sc.Encode(src)
 		require.NoError(t, err)
 
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, src, dst)
 	})
@@ -35,11 +35,11 @@ func TestCompression(t *testing.T) {
 			src[fmt.Sprintf("key-%03d", i)] = "same-value-repeated"
 		}
 
-		encoded, err := sc.Encode("s", src)
+		encoded, err := sc.Encode(src)
 		require.NoError(t, err)
 
 		var dst map[string]string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, src, dst)
 	})
@@ -50,7 +50,7 @@ func TestCompression(t *testing.T) {
 			src[fmt.Sprintf("field-%03d", i)] = "this is a repeated value string"
 		}
 
-		encodedCompressed, err := sc.Encode("s", src)
+		encodedCompressed, err := sc.Encode(src)
 		require.NoError(t, err)
 
 		jsonBytes, _ := JSONSerializer{}.Serialize(src)
@@ -59,7 +59,7 @@ func TestCompression(t *testing.T) {
 			"compressed encoding should be smaller than 2x JSON size")
 
 		var dst map[string]string
-		err = sc.Decode("s", encodedCompressed, &dst)
+		err = sc.Decode(encodedCompressed, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, src, dst)
 	})
@@ -79,11 +79,11 @@ func TestDecodeCorruptedCompressedPayload(t *testing.T) {
 	_, err = rand.Read(nonce)
 	require.NoError(t, err)
 
-	ciphertext := sc.gcm.Seal(nonce, nonce, payload, []byte("s"))
+	ciphertext := sc.gcm.Seal(nonce, nonce, payload, nil)
 	encoded := base64.RawURLEncoding.EncodeToString(ciphertext)
 
 	var dst string
-	err = sc.Decode("s", encoded, &dst)
+	err = sc.Decode(encoded, &dst)
 	assert.ErrorIs(t, err, ErrDecodeFailed)
 	assert.Contains(t, err.Error(), "decompression")
 }

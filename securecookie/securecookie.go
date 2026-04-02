@@ -39,8 +39,8 @@ const (
 
 // Codec encodes and decodes cookie values.
 type Codec interface {
-	Encode(name string, value any) (string, error)
-	Decode(name string, value string, dst any) error
+	Encode(value any) (string, error)
+	Decode(value string, dst any) error
 }
 
 // SecureCookie encodes and decodes authenticated, encrypted cookie values
@@ -53,8 +53,7 @@ type SecureCookie struct {
 	serializer Serializer
 	now        func() time.Time
 	randReader io.Reader
-	aad        []byte // custom additional authenticated data
-	aadSet     bool   // true when AdditionalData has been called with non-nil
+	aad        []byte // additional authenticated data; nil = no AAD (default)
 }
 
 // New creates a [SecureCookie] with the given AES key.
@@ -64,11 +63,15 @@ func New(key []byte) (*SecureCookie, error) {
 		return nil, ErrInvalidKey
 	}
 
-	// aes.NewCipher cannot fail with a valid key size (16, 24, or 32 bytes).
-	block, _ := aes.NewCipher(key)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidKey, err)
+	}
 
-	// cipher.NewGCM cannot fail on a standard AES block cipher.
-	gcm, _ := cipher.NewGCM(block)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidKey, err)
+	}
 
 	return &SecureCookie{
 		gcm:        gcm,
@@ -153,12 +156,10 @@ func (s *SecureCookie) SetSerializer(sz Serializer) *SecureCookie {
 }
 
 // AdditionalData sets custom additional authenticated data (AAD) bound into
-// the GCM authentication tag. When set, this replaces the default behavior
-// of using the cookie name as AAD.
+// the GCM authentication tag. Use this to bind cookies to context such as
+// a user ID, session ID, or cookie name.
 //
-//   - Custom data: binds cookies to context such as a user ID or session ID.
-//   - Empty slice: disables AAD entirely (no binding).
-//   - Nil: reverts to the default (cookie name as AAD).
+// By default no AAD is used. Pass nil to clear.
 func (s *SecureCookie) AdditionalData(data []byte) *SecureCookie {
 	if s == nil {
 		return s
@@ -166,28 +167,16 @@ func (s *SecureCookie) AdditionalData(data []byte) *SecureCookie {
 
 	if data == nil {
 		s.aad = nil
-		s.aadSet = false
 	} else {
 		s.aad = make([]byte, len(data))
 		copy(s.aad, data)
-		s.aadSet = true
 	}
 
 	return s
 }
 
-func (s *SecureCookie) buildAAD(name string) []byte {
-	if s.aadSet {
-		return s.aad
-	}
-
-	return []byte(name)
-}
-
-// Encode serializes, encrypts, and base64-encodes a value. By default the
-// cookie name is bound as additional authenticated data (AAD) to prevent
-// value transplant. Use [SecureCookie.AdditionalData] to override.
-func (s *SecureCookie) Encode(name string, value any) (string, error) {
+// Encode serializes, encrypts, and base64-encodes a value.
+func (s *SecureCookie) Encode(value any) (string, error) {
 	if s == nil || s.gcm == nil {
 		return "", ErrEncodeFailed
 	}
@@ -208,13 +197,13 @@ func (s *SecureCookie) Encode(name string, value any) (string, error) {
 	payload = append(payload, ts...)
 	payload = append(payload, compressed...)
 
-	// Encrypt with cookie name as AAD.
+	// Encrypt with optional AAD.
 	nonce := make([]byte, s.gcm.NonceSize())
 	if _, err := io.ReadFull(s.randReader, nonce); err != nil {
 		return "", fmt.Errorf("%w: nonce generation: %s", ErrEncodeFailed, err)
 	}
 
-	ciphertext := s.gcm.Seal(nonce, nonce, payload, s.buildAAD(name))
+	ciphertext := s.gcm.Seal(nonce, nonce, payload, s.aad)
 
 	encoded := base64.RawURLEncoding.EncodeToString(ciphertext)
 
@@ -227,7 +216,7 @@ func (s *SecureCookie) Encode(name string, value any) (string, error) {
 
 // Decode base64-decodes, decrypts, validates the timestamp, and deserializes
 // a cookie value into dst.
-func (s *SecureCookie) Decode(name string, value string, dst any) error {
+func (s *SecureCookie) Decode(value string, dst any) error {
 	if s == nil || s.gcm == nil {
 		return ErrDecodeFailed
 	}
@@ -247,7 +236,7 @@ func (s *SecureCookie) Decode(name string, value string, dst any) error {
 	}
 
 	nonce := ciphertext[:nonceSize]
-	payload, err := s.gcm.Open(nil, nonce, ciphertext[nonceSize:], s.buildAAD(name))
+	payload, err := s.gcm.Open(nil, nonce, ciphertext[nonceSize:], s.aad)
 	if err != nil {
 		return fmt.Errorf("%w: decryption failed", ErrDecodeFailed)
 	}
@@ -337,7 +326,7 @@ func CodecsFromKeys(keys ...[]byte) ([]Codec, error) {
 }
 
 // EncodeMulti encodes a value using the first codec in the list.
-func EncodeMulti(name string, value any, codecs ...Codec) (string, error) {
+func EncodeMulti(value any, codecs ...Codec) (string, error) {
 	if len(codecs) == 0 {
 		return "", ErrNoCodecs
 	}
@@ -346,7 +335,7 @@ func EncodeMulti(name string, value any, codecs ...Codec) (string, error) {
 		return "", ErrEncodeFailed
 	}
 
-	return codecs[0].Encode(name, value)
+	return codecs[0].Encode(value)
 }
 
 // DecodeMulti tries each codec in order and returns the first successful decode.
@@ -356,7 +345,7 @@ func EncodeMulti(name string, value any, codecs ...Codec) (string, error) {
 // written on a fully successful decode because GCM decryption and timestamp
 // validation occur before deserialization. Custom [Codec] implementations
 // should follow the same pattern: validate before writing to dst.
-func DecodeMulti(name string, value string, dst any, codecs ...Codec) error {
+func DecodeMulti(value string, dst any, codecs ...Codec) error {
 	if len(codecs) == 0 {
 		return ErrNoCodecs
 	}
@@ -369,7 +358,7 @@ func DecodeMulti(name string, value string, dst any, codecs ...Codec) error {
 			continue
 		}
 
-		if err := c.Decode(name, value, dst); err != nil {
+		if err := c.Decode(value, dst); err != nil {
 			lastErr = err
 			continue
 		}

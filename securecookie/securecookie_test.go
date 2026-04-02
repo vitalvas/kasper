@@ -67,11 +67,11 @@ func TestEncodeDecodeAllKeySizes(t *testing.T) {
 			sc, err := New(key)
 			require.NoError(t, err)
 
-			encoded, err := sc.Encode("s", "hello")
+			encoded, err := sc.Encode("hello")
 			require.NoError(t, err)
 
 			var dst string
-			err = sc.Decode("s", encoded, &dst)
+			err = sc.Decode(encoded, &dst)
 			require.NoError(t, err)
 			assert.Equal(t, "hello", dst)
 		})
@@ -83,12 +83,12 @@ func TestEncodeDecode(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("round trip string", func(t *testing.T) {
-		encoded, err := sc.Encode("session", "hello world")
+		encoded, err := sc.Encode("hello world")
 		require.NoError(t, err)
 		assert.NotEmpty(t, encoded)
 
 		var dst string
-		err = sc.Decode("session", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "hello world", dst)
 	})
@@ -100,46 +100,39 @@ func TestEncodeDecode(t *testing.T) {
 		}
 
 		src := data{Name: "test", Count: 42}
-		encoded, err := sc.Encode("app", src)
+		encoded, err := sc.Encode(src)
 		require.NoError(t, err)
 
 		var dst data
-		err = sc.Decode("app", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, src, dst)
 	})
 
 	t.Run("round trip map", func(t *testing.T) {
 		src := map[string]string{"key": "value", "foo": "bar"}
-		encoded, err := sc.Encode("prefs", src)
+		encoded, err := sc.Encode(src)
 		require.NoError(t, err)
 
 		var dst map[string]string
-		err = sc.Decode("prefs", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, src, dst)
 	})
 }
 
-func TestNameBinding(t *testing.T) {
+func TestNameNotBoundByDefault(t *testing.T) {
 	sc, err := New(testKey())
 	require.NoError(t, err)
 
-	encoded, err := sc.Encode("session", "secret")
+	encoded, err := sc.Encode("secret")
 	require.NoError(t, err)
 
-	t.Run("correct name succeeds", func(t *testing.T) {
-		var dst string
-		err := sc.Decode("session", encoded, &dst)
-		require.NoError(t, err)
-		assert.Equal(t, "secret", dst)
-	})
-
-	t.Run("wrong name fails", func(t *testing.T) {
-		var dst string
-		err := sc.Decode("other", encoded, &dst)
-		assert.ErrorIs(t, err, ErrDecodeFailed)
-	})
+	// By default no AAD is used, so any name works.
+	var dst string
+	err = sc.Decode(encoded, &dst)
+	require.NoError(t, err)
+	assert.Equal(t, "secret", dst)
 }
 
 func TestAdditionalData(t *testing.T) {
@@ -149,52 +142,47 @@ func TestAdditionalData(t *testing.T) {
 	t.Run("custom AAD round trip", func(t *testing.T) {
 		sc.AdditionalData([]byte("user-123"))
 
-		encoded, err := sc.Encode("session", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		var dst string
-		err = sc.Decode("session", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
 
-	t.Run("custom AAD ignores cookie name", func(t *testing.T) {
+	t.Run("same AAD round trip", func(t *testing.T) {
 		sc.AdditionalData([]byte("user-123"))
 
-		encoded, err := sc.Encode("session", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
-		// Decoding with a different cookie name still works because AAD is custom.
 		var dst string
-		err = sc.Decode("other-name", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
 
 	t.Run("wrong custom AAD fails", func(t *testing.T) {
 		sc.AdditionalData([]byte("user-123"))
-		encoded, err := sc.Encode("session", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		sc.AdditionalData([]byte("user-456"))
 		var dst string
-		err = sc.Decode("session", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
-	t.Run("revert to cookie name", func(t *testing.T) {
+	t.Run("clear AAD with nil", func(t *testing.T) {
 		sc.AdditionalData(nil)
 
-		encoded, err := sc.Encode("session", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
-		// Cookie name is AAD again, so wrong name fails.
+		// No AAD, so any name works.
 		var dst string
-		err = sc.Decode("other", encoded, &dst)
-		assert.ErrorIs(t, err, ErrDecodeFailed)
-
-		// Correct name succeeds.
-		err = sc.Decode("session", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -202,12 +190,12 @@ func TestAdditionalData(t *testing.T) {
 	t.Run("disabled AAD with empty slice", func(t *testing.T) {
 		sc.AdditionalData([]byte{})
 
-		encoded, err := sc.Encode("session", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
-		// Any cookie name works when AAD is disabled.
+		// Empty AAD works the same as no AAD.
 		var dst string
-		err = sc.Decode("any-name", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -218,7 +206,7 @@ func TestAdditionalData(t *testing.T) {
 		aad := []byte("user-123")
 		sc.AdditionalData(aad)
 
-		encoded, err := sc.Encode("s", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		// Mutate the original slice after setting AAD.
@@ -226,7 +214,7 @@ func TestAdditionalData(t *testing.T) {
 
 		// Decode should still work because AAD was copied.
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -247,11 +235,11 @@ func TestDifferentKeys(t *testing.T) {
 	sc2, err := New(key2)
 	require.NoError(t, err)
 
-	encoded, err := sc1.Encode("s", "data")
+	encoded, err := sc1.Encode("data")
 	require.NoError(t, err)
 
 	var dst string
-	err = sc2.Decode("s", encoded, &dst)
+	err = sc2.Decode(encoded, &dst)
 	assert.ErrorIs(t, err, ErrDecodeFailed)
 }
 
@@ -263,13 +251,13 @@ func TestMaxAge(t *testing.T) {
 	sc.now = func() time.Time { return now }
 	sc.MaxAge(60) // 60 seconds
 
-	encoded, err := sc.Encode("s", "data")
+	encoded, err := sc.Encode("data")
 	require.NoError(t, err)
 
 	t.Run("fresh cookie accepted", func(t *testing.T) {
 		sc.now = func() time.Time { return now.Add(30 * time.Second) }
 		var dst string
-		err := sc.Decode("s", encoded, &dst)
+		err := sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -277,7 +265,7 @@ func TestMaxAge(t *testing.T) {
 	t.Run("expired cookie rejected", func(t *testing.T) {
 		sc.now = func() time.Time { return now.Add(61 * time.Second) }
 		var dst string
-		err := sc.Decode("s", encoded, &dst)
+		err := sc.Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrTimestampExpired)
 	})
 
@@ -285,7 +273,7 @@ func TestMaxAge(t *testing.T) {
 		sc.MaxAge(0)
 		sc.now = func() time.Time { return now.Add(999 * time.Hour) }
 		var dst string
-		err := sc.Decode("s", encoded, &dst)
+		err := sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -302,13 +290,13 @@ func TestFutureTimestamp(t *testing.T) {
 	t.Run("within clock skew accepted", func(t *testing.T) {
 		// Encode at now+3m (within 5m tolerance).
 		sc.now = func() time.Time { return now.Add(3 * time.Minute) }
-		encoded, err := sc.Encode("s", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		// Decode at now (3m before the timestamp).
 		sc.now = func() time.Time { return now }
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -316,26 +304,26 @@ func TestFutureTimestamp(t *testing.T) {
 	t.Run("far future rejected", func(t *testing.T) {
 		// Encode at now+2h.
 		sc.now = func() time.Time { return now.Add(2 * time.Hour) }
-		encoded, err := sc.Encode("s", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		// Decode at now (2h before the timestamp).
 		sc.now = func() time.Time { return now }
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrTimestampFuture)
 	})
 
 	t.Run("exactly at skew boundary accepted", func(t *testing.T) {
 		// Encode at now+5m (exactly at tolerance).
 		sc.now = func() time.Time { return now.Add(5 * time.Minute) }
-		encoded, err := sc.Encode("s", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		// Decode at now.
 		sc.now = func() time.Time { return now }
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -343,13 +331,13 @@ func TestFutureTimestamp(t *testing.T) {
 	t.Run("one second past skew rejected", func(t *testing.T) {
 		// Encode at now+5m1s (just past tolerance).
 		sc.now = func() time.Time { return now.Add(5*time.Minute + time.Second) }
-		encoded, err := sc.Encode("s", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		// Decode at now.
 		sc.now = func() time.Time { return now }
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrTimestampFuture)
 	})
 }
@@ -363,20 +351,20 @@ func TestMinAge(t *testing.T) {
 	sc.MaxAge(0) // disable max age
 	sc.MinAge(10)
 
-	encoded, err := sc.Encode("s", "data")
+	encoded, err := sc.Encode("data")
 	require.NoError(t, err)
 
 	t.Run("too new rejected", func(t *testing.T) {
 		sc.now = func() time.Time { return now.Add(5 * time.Second) }
 		var dst string
-		err := sc.Decode("s", encoded, &dst)
+		err := sc.Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrTimestampTooNew)
 	})
 
 	t.Run("old enough accepted", func(t *testing.T) {
 		sc.now = func() time.Time { return now.Add(11 * time.Second) }
 		var dst string
-		err := sc.Decode("s", encoded, &dst)
+		err := sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "data", dst)
 	})
@@ -388,22 +376,22 @@ func TestMaxLength(t *testing.T) {
 	sc.MaxLength(10)
 
 	t.Run("encode rejects too long", func(t *testing.T) {
-		_, err := sc.Encode("s", "this is a very long string that will produce a long encoded value")
+		_, err := sc.Encode("this is a very long string that will produce a long encoded value")
 		assert.ErrorIs(t, err, ErrValueTooLong)
 	})
 
 	t.Run("decode rejects too long", func(t *testing.T) {
-		err := sc.Decode("s", "aaaaaaaaaaaaaaaaaaa", nil)
+		err := sc.Decode("aaaaaaaaaaaaaaaaaaa", nil)
 		assert.ErrorIs(t, err, ErrValueTooLong)
 	})
 
 	t.Run("disabled length check", func(t *testing.T) {
 		sc.MaxLength(0)
-		encoded, err := sc.Encode("s", "this is a very long string")
+		encoded, err := sc.Encode("this is a very long string")
 		require.NoError(t, err)
 
 		var dst string
-		err = sc.Decode("s", encoded, &dst)
+		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "this is a very long string", dst)
 	})
@@ -413,12 +401,12 @@ func TestNilReceiver(t *testing.T) {
 	var sc *SecureCookie
 
 	t.Run("encode", func(t *testing.T) {
-		_, err := sc.Encode("s", "data")
+		_, err := sc.Encode("data")
 		assert.ErrorIs(t, err, ErrEncodeFailed)
 	})
 
 	t.Run("decode", func(t *testing.T) {
-		err := sc.Decode("s", "value", nil)
+		err := sc.Decode("value", nil)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
@@ -443,12 +431,12 @@ func TestZeroValueStruct(t *testing.T) {
 	var sc SecureCookie
 
 	t.Run("encode returns error", func(t *testing.T) {
-		_, err := sc.Encode("s", "data")
+		_, err := sc.Encode("data")
 		assert.ErrorIs(t, err, ErrEncodeFailed)
 	})
 
 	t.Run("decode returns error", func(t *testing.T) {
-		err := sc.Decode("s", "value", nil)
+		err := sc.Decode("value", nil)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 }
@@ -462,11 +450,11 @@ func TestSetSerializerTypedNil(t *testing.T) {
 	sc.SetSerializer(sz)
 
 	// Encode/Decode should still work with the default serializer.
-	encoded, err := sc.Encode("s", "hello")
+	encoded, err := sc.Encode("hello")
 	require.NoError(t, err)
 
 	var dst string
-	err = sc.Decode("s", encoded, &dst)
+	err = sc.Decode(encoded, &dst)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", dst)
 }
@@ -476,23 +464,23 @@ func TestDecodeInvalid(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("invalid base64", func(t *testing.T) {
-		err := sc.Decode("s", "not!valid!base64!", nil)
+		err := sc.Decode("not!valid!base64!", nil)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
 	t.Run("too short ciphertext", func(t *testing.T) {
-		err := sc.Decode("s", "dG9v", nil) // "too" in base64
+		err := sc.Decode("dG9v", nil) // "too" in base64
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
 	t.Run("corrupted ciphertext", func(t *testing.T) {
-		encoded, err := sc.Encode("s", "data")
+		encoded, err := sc.Encode("data")
 		require.NoError(t, err)
 
 		// Flip a byte in the middle.
 		corrupted := []byte(encoded)
 		corrupted[len(corrupted)/2] ^= 0xff
-		err = sc.Decode("s", string(corrupted), nil)
+		err = sc.Decode(string(corrupted), nil)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 }
@@ -505,34 +493,34 @@ func TestKeyRotation(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("encode uses first key", func(t *testing.T) {
-		encoded, err := EncodeMulti("s", "new data", codecs...)
+		encoded, err := EncodeMulti("new data", codecs...)
 		require.NoError(t, err)
 
 		// Should decode with first codec (key2).
 		var dst string
-		err = codecs[0].Decode("s", encoded, &dst)
+		err = codecs[0].Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, "new data", dst)
 
 		// Should fail with second codec (key1) alone.
-		err = codecs[1].Decode("s", encoded, &dst)
+		err = codecs[1].Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
 	t.Run("decode tries old key", func(t *testing.T) {
 		// Encode with old key only.
-		oldEncoded, err := codecs[1].Encode("s", "old data")
+		oldEncoded, err := codecs[1].Encode("old data")
 		require.NoError(t, err)
 
 		// DecodeMulti should find it via second codec.
 		var dst string
-		err = DecodeMulti("s", oldEncoded, &dst, codecs...)
+		err = DecodeMulti(oldEncoded, &dst, codecs...)
 		require.NoError(t, err)
 		assert.Equal(t, "old data", dst)
 	})
 
 	t.Run("all codecs fail", func(t *testing.T) {
-		err := DecodeMulti("s", "garbage", nil, codecs...)
+		err := DecodeMulti("garbage", nil, codecs...)
 		assert.Error(t, err)
 	})
 }
@@ -552,13 +540,13 @@ func TestCodecsFromKeys(t *testing.T) {
 func TestEncodeMultiNilCodec(t *testing.T) {
 	t.Run("untyped nil", func(t *testing.T) {
 		var c Codec
-		_, err := EncodeMulti("s", "data", c)
+		_, err := EncodeMulti("data", c)
 		assert.ErrorIs(t, err, ErrEncodeFailed)
 	})
 
 	t.Run("typed nil", func(t *testing.T) {
 		var c Codec = (*SecureCookie)(nil)
-		_, err := EncodeMulti("s", "data", c)
+		_, err := EncodeMulti("data", c)
 		assert.ErrorIs(t, err, ErrEncodeFailed)
 	})
 }
@@ -567,14 +555,14 @@ func TestDecodeMultiNilCodec(t *testing.T) {
 	t.Run("all nil codecs", func(t *testing.T) {
 		var c Codec
 		var dst string
-		err := DecodeMulti("s", "data", &dst, c, c)
+		err := DecodeMulti("data", &dst, c, c)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
 	t.Run("typed nil codec", func(t *testing.T) {
 		var c Codec = (*SecureCookie)(nil)
 		var dst string
-		err := DecodeMulti("s", "data", &dst, c)
+		err := DecodeMulti("data", &dst, c)
 		assert.ErrorIs(t, err, ErrDecodeFailed)
 	})
 
@@ -582,12 +570,12 @@ func TestDecodeMultiNilCodec(t *testing.T) {
 		sc, err := New(testKey())
 		require.NoError(t, err)
 
-		encoded, err := sc.Encode("s", "hello")
+		encoded, err := sc.Encode("hello")
 		require.NoError(t, err)
 
 		var c Codec
 		var dst string
-		err = DecodeMulti("s", encoded, &dst, c, sc)
+		err = DecodeMulti(encoded, &dst, c, sc)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", dst)
 	})
@@ -596,12 +584,12 @@ func TestDecodeMultiNilCodec(t *testing.T) {
 		sc, err := New(testKey())
 		require.NoError(t, err)
 
-		encoded, err := sc.Encode("s", "hello")
+		encoded, err := sc.Encode("hello")
 		require.NoError(t, err)
 
 		var c Codec = (*SecureCookie)(nil)
 		var dst string
-		err = DecodeMulti("s", encoded, &dst, c, sc)
+		err = DecodeMulti(encoded, &dst, c, sc)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", dst)
 	})
@@ -612,7 +600,7 @@ func TestDecodeMultiDeserializeError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Encode a string value.
-	encoded, err := sc.Encode("s", "not-a-struct")
+	encoded, err := sc.Encode("not-a-struct")
 	require.NoError(t, err)
 
 	// Try to decode into an incompatible struct type.
@@ -621,7 +609,7 @@ func TestDecodeMultiDeserializeError(t *testing.T) {
 	}
 
 	var dst strict
-	err = DecodeMulti("s", encoded, &dst, sc)
+	err = DecodeMulti(encoded, &dst, sc)
 	// json.Unmarshal("not-a-struct" -> struct) fails.
 	assert.ErrorIs(t, err, ErrDecodeFailed)
 	assert.Contains(t, err.Error(), "deserialization")
@@ -638,25 +626,25 @@ func TestDecodeMultiDoesNotPoisonDst(t *testing.T) {
 	require.NoError(t, err)
 
 	// Encode with key2.
-	encoded, err := sc2.Encode("s", "correct")
+	encoded, err := sc2.Encode("correct")
 	require.NoError(t, err)
 
 	// DecodeMulti: first codec (key1) fails, second (key2) succeeds.
 	// dst should only contain the result from the successful codec.
 	var dst string
-	err = DecodeMulti("s", encoded, &dst, sc1, sc2)
+	err = DecodeMulti(encoded, &dst, sc1, sc2)
 	require.NoError(t, err)
 	assert.Equal(t, "correct", dst)
 }
 
 func TestEncodeDecodeMultiEmpty(t *testing.T) {
 	t.Run("encode no codecs", func(t *testing.T) {
-		_, err := EncodeMulti("s", "data")
+		_, err := EncodeMulti("data")
 		assert.ErrorIs(t, err, ErrNoCodecs)
 	})
 
 	t.Run("decode no codecs", func(t *testing.T) {
-		err := DecodeMulti("s", "data", nil)
+		err := DecodeMulti("data", nil)
 		assert.ErrorIs(t, err, ErrNoCodecs)
 	})
 }
@@ -703,11 +691,11 @@ func TestSetSerializer(t *testing.T) {
 	// Custom serializer that prepends a byte.
 	sc.SetSerializer(&prefixSerializer{prefix: 0xAA})
 
-	encoded, err := sc.Encode("s", "hello")
+	encoded, err := sc.Encode("hello")
 	require.NoError(t, err)
 
 	var dst string
-	err = sc.Decode("s", encoded, &dst)
+	err = sc.Decode(encoded, &dst)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", dst)
 }
@@ -773,11 +761,11 @@ func TestSetSerializerNil(t *testing.T) {
 	// Nil serializer should be ignored, keeping the default.
 	sc.SetSerializer(nil)
 
-	encoded, err := sc.Encode("s", "hello")
+	encoded, err := sc.Encode("hello")
 	require.NoError(t, err)
 
 	var dst string
-	err = sc.Decode("s", encoded, &dst)
+	err = sc.Decode(encoded, &dst)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", dst)
 }
@@ -787,12 +775,12 @@ func TestDecodeDeserializeErrorWrapped(t *testing.T) {
 	require.NoError(t, err)
 
 	// Encode a string value.
-	encoded, err := sc.Encode("s", "hello")
+	encoded, err := sc.Encode("hello")
 	require.NoError(t, err)
 
 	// Try to decode into an incompatible type (int).
 	var dst int
-	err = sc.Decode("s", encoded, &dst)
+	err = sc.Decode(encoded, &dst)
 	assert.ErrorIs(t, err, ErrDecodeFailed)
 	assert.Contains(t, err.Error(), "deserialization")
 }
@@ -802,10 +790,10 @@ func TestUniqueNonces(t *testing.T) {
 	require.NoError(t, err)
 
 	// Same value encoded twice should produce different ciphertext.
-	e1, err := sc.Encode("s", "same")
+	e1, err := sc.Encode("same")
 	require.NoError(t, err)
 
-	e2, err := sc.Encode("s", "same")
+	e2, err := sc.Encode("same")
 	require.NoError(t, err)
 
 	assert.NotEqual(t, e1, e2)
@@ -816,7 +804,7 @@ func TestEncodeSerializerError(t *testing.T) {
 	require.NoError(t, err)
 	sc.SetSerializer(&failSerializer{})
 
-	_, err = sc.Encode("s", "data")
+	_, err = sc.Encode("data")
 	assert.ErrorIs(t, err, ErrEncodeFailed)
 	assert.Contains(t, err.Error(), "serialization")
 }
@@ -837,7 +825,7 @@ func TestEncodeNonceGenerationError(t *testing.T) {
 	require.NoError(t, err)
 	sc.randReader = &errReader{}
 
-	_, err = sc.Encode("s", "data")
+	_, err = sc.Encode("data")
 	assert.ErrorIs(t, err, ErrEncodeFailed)
 	assert.Contains(t, err.Error(), "nonce generation")
 }
@@ -862,11 +850,11 @@ func TestDecodePayloadTooShort(t *testing.T) {
 
 	// Payload of only 4 bytes (less than 8-byte timestamp).
 	shortPayload := []byte{0x01, 0x02, 0x03, 0x04}
-	ciphertext := sc.gcm.Seal(nonce, nonce, shortPayload, []byte("s"))
+	ciphertext := sc.gcm.Seal(nonce, nonce, shortPayload, nil)
 	encoded := base64.RawURLEncoding.EncodeToString(ciphertext)
 
 	var dst string
-	err = sc.Decode("s", encoded, &dst)
+	err = sc.Decode(encoded, &dst)
 	assert.ErrorIs(t, err, ErrDecodeFailed)
 	assert.Contains(t, err.Error(), "payload too short")
 }

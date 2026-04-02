@@ -5,7 +5,7 @@ Authenticated and encrypted cookie values using AES-GCM.
 ## Features
 
 - AES-GCM authenticated encryption (AES-128, AES-192, AES-256)
-- Configurable additional authenticated data (AAD) -- cookie name by default, custom context, or disabled
+- Optional additional authenticated data (AAD) binding (user ID, cookie name, tenant, etc.)
 - Embedded timestamp with configurable MaxAge, MinAge, and future-timestamp rejection
 - Key rotation via multi-codec encode/decode
 - Pluggable serialization (JSON by default)
@@ -27,10 +27,10 @@ go get github.com/vitalvas/kasper/securecookie
 key, _ := securecookie.GenerateKey(32) // 16 for AES-128, 24 for AES-192, 32 for AES-256
 sc, _ := securecookie.New(key)
 
-encoded, _ := sc.Encode("session", map[string]string{"user": "alice"})
+encoded, _ := sc.Encode(map[string]string{"user": "alice"})
 
 var dst map[string]string
-_ = sc.Decode("session", encoded, &dst)
+_ = sc.Decode(encoded, &dst)
 ```
 
 ### Configuration
@@ -46,15 +46,27 @@ Set to 0 to disable MaxAge, MinAge, or MaxLength checks.
 
 ### Key Rotation
 
-Encode always uses the first key. Decode tries each key in order until one succeeds.
+`CodecsFromKeys` creates a `Codec` slice from multiple AES keys. `EncodeMulti` always uses the first (newest) key. `DecodeMulti` tries each key in order until one succeeds.
 
 ```go
 codecs, _ := securecookie.CodecsFromKeys(currentKey, previousKey)
 
-encoded, _ := securecookie.EncodeMulti("session", value, codecs...)
+encoded, _ := securecookie.EncodeMulti(value, codecs...)
 
 var dst MySession
-_ = securecookie.DecodeMulti("session", encoded, &dst, codecs...)
+_ = securecookie.DecodeMulti(encoded, &dst, codecs...)
+```
+
+Rotation strategy:
+
+1. Generate a new key and add it at the front of the list
+2. Keep old keys in the list until all cookies issued with them have expired (MaxAge)
+3. Remove expired keys from the list
+
+Keys can have different sizes (e.g., rotating from AES-128 to AES-256):
+
+```go
+codecs, _ := securecookie.CodecsFromKeys(newKey256, oldKey128)
 ```
 
 ### Custom Serializer
@@ -75,19 +87,16 @@ type Serializer interface {
 
 ### Additional Authenticated Data (AAD)
 
-By default, the cookie name is bound as GCM additional authenticated data, preventing a value encoded for one cookie name from being used with another.
+AAD is bound into the GCM authentication tag. By default no AAD is used. Use `AdditionalData` to bind cookies to context such as a user ID, cookie name, or tenant:
 
 ```go
-// Default: cookie name as AAD (value is bound to the name "session")
-sc.Encode("session", value)
-
-// Custom AAD: bind to user ID, tenant, or session context
+// Bind to user ID
 sc.AdditionalData([]byte("user-123"))
 
-// Disable AAD entirely (no binding)
-sc.AdditionalData([]byte{})
+// Bind to cookie name
+sc.AdditionalData([]byte("session"))
 
-// Revert to default (cookie name)
+// Clear AAD (default)
 sc.AdditionalData(nil)
 ```
 
@@ -95,7 +104,7 @@ sc.AdditionalData(nil)
 
 ```go
 func setHandler(w http.ResponseWriter, r *http.Request) {
-    encoded, _ := sc.Encode("prefs", map[string]string{"theme": "dark"})
+    encoded, _ := sc.Encode(map[string]string{"theme": "dark"})
     http.SetCookie(w, &http.Cookie{
         Name:     "prefs",
         Value:    encoded,
@@ -110,7 +119,7 @@ func setHandler(w http.ResponseWriter, r *http.Request) {
 func getHandler(w http.ResponseWriter, r *http.Request) {
     cookie, _ := r.Cookie("prefs")
     var prefs map[string]string
-    _ = sc.Decode("prefs", cookie.Value, &prefs)
+    _ = sc.Decode(cookie.Value, &prefs)
 }
 ```
 
@@ -131,7 +140,8 @@ Small payloads (< 32 B) and high-entropy data (> 6.5 bits/byte) are stored raw w
 ## Security
 
 - AES-GCM provides authenticated encryption: tampering is detected automatically
-- By default the cookie name is bound as AAD, preventing value transplant between cookie names (configurable via `AdditionalData`)
+- Optional AAD binding via `AdditionalData` (e.g., bind to user ID or cookie name)
 - Future timestamps beyond 5 minutes of clock skew are rejected
+- Decompressed payloads are limited to 512 KB to prevent zip-bomb attacks
 - Generate keys with `GenerateKey(32)` and store them securely
 - Always transmit cookies over HTTPS with HttpOnly and Secure flags
