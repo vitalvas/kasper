@@ -122,3 +122,18 @@ HTTP middleware for the mux router.
 | `AcceptPatchMiddleware` | RFC 5789 | OPTIONS handler with Allow and Accept-Patch headers, auto-discovers methods from router |
 | `RedirectMiddleware` | -- | Path-based redirects with exact and wildcard matching, HTML meta-refresh body |
 | `CanonicalHostMiddleware` | -- | Redirects requests to canonical scheme and host, preserves path and query |
+
+---
+
+## securecookie
+
+Authenticated and encrypted cookie values using AES-GCM.
+
+| Feature | Details |
+|---------|---------|
+| Encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM |
+| AAD | Cookie name (default), custom context, or disabled |
+| Timestamps | MaxAge, MinAge, future-timestamp rejection (5 min skew) |
+| Key rotation | Multi-codec encode/decode via `CodecsFromKeys` |
+| Serialization | JSON (default), pluggable `Serializer` interface |
+| Key generation | `GenerateKey(size)` with cryptographic randomness |

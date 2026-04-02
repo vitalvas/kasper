@@ -29,6 +29,10 @@
 //     RFC 9474 (RSABSSA). Provides blinding, signing, finalizing, and
 //     verification along with HTTP handlers for token issuance.
 //
+//   - [github.com/vitalvas/kasper/securecookie] -- Authenticated and encrypted
+//     cookie values using AES-GCM (128/192/256). Provides timestamp validation,
+//     key rotation via multi-codec, configurable AAD, and pluggable serialization.
+//
 // Install with:
 //
 //	go get github.com/vitalvas/kasper
