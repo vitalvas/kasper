@@ -12,7 +12,7 @@ Kasper adds features on top without breaking the existing API.
 | `gorilla/websocket` | `kasper/websocket` | Full API compatible + extensions |
 | `gorilla/handlers` | `kasper/muxhandlers` | New implementation, different API |
 | `gorilla/sessions` | -- | No Kasper equivalent |
-| `gorilla/securecookie` | -- | No Kasper equivalent |
+| `gorilla/securecookie` | `kasper/securecookie` | New implementation, different API |
 | `gorilla/csrf` | -- | No Kasper equivalent |
 | `gorilla/schema` | `kasper/mux` | `BindQuery`, `BindForm`, `EncodeQuery`, `EncodeForm` with dot notation |
 | `gorilla/feeds` | -- | No Kasper equivalent |
@@ -22,6 +22,7 @@ Kasper adds features on top without breaking the existing API.
 | `gorilla/context` | -- | Deprecated; Go stdlib `context.Context` used instead |
 | -- | `kasper/openapi` | No Gorilla equivalent |
 | -- | `kasper/httpsig` | No Gorilla equivalent |
+| -- | `kasper/blindrsa` | No Gorilla equivalent |
 
 ## Migration
 
@@ -450,3 +451,110 @@ HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530). No G
 | Server middleware | `mux.MiddlewareFunc` for automatic request verification |
 | Nonce generation | Replay attack prevention |
 | Component coverage | Method, authority, path, query, scheme, target URI, headers |
+
+---
+
+## securecookie
+
+gorilla/securecookie and kasper/securecookie both provide authenticated, encrypted cookie values but use different cryptographic designs and APIs.
+
+### Secure Cookie Feature Comparison
+
+| Feature | gorilla/securecookie | kasper/securecookie |
+|---------|:--------------------:|:-------------------:|
+| **Cryptography** | | |
+| Encryption algorithm | AES-CTR (stream cipher) | AES-GCM (AEAD) |
+| Authentication | HMAC-SHA256 (separate step) | GCM auth tag (built-in) |
+| Key count | 2 (hash key + block key) | 1 |
+| Key sizes | Hash: 32-64 B, Block: 16/24/32 B | 16/24/32 B (AES-128/192/256) |
+| Auth-only mode (no encryption) | Yes (nil block key) | No (always encrypted) |
+| **Timestamps** | | |
+| Embedded timestamp | Yes | Yes |
+| MaxAge | Yes (default 30 days) | Yes (default 30 days) |
+| MinAge | Yes | Yes |
+| Future timestamp rejection | No | Yes (5 min skew) |
+| **Key Rotation** | | |
+| Multi-key encode | `EncodeMulti` | `EncodeMulti` |
+| Multi-key decode | `DecodeMulti` | `DecodeMulti` |
+| Codec factory | `CodecsFromPairs(hash, block, ...)` | `CodecsFromKeys(key1, key2, ...)` |
+| Mixed key sizes during rotation | No | Yes |
+| **Compression** | | |
+| Automatic compression | No | Yes (deflate) |
+| Entropy-adaptive (skip high-entropy) | No | Yes (Shannon entropy check) |
+| Pooled compressor (low allocs) | No | Yes (`sync.Pool`) |
+| **AAD (Additional Authenticated Data)** | | |
+| Cookie name as AAD | Yes (always, via HMAC) | No (opt-in via `AdditionalData`) |
+| Custom AAD | No | Yes |
+| **Serialization** | | |
+| Default serializer | Gob | JSON |
+| Custom serializer | Yes (`Serializer` interface) | Yes (`Serializer` interface) |
+| NopEncoder (pass-through) | Yes | No |
+| **Safety** | | |
+| Nil receiver guards | No | Yes |
+| Typed-nil codec guards | No | Yes |
+| Zero-value struct guards | No | Yes |
+| Negative config value handling | Accepted as-is | Clamped to 0 |
+| Decompression size limit | N/A | 512 KB |
+| **Error Handling** | | |
+| Error style | `Error` interface (IsUsage/IsDecode/IsInternal) | Sentinel errors (`errors.Is`) |
+| Constructor returns error | No (deferred) | Yes (fail-fast) |
+| MultiError on decode | Yes | No (returns last error) |
+| **API** | | |
+| Builder pattern | Yes | Yes |
+| Custom hash function | Yes (`HashFunc`) | N/A (GCM) |
+| Custom block cipher | Yes (`BlockFunc`) | N/A (AES only) |
+| Key generation | `GenerateRandomKey(n) []byte` | `GenerateKey(n) ([]byte, error)` |
+| **Status** | | |
+| Maintenance | Archived | Active |
+
+### API Comparison
+
+| API | gorilla/securecookie | kasper/securecookie |
+|-----|----------------------|---------------------|
+| Constructor | `New(hashKey, blockKey []byte) *SecureCookie` | `New(key []byte) (*SecureCookie, error)` |
+| Encode | `Encode(name string, value any) (string, error)` | `Encode(value any) (string, error)` |
+| Decode | `Decode(name, value string, dst any) error` | `Decode(value string, dst any) error` |
+| Multi-encode | `EncodeMulti(name string, value any, codecs ...Codec) (string, error)` | `EncodeMulti(value any, codecs ...Codec) (string, error)` |
+| Multi-decode | `DecodeMulti(name, value string, dst any, codecs ...Codec) error` | `DecodeMulti(value string, dst any, codecs ...Codec) error` |
+| Codec factory | `CodecsFromPairs(keyPairs ...[]byte) []Codec` | `CodecsFromKeys(keys ...[]byte) ([]Codec, error)` |
+| Key generation | `GenerateRandomKey(length int) []byte` | `GenerateKey(size int) ([]byte, error)` |
+| AAD | N/A (cookie name always used) | `AdditionalData(data []byte) *SecureCookie` |
+| Serializer | `SetSerializer(sz Serializer) *SecureCookie` | `SetSerializer(sz Serializer) *SecureCookie` |
+| MaxAge | `MaxAge(value int) *SecureCookie` | `MaxAge(seconds int) *SecureCookie` |
+| MinAge | `MinAge(value int) *SecureCookie` | `MinAge(seconds int) *SecureCookie` |
+| MaxLength | `MaxLength(value int) *SecureCookie` | `MaxLength(length int) *SecureCookie` |
+| Hash function | `HashFunc(f func() hash.Hash) *SecureCookie` | N/A |
+| Block cipher | `BlockFunc(f func([]byte) (cipher.Block, error)) *SecureCookie` | N/A |
+
+### Secure Cookie Migration
+
+```go
+// gorilla/securecookie
+s := securecookie.New(hashKey, blockKey)
+s.MaxAge(3600)
+encoded, err := s.Encode("session", value)
+err = s.Decode("session", encoded, &dst)
+codecs := securecookie.CodecsFromPairs(hashKey, blockKey, oldHash, oldBlock)
+key := securecookie.GenerateRandomKey(32)
+
+// kasper/securecookie
+s, err := securecookie.New(key)          // single key, returns error
+s.MaxAge(3600)
+encoded, err := s.Encode(value)          // no name parameter
+err = s.Decode(encoded, &dst)            // no name parameter
+codecs, err := securecookie.CodecsFromKeys(key, oldKey) // returns error
+key, err := securecookie.GenerateKey(32)                // returns error
+```
+
+### Architecture Difference
+
+gorilla/securecookie uses two separate cryptographic primitives:
+HMAC for authentication and AES-CTR for encryption.
+This requires two keys and two passes over the data,
+and allows an "auth-only" mode where data is signed but not encrypted.
+
+kasper/securecookie uses AES-GCM, which provides authenticated encryption
+in a single pass with a single key. There is no auth-only mode -- data is
+always both encrypted and authenticated. This eliminates the risk of
+accidentally deploying without encryption (a common gorilla/securecookie
+misconfiguration when the block key is nil).
