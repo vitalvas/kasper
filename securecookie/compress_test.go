@@ -236,3 +236,91 @@ func (failWriteCloser) Write(_ []byte) (int, error) {
 func (failWriteCloser) Close() error {
 	return nil
 }
+
+// Fuzz tests
+
+func FuzzCompressDecompress(f *testing.F) {
+	f.Add([]byte("hello"))
+	f.Add([]byte(""))
+	f.Add(bytes.Repeat([]byte("a"), 100))
+	f.Add([]byte{0x00, 0x01, 0x02, 0xff, 0xfe})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		compressed := maybeCompress(data)
+
+		result, err := maybeDecompress(compressed)
+		if err != nil {
+			t.Fatalf("decompress failed: %v", err)
+		}
+
+		if !bytes.Equal(result, data) {
+			t.Fatalf("round-trip mismatch: got %d bytes, want %d bytes", len(result), len(data))
+		}
+	})
+}
+
+// Benchmarks
+
+func BenchmarkMaybeCompress(b *testing.B) {
+	small := []byte("short")
+	medium := bytes.Repeat([]byte("abcdefghij"), 20)
+	large := bytes.Repeat([]byte("repeated-value-"), 100)
+	random := make([]byte, 1024)
+	rand.Read(random)
+
+	b.Run("small_5B", func(b *testing.B) {
+		for b.Loop() {
+			maybeCompress(small)
+		}
+	})
+
+	b.Run("medium_200B", func(b *testing.B) {
+		for b.Loop() {
+			maybeCompress(medium)
+		}
+	})
+
+	b.Run("large_1500B", func(b *testing.B) {
+		for b.Loop() {
+			maybeCompress(large)
+		}
+	})
+
+	b.Run("random_1KB", func(b *testing.B) {
+		for b.Loop() {
+			maybeCompress(random)
+		}
+	})
+}
+
+func BenchmarkMaybeDecompress(b *testing.B) {
+	medium := maybeCompress(bytes.Repeat([]byte("abcdefghij"), 20))
+	large := maybeCompress(bytes.Repeat([]byte("repeated-value-"), 100))
+	raw := maybeCompress([]byte("short"))
+
+	b.Run("raw_small", func(b *testing.B) {
+		for b.Loop() {
+			maybeDecompress(raw)
+		}
+	})
+
+	b.Run("deflated_200B", func(b *testing.B) {
+		for b.Loop() {
+			maybeDecompress(medium)
+		}
+	})
+
+	b.Run("deflated_1500B", func(b *testing.B) {
+		for b.Loop() {
+			maybeDecompress(large)
+		}
+	})
+}
+
+func BenchmarkShannonEntropy(b *testing.B) {
+	data := bytes.Repeat([]byte("hello world json payload"), 50)
+
+	for b.Loop() {
+		shannonEntropy(data)
+	}
+}

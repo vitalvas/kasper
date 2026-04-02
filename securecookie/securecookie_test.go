@@ -1,6 +1,7 @@
 package securecookie
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,6 +119,84 @@ func TestEncodeDecode(t *testing.T) {
 		require.NoError(t, err)
 
 		var dst data
+		err = sc.Decode(encoded, &dst)
+		require.NoError(t, err)
+		assert.Equal(t, src, dst)
+	})
+
+	t.Run("round trip session struct", func(t *testing.T) {
+		type session struct {
+			AccessToken  string            `json:"access_token"`
+			RefreshToken string            `json:"refresh_token"`
+			IDToken      string            `json:"id_token"`
+			UserID       string            `json:"user_id"`
+			Email        string            `json:"email"`
+			Roles        []string          `json:"roles"`
+			Extra        map[string]string `json:"extra"`
+		}
+
+		src := session{
+			AccessToken:  "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20ifQ.sig",
+			RefreshToken: "opaque-refresh-token-value",
+			IDToken:      "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyJ9.sig",
+			UserID:       "user-123",
+			Email:        "alice@example.com",
+			Roles:        []string{"admin", "editor", "viewer"},
+			Extra:        map[string]string{"tenant": "acme", "department": "engineering"},
+		}
+
+		encoded, err := sc.Encode(src)
+		require.NoError(t, err)
+
+		var dst session
+		err = sc.Decode(encoded, &dst)
+		require.NoError(t, err)
+		assert.Equal(t, src, dst)
+	})
+
+	t.Run("round trip nested struct", func(t *testing.T) {
+		type address struct {
+			Street string `json:"street"`
+			City   string `json:"city"`
+		}
+		type user struct {
+			Name    string  `json:"name"`
+			Age     int     `json:"age"`
+			Active  bool    `json:"active"`
+			Address address `json:"address"`
+		}
+
+		src := user{
+			Name:   "Alice",
+			Age:    30,
+			Active: true,
+			Address: address{
+				Street: "123 Main St",
+				City:   "Springfield",
+			},
+		}
+
+		encoded, err := sc.Encode(src)
+		require.NoError(t, err)
+
+		var dst user
+		err = sc.Decode(encoded, &dst)
+		require.NoError(t, err)
+		assert.Equal(t, src, dst)
+	})
+
+	t.Run("round trip struct with zero values", func(t *testing.T) {
+		type config struct {
+			Enabled bool   `json:"enabled"`
+			Count   int    `json:"count"`
+			Name    string `json:"name"`
+		}
+
+		src := config{} // all zero values
+		encoded, err := sc.Encode(src)
+		require.NoError(t, err)
+
+		var dst config
 		err = sc.Decode(encoded, &dst)
 		require.NoError(t, err)
 		assert.Equal(t, src, dst)
@@ -870,4 +950,242 @@ func TestDecodePayloadTooShort(t *testing.T) {
 	err = sc.Decode(encoded, &dst)
 	assert.ErrorIs(t, err, ErrDecodeFailed)
 	assert.Contains(t, err.Error(), "payload too short")
+}
+
+// Fuzz tests
+
+func FuzzEncodeDecode(f *testing.F) {
+	f.Add([]byte("hello world"))
+	f.Add([]byte(""))
+	f.Add([]byte(`{"user":"alice","role":"admin"}`))
+	f.Add([]byte{0x00, 0x01, 0x02, 0xff})
+
+	sc, err := New(testKey())
+	if err != nil {
+		f.Fatal(err)
+	}
+	sc.MaxLength(0)
+
+	// Use []byte which JSON serializes as base64, ensuring clean round-trips
+	// for arbitrary binary data.
+	f.Fuzz(func(t *testing.T, data []byte) {
+		encoded, err := sc.Encode(data)
+		if err != nil {
+			return
+		}
+
+		var dst []byte
+		if err := sc.Decode(encoded, &dst); err != nil {
+			t.Fatalf("decode failed for valid encode: %v", err)
+		}
+
+		if !bytes.Equal(dst, data) {
+			t.Fatalf("round-trip mismatch: got %d bytes, want %d bytes", len(dst), len(data))
+		}
+	})
+}
+
+func FuzzEncodeDecodeStruct(f *testing.F) {
+	f.Add("alice", "admin", 42)
+	f.Add("", "", 0)
+	f.Add("user with spaces", "role-with-dashes", -1)
+
+	sc, err := New(testKey())
+	if err != nil {
+		f.Fatal(err)
+	}
+	sc.MaxLength(0)
+
+	type payload struct {
+		Name  string `json:"name"`
+		Role  string `json:"role"`
+		Count int    `json:"count"`
+	}
+
+	f.Fuzz(func(t *testing.T, name, role string, count int) {
+		src := payload{Name: name, Role: role, Count: count}
+		encoded, err := sc.Encode(src)
+		if err != nil {
+			return
+		}
+
+		var dst payload
+		if err := sc.Decode(encoded, &dst); err != nil {
+			t.Fatalf("decode failed: %v", err)
+		}
+
+		// JSON replaces invalid UTF-8 with U+FFFD, so only assert
+		// exact equality for valid UTF-8 inputs.
+		if utf8.ValidString(name) && utf8.ValidString(role) {
+			if dst != src {
+				t.Fatalf("round-trip mismatch: got %+v, want %+v", dst, src)
+			}
+		}
+
+		// Non-string fields must always round-trip exactly.
+		if dst.Count != src.Count {
+			t.Fatalf("count mismatch: got %d, want %d", dst.Count, src.Count)
+		}
+	})
+}
+
+func FuzzDecode(f *testing.F) {
+	sc, err := New(testKey())
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	// Seed with a valid encoded value.
+	encoded, _ := sc.Encode("seed value")
+	f.Add(encoded)
+	f.Add("")
+	f.Add("not-base64!!!")
+	f.Add("dG9v") // "too" in base64
+
+	f.Fuzz(func(_ *testing.T, data string) {
+		var dst string
+		// Must not panic on any input.
+		_ = sc.Decode(data, &dst)
+	})
+}
+
+// Benchmarks
+
+type benchSession struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
+	UserID       string `json:"user_id"`
+	Email        string `json:"email"`
+}
+
+func BenchmarkEncode(b *testing.B) {
+	sc, _ := New(testKey())
+	sc.MaxLength(0)
+
+	small := "hello"
+	medium := map[string]string{
+		"sub": "user-123", "email": "user@example.com",
+		"name": "Alice Smith", "role": "admin", "tenant": "acme",
+	}
+	large := make(map[string]string, 50)
+	for i := range 50 {
+		large[fmt.Sprintf("key-%03d", i)] = "repeated-value-string"
+	}
+	session := benchSession{
+		AccessToken:  "eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20ifQ.sig",
+		RefreshToken: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4gdGhhdCBpcyB0eXBpY2FsbHkgb3BhcXVl",
+		IDToken:      "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyIsImVtYWlsIjoidXNlckBleGFtcGxlLmNvbSJ9.sig",
+		UserID:       "user-123",
+		Email:        "user@example.com",
+	}
+
+	b.Run("small_string", func(b *testing.B) {
+		for b.Loop() {
+			sc.Encode(small)
+		}
+	})
+
+	b.Run("medium_map", func(b *testing.B) {
+		for b.Loop() {
+			sc.Encode(medium)
+		}
+	})
+
+	b.Run("large_map_50", func(b *testing.B) {
+		for b.Loop() {
+			sc.Encode(large)
+		}
+	})
+
+	b.Run("struct_session", func(b *testing.B) {
+		for b.Loop() {
+			sc.Encode(session)
+		}
+	})
+}
+
+func BenchmarkDecode(b *testing.B) {
+	sc, _ := New(testKey())
+	sc.MaxLength(0)
+
+	smallEnc, _ := sc.Encode("hello")
+	mediumEnc, _ := sc.Encode(map[string]string{
+		"sub": "user-123", "email": "user@example.com",
+		"name": "Alice Smith", "role": "admin", "tenant": "acme",
+	})
+	largeData := make(map[string]string, 50)
+	for i := range 50 {
+		largeData[fmt.Sprintf("key-%03d", i)] = "repeated-value-string"
+	}
+	largeEnc, _ := sc.Encode(largeData)
+	sessionEnc, _ := sc.Encode(benchSession{
+		AccessToken:  "eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20ifQ.sig",
+		RefreshToken: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4gdGhhdCBpcyB0eXBpY2FsbHkgb3BhcXVl",
+		IDToken:      "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyIsImVtYWlsIjoidXNlckBleGFtcGxlLmNvbSJ9.sig",
+		UserID:       "user-123",
+		Email:        "user@example.com",
+	})
+
+	b.Run("small_string", func(b *testing.B) {
+		for b.Loop() {
+			var dst string
+			sc.Decode(smallEnc, &dst)
+		}
+	})
+
+	b.Run("medium_map", func(b *testing.B) {
+		for b.Loop() {
+			var dst map[string]string
+			sc.Decode(mediumEnc, &dst)
+		}
+	})
+
+	b.Run("large_map_50", func(b *testing.B) {
+		for b.Loop() {
+			var dst map[string]string
+			sc.Decode(largeEnc, &dst)
+		}
+	})
+
+	b.Run("struct_session", func(b *testing.B) {
+		for b.Loop() {
+			var dst benchSession
+			sc.Decode(sessionEnc, &dst)
+		}
+	})
+}
+
+func BenchmarkKeyRotation(b *testing.B) {
+	key1, _ := GenerateKey(32)
+	key2, _ := GenerateKey(32)
+	key3, _ := GenerateKey(32)
+	codecs, _ := CodecsFromKeys(key1, key2, key3)
+
+	// Encode with key1, decode trying all 3.
+	encoded, _ := EncodeMulti("data", codecs...)
+
+	b.Run("encode", func(b *testing.B) {
+		for b.Loop() {
+			EncodeMulti("data", codecs...)
+		}
+	})
+
+	b.Run("decode_first_key", func(b *testing.B) {
+		for b.Loop() {
+			var dst string
+			DecodeMulti(encoded, &dst, codecs...)
+		}
+	})
+
+	// Encode with key3 (last), decode tries key1, key2 before key3.
+	sc3, _ := New(key3)
+	oldEncoded, _ := sc3.Encode("old data")
+
+	b.Run("decode_third_key", func(b *testing.B) {
+		for b.Loop() {
+			var dst string
+			DecodeMulti(oldEncoded, &dst, codecs...)
+		}
+	})
 }

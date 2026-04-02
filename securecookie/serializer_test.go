@@ -32,4 +32,19 @@ func TestJSONSerializer(t *testing.T) {
 		err := sz.Deserialize([]byte("{invalid"), &dst)
 		assert.Error(t, err)
 	})
+
+	t.Run("invalid UTF-8 replaced with U+FFFD", func(t *testing.T) {
+		// encoding/json replaces invalid UTF-8 with the replacement character.
+		src := "hello\x80world"
+		data, err := sz.Serialize(src)
+		require.NoError(t, err)
+
+		var dst string
+		err = sz.Deserialize(data, &dst)
+		require.NoError(t, err)
+
+		// The invalid byte \x80 is replaced with \ufffd.
+		assert.Equal(t, "hello\ufffdworld", dst)
+		assert.NotEqual(t, src, dst)
+	})
 }

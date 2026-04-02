@@ -10,6 +10,10 @@ type Serializer interface {
 }
 
 // JSONSerializer uses JSON encoding. This is the default serializer.
+//
+// Note: encoding/json replaces invalid UTF-8 in string fields with the
+// Unicode replacement character (U+FFFD). Use []byte fields for
+// binary data that must round-trip exactly.
 type JSONSerializer struct{}
 
 // Serialize marshals src to JSON.
