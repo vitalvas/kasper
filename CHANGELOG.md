@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.0](https://github.com/vitalvas/kasper/compare/v0.10.0...v0.11.0) (2026-04-03)
+
+
+### Features
+
+* **securecookie:** add authenticated encrypted cookie package ([5ac44b8](https://github.com/vitalvas/kasper/commit/5ac44b8ab5bce876a6a614a3d174abfdf916f73c))
+* **securecookie:** add fuzz tests, benchmarks, and pool flate writers ([62441bd](https://github.com/vitalvas/kasper/commit/62441bd7ada123db9f0f888b83ee5776deb43815))
+
+
+### Bug Fixes
+
+* resolve function signature and composite literal violations ([b8c5969](https://github.com/vitalvas/kasper/commit/b8c5969396b5e5eeaf7873727ca0acd62320928a))
+* **securecookie:** cover error branches in compress and cipher init ([70bfb35](https://github.com/vitalvas/kasper/commit/70bfb357d65365dbe194d7bb322be00a774210dd))
+* **securecookie:** remove cookie name from API, fix error handling ([44264de](https://github.com/vitalvas/kasper/commit/44264dee770d2cb55e3665b814c35b8ef2076b9a))
+
 ## [0.10.0](https://github.com/vitalvas/kasper/compare/v0.9.0...v0.10.0) (2026-03-24)
 
 
