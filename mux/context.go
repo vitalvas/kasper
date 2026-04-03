@@ -106,7 +106,10 @@ func setRouteContext(r *http.Request, route *Route, vars map[string]string) *htt
 		})
 		rc = route.staticCtx
 	} else {
-		rc = &routeContext{route: route, vars: vars}
+		rc = &routeContext{
+			route: route,
+			vars:  vars,
+		}
 	}
 	ctx := context.WithValue(r.Context(), ctxKey, rc)
 	return r.WithContext(ctx)

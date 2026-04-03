@@ -29,7 +29,10 @@ func NewEd25519Signer(keyID string, key ed25519.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: ed25519 private key must be %d bytes", ErrInvalidKey, ed25519.PrivateKeySize)
 	}
 
-	return &ed25519Signer{key: key, keyID: keyID}, nil
+	return &ed25519Signer{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (s *ed25519Signer) Sign(message []byte) ([]byte, error) {
@@ -50,7 +53,10 @@ func NewEd25519Verifier(keyID string, key ed25519.PublicKey) (Verifier, error) {
 		return nil, fmt.Errorf("%w: ed25519 public key must be %d bytes", ErrInvalidKey, ed25519.PublicKeySize)
 	}
 
-	return &ed25519Verifier{key: key, keyID: keyID}, nil
+	return &ed25519Verifier{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (v *ed25519Verifier) Verify(message, signature []byte) error {
@@ -81,7 +87,10 @@ func NewECDSAP256Signer(keyID string, key *ecdsa.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: key curve must be P-256", ErrInvalidKey)
 	}
 
-	return &ecdsaP256Signer{key: key, keyID: keyID}, nil
+	return &ecdsaP256Signer{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (s *ecdsaP256Signer) Sign(message []byte) ([]byte, error) {
@@ -108,7 +117,10 @@ func NewECDSAP256Verifier(keyID string, key *ecdsa.PublicKey) (Verifier, error) 
 		return nil, fmt.Errorf("%w: key curve must be P-256", ErrInvalidKey)
 	}
 
-	return &ecdsaP256Verifier{key: key, keyID: keyID}, nil
+	return &ecdsaP256Verifier{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (v *ecdsaP256Verifier) Verify(message, signature []byte) error {
@@ -140,7 +152,10 @@ func NewECDSAP384Signer(keyID string, key *ecdsa.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: key curve must be P-384", ErrInvalidKey)
 	}
 
-	return &ecdsaP384Signer{key: key, keyID: keyID}, nil
+	return &ecdsaP384Signer{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (s *ecdsaP384Signer) Sign(message []byte) ([]byte, error) {
@@ -167,7 +182,10 @@ func NewECDSAP384Verifier(keyID string, key *ecdsa.PublicKey) (Verifier, error) 
 		return nil, fmt.Errorf("%w: key curve must be P-384", ErrInvalidKey)
 	}
 
-	return &ecdsaP384Verifier{key: key, keyID: keyID}, nil
+	return &ecdsaP384Verifier{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (v *ecdsaP384Verifier) Verify(message, signature []byte) error {
@@ -199,7 +217,10 @@ func NewRSAPSSSigner(keyID string, key *rsa.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
-	return &rsaPSSSigner{key: key, keyID: keyID}, nil
+	return &rsaPSSSigner{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (s *rsaPSSSigner) Sign(message []byte) ([]byte, error) {
@@ -228,7 +249,10 @@ func NewRSAPSSVerifier(keyID string, key *rsa.PublicKey) (Verifier, error) {
 		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
-	return &rsaPSSVerifier{key: key, keyID: keyID}, nil
+	return &rsaPSSVerifier{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (v *rsaPSSVerifier) Verify(message, signature []byte) error {
@@ -264,7 +288,10 @@ func NewRSAv15Signer(keyID string, key *rsa.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
-	return &rsaV15Signer{key: key, keyID: keyID}, nil
+	return &rsaV15Signer{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (s *rsaV15Signer) Sign(message []byte) ([]byte, error) {
@@ -291,7 +318,10 @@ func NewRSAv15Verifier(keyID string, key *rsa.PublicKey) (Verifier, error) {
 		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
-	return &rsaV15Verifier{key: key, keyID: keyID}, nil
+	return &rsaV15Verifier{
+		key:   key,
+		keyID: keyID,
+	}, nil
 }
 
 func (v *rsaV15Verifier) Verify(message, signature []byte) error {
@@ -327,7 +357,10 @@ func NewHMACSHA256Signer(keyID string, key []byte) (Signer, error) {
 	keyCopy := make([]byte, len(key))
 	copy(keyCopy, key)
 
-	return &hmacSHA256Signer{key: keyCopy, keyID: keyID}, nil
+	return &hmacSHA256Signer{
+		key:   keyCopy,
+		keyID: keyID,
+	}, nil
 }
 
 func (s *hmacSHA256Signer) Sign(message []byte) ([]byte, error) {
@@ -352,7 +385,10 @@ func NewHMACSHA256Verifier(keyID string, key []byte) (Verifier, error) {
 	keyCopy := make([]byte, len(key))
 	copy(keyCopy, key)
 
-	return &hmacSHA256Verifier{key: keyCopy, keyID: keyID}, nil
+	return &hmacSHA256Verifier{
+		key:   keyCopy,
+		keyID: keyID,
+	}, nil
 }
 
 func (v *hmacSHA256Verifier) Verify(message, signature []byte) error {

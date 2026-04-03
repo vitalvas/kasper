@@ -200,7 +200,13 @@ func CORSMiddleware(r *mux.Router, cfg CORSConfig) (mux.MiddlewareFunc, error) {
 			req.Method == http.MethodOptions &&
 			req.Header.Get("Access-Control-Request-Method") != "" {
 			setCORSOriginHeaders(w, &cfg, rawOrigin)
-			handlePreflight(w, req, r, &cfg, preflightStatus, headersWildcard, true)
+			handlePreflight(w, req, preflightParams{
+				router:          r,
+				cfg:             &cfg,
+				statusCode:      preflightStatus,
+				headersWildcard: headersWildcard,
+				writeStatus:     true,
+			})
 			return
 		}
 
@@ -236,7 +242,13 @@ func CORSMiddleware(r *mux.Router, cfg CORSConfig) (mux.MiddlewareFunc, error) {
 			setCORSOriginHeaders(w, &cfg, rawOrigin)
 
 			if req.Method == http.MethodOptions && req.Header.Get("Access-Control-Request-Method") != "" {
-				handlePreflight(w, req, r, &cfg, preflightStatus, headersWildcard, !cfg.OptionsPassthrough)
+				handlePreflight(w, req, preflightParams{
+					router:          r,
+					cfg:             &cfg,
+					statusCode:      preflightStatus,
+					headersWildcard: headersWildcard,
+					writeStatus:     !cfg.OptionsPassthrough,
+				})
 
 				// Feature 5: OptionsPassthrough forwards to next handler.
 				if cfg.OptionsPassthrough {
@@ -266,10 +278,18 @@ func CORSMiddleware(r *mux.Router, cfg CORSConfig) (mux.MiddlewareFunc, error) {
 	}, nil
 }
 
-func handlePreflight(w http.ResponseWriter, req *http.Request, r *mux.Router, cfg *CORSConfig, statusCode int, headersWildcard bool, writeStatus bool) {
-	methods := cfg.AllowedMethods
+type preflightParams struct {
+	router          *mux.Router
+	cfg             *CORSConfig
+	statusCode      int
+	headersWildcard bool
+	writeStatus     bool
+}
+
+func handlePreflight(w http.ResponseWriter, req *http.Request, p preflightParams) {
+	methods := p.cfg.AllowedMethods
 	if len(methods) == 0 {
-		if discovered, err := getAllMethodsForRoute(r, req); err == nil {
+		if discovered, err := getAllMethodsForRoute(p.router, req); err == nil {
 			methods = discovered
 		}
 	}
@@ -278,23 +298,23 @@ func handlePreflight(w http.ResponseWriter, req *http.Request, r *mux.Router, cf
 		w.Header().Set("Access-Control-Allow-Methods", strings.Join(methods, ","))
 	}
 
-	if headersWildcard {
+	if p.headersWildcard {
 		if reqHeaders := req.Header.Get("Access-Control-Request-Headers"); reqHeaders != "" {
 			w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
 		}
-	} else if len(cfg.AllowedHeaders) > 0 {
-		w.Header().Set("Access-Control-Allow-Headers", strings.Join(cfg.AllowedHeaders, ","))
+	} else if len(p.cfg.AllowedHeaders) > 0 {
+		w.Header().Set("Access-Control-Allow-Headers", strings.Join(p.cfg.AllowedHeaders, ","))
 	} else if reqHeaders := req.Header.Get("Access-Control-Request-Headers"); reqHeaders != "" {
 		w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
 	}
 
-	if cfg.MaxAge > 0 {
-		w.Header().Set("Access-Control-Max-Age", strconv.Itoa(cfg.MaxAge))
-	} else if cfg.MaxAge < 0 {
+	if p.cfg.MaxAge > 0 {
+		w.Header().Set("Access-Control-Max-Age", strconv.Itoa(p.cfg.MaxAge))
+	} else if p.cfg.MaxAge < 0 {
 		w.Header().Set("Access-Control-Max-Age", "0")
 	}
 
-	if cfg.AllowPrivateNetwork && req.Header.Get("Access-Control-Request-Private-Network") == "true" {
+	if p.cfg.AllowPrivateNetwork && req.Header.Get("Access-Control-Request-Private-Network") == "true" {
 		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 		w.Header().Add("Vary", "Access-Control-Request-Private-Network")
 	}
@@ -302,8 +322,8 @@ func handlePreflight(w http.ResponseWriter, req *http.Request, r *mux.Router, cf
 	w.Header().Add("Vary", "Access-Control-Request-Method")
 	w.Header().Add("Vary", "Access-Control-Request-Headers")
 
-	if writeStatus {
-		w.WriteHeader(statusCode)
+	if p.writeStatus {
+		w.WriteHeader(p.statusCode)
 	}
 }
 

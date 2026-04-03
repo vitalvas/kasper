@@ -94,7 +94,10 @@ func (g *RouteGroup) Parameter(param *Parameter) *RouteGroup {
 //
 // See: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
 func (g *RouteGroup) ExternalDocs(url, description string) *RouteGroup {
-	g.defaults.externalDocs = &ExternalDocs{URL: url, Description: description}
+	g.defaults.externalDocs = &ExternalDocs{
+		URL:         url,
+		Description: description,
+	}
 	return g
 }
 

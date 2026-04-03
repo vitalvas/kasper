@@ -183,7 +183,12 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		_ = netConn.SetWriteDeadline(time.Time{})
 	}
 
-	conn := newConnFromBufio(netConn, brw, true, u.ReadBufferSize, u.WriteBufferSize, u.WriteBufferPool)
+	conn := newConnFromBufio(netConn, brw, connConfig{
+		isServer:        true,
+		readBufferSize:  u.ReadBufferSize,
+		writeBufferSize: u.WriteBufferSize,
+		writeBufferPool: u.WriteBufferPool,
+	})
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
 
@@ -281,15 +286,23 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 		rc:   rc,
 	}
 
-	conn := newConnFromRWC(rwc, nil, true, u.ReadBufferSize, u.WriteBufferSize, u.WriteBufferPool)
+	conn := newConnFromRWC(connConfig{
+		rwc:             rwc,
+		isServer:        true,
+		readBufferSize:  u.ReadBufferSize,
+		writeBufferSize: u.WriteBufferSize,
+		writeBufferPool: u.WriteBufferPool,
+	})
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
 
 	return conn, nil
 }
 
-func newConnFromBufio(netConn net.Conn, brw *bufio.ReadWriter, isServer bool, readBufferSize, writeBufferSize int, writeBufferPool BufferPool) *Conn {
-	c := newConnWithPool(netConn, isServer, readBufferSize, writeBufferSize, writeBufferPool)
+func newConnFromBufio(netConn net.Conn, brw *bufio.ReadWriter, cfg connConfig) *Conn {
+	cfg.rwc = netConn
+	cfg.netConn = netConn
+	c := newConnFromRWC(cfg)
 	// Use the buffered reader if there's buffered data from the HTTP handshake.
 	// This ensures any data read-ahead by the HTTP server is not lost.
 	if brw != nil && brw.Reader.Buffered() > 0 {

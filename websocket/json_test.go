@@ -283,7 +283,14 @@ func TestWriteJSONCloseError(t *testing.T) {
 			},
 		}
 
-		conn := newConnFromRWC(fw, nil, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             fw,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 
 		err := conn.WriteJSON(testMessage{Name: "hello", Value: 42})
 		require.Error(t, err)

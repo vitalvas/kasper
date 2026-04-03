@@ -598,7 +598,12 @@ func (d *Dialer) dialHTTP2(ctx context.Context, client *http.Client, u *url.URL,
 		return nil, resp, errors.New("websocket: response body is not ReadWriteCloser")
 	}
 
-	conn := newConnFromRWC(rwc, nil, false, d.ReadBufferSize, d.WriteBufferSize, d.WriteBufferPool)
+	conn := newConnFromRWC(connConfig{
+		rwc:             rwc,
+		readBufferSize:  d.ReadBufferSize,
+		writeBufferSize: d.WriteBufferSize,
+		writeBufferPool: d.WriteBufferPool,
+	})
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
 

@@ -59,7 +59,10 @@ var patternMacros = func() map[string]macro {
 
 		var matcher varMatcher
 		if maxLen, ok := maxLengths[name]; ok {
-			matcher = &lengthMatcher{re: re, maxLen: maxLen}
+			matcher = &lengthMatcher{
+				re:     re,
+				maxLen: maxLen,
+			}
 		} else {
 			matcher = re
 		}

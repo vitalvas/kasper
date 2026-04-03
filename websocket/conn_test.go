@@ -663,7 +663,6 @@ func TestNextReader(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []byte("hello"), data)
 	})
-
 }
 
 func TestReadMessage(t *testing.T) {
@@ -1907,7 +1906,14 @@ func (m *fuzzMockConn) SetWriteDeadline(_ time.Time) error { return nil }
 func TestConnWithNilNetConn(t *testing.T) {
 	// Create a connection with nil netConn (simulates HTTP/2 or http.Client path).
 	rwc := &mockRWC{}
-	conn := newConnFromRWC(rwc, nil, false, 1024, 1024, nil)
+	conn := newConnFromRWC(connConfig{
+		rwc:             rwc,
+		netConn:         nil,
+		isServer:        false,
+		readBufferSize:  1024,
+		writeBufferSize: 1024,
+		writeBufferPool: nil,
+	})
 
 	t.Run("LocalAddr returns nil", func(t *testing.T) {
 		assert.Nil(t, conn.LocalAddr())
@@ -2187,7 +2193,14 @@ func TestBufferedReader(t *testing.T) {
 		defer server.Close()
 		defer client.Close()
 
-		conn := newConnFromRWC(server, nil, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             server,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 		_, ok := conn.br.(*bufio.Reader)
 		assert.True(t, ok, "br should be a *bufio.Reader")
 	})
@@ -2198,7 +2211,14 @@ func TestBufferedReader(t *testing.T) {
 		defer client.Close()
 
 		existing := bufio.NewReaderSize(server, 4096)
-		conn := newConnFromRWC(server, nil, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             server,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 		// Should be a bufio.Reader
 		_, ok := conn.br.(*bufio.Reader)
 		assert.True(t, ok)
@@ -2212,7 +2232,14 @@ func TestBufferedReader(t *testing.T) {
 		defer server.Close()
 		defer client.Close()
 
-		conn := newConnFromRWC(server, server, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             server,
+			netConn:         server,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 		_, ok := conn.br.(*bufio.Reader)
 		assert.True(t, ok, "br should be wrapped even when netConn is provided")
 	})
@@ -2391,7 +2418,14 @@ func TestReadMessageContext(t *testing.T) {
 
 		// Wrap server with deadline tracking.
 		tracked := &deadlineTrackingConn{Conn: server}
-		conn := newConnFromRWC(tracked, tracked, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             tracked,
+			netConn:         tracked,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
@@ -2480,7 +2514,14 @@ func TestWriteErrSetOnFailure(t *testing.T) {
 	t.Run("writeErr set after write failure", func(t *testing.T) {
 		writeErr := errors.New("write failed")
 		mock := &failingWriter{err: writeErr}
-		conn := newConnFromRWC(mock, nil, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             mock,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 
 		err := conn.WriteMessage(TextMessage, []byte("test"))
 		require.Error(t, err)
@@ -2507,7 +2548,14 @@ func TestReadMessageContextRaceSafety(t *testing.T) {
 			server, client := net.Pipe()
 
 			tracked := &deadlineTrackingConn{Conn: server}
-			conn := newConnFromRWC(tracked, tracked, true, 1024, 1024, nil)
+			conn := newConnFromRWC(connConfig{
+				rwc:             tracked,
+				netConn:         tracked,
+				isServer:        true,
+				readBufferSize:  1024,
+				writeBufferSize: 1024,
+				writeBufferPool: nil,
+			})
 
 			// Write a message from client just before context expires,
 			// to exercise the race between context cancel and read completion.
@@ -2661,7 +2709,14 @@ func TestMessageWriterCompressedBuffering(t *testing.T) {
 			readBuf:  bytes.NewBuffer(serverMock.writeBuf.Bytes()),
 			writeBuf: &bytes.Buffer{},
 		}
-		clientConn := newConnFromRWC(clientMock, nil, false, 4096, 4096, nil)
+		clientConn := newConnFromRWC(connConfig{
+			rwc:             clientMock,
+			netConn:         nil,
+			isServer:        false,
+			readBufferSize:  4096,
+			writeBufferSize: 4096,
+			writeBufferPool: nil,
+		})
 		clientConn.compressionEnabled = true
 
 		msgType, p, err := clientConn.ReadMessage()
@@ -2844,7 +2899,14 @@ func TestNewConnFromRWCWriteBufferPool(t *testing.T) {
 		pool := &largeBufferPool{buf: poolBuf}
 
 		rwc := &mockRWC{}
-		conn := newConnFromRWC(rwc, nil, true, 0, 0, pool)
+		conn := newConnFromRWC(connConfig{
+			rwc:             rwc,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  0,
+			writeBufferSize: 0,
+			writeBufferPool: pool,
+		})
 
 		// The writeBuf should be a slice of the pooled buffer.
 		assert.Equal(t, needed, len(conn.writeBuf))
@@ -2858,7 +2920,14 @@ func TestNewConnFromRWCWriteBufferPool(t *testing.T) {
 		pool := &largeBufferPool{buf: smallBuf}
 
 		rwc := &mockRWC{}
-		conn := newConnFromRWC(rwc, nil, true, 0, 0, pool)
+		conn := newConnFromRWC(connConfig{
+			rwc:             rwc,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  0,
+			writeBufferSize: 0,
+			writeBufferPool: pool,
+		})
 
 		// Should have allocated a new buffer of the correct size.
 		assert.Equal(t, needed, len(conn.writeBuf))
@@ -2870,7 +2939,14 @@ func TestNewConnFromRWCWriteBufferPool(t *testing.T) {
 		pool := &largeBufferPool{buf: nil} // Get() returns nil
 
 		rwc := &mockRWC{}
-		conn := newConnFromRWC(rwc, nil, true, 0, 0, pool)
+		conn := newConnFromRWC(connConfig{
+			rwc:             rwc,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  0,
+			writeBufferSize: 0,
+			writeBufferPool: pool,
+		})
 
 		needed := defaultWriteBufferSize + maxFrameHeaderSize
 		assert.Equal(t, needed, len(conn.writeBuf))
@@ -2949,7 +3025,14 @@ func TestMessageWriterWriteError(t *testing.T) {
 	t.Run("Write propagates writeFrameWithCompress error", func(t *testing.T) {
 		writeErr := errors.New("write failed")
 		mock := &countingWriter{failOn: 1, err: writeErr}
-		conn := newConnFromRWC(mock, nil, true, 0, 0, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             mock,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  0,
+			writeBufferSize: 0,
+			writeBufferPool: nil,
+		})
 
 		w, err := conn.NextWriter(TextMessage)
 		require.NoError(t, err)
@@ -2981,7 +3064,14 @@ func TestWriteFrameWithCompressLargePayloadErrors(t *testing.T) {
 		mock := &countingWriter{failOn: 1, err: writeErr}
 		// Use very small write buffer to force the two-write path for a payload
 		// that exceeds the buffer size.
-		conn := newConnFromRWC(mock, nil, true, 0, 32, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             mock,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  0,
+			writeBufferSize: 32,
+			writeBufferPool: nil,
+		})
 
 		conn.writeMu.Lock()
 		_, err := conn.writeFrameWithCompress(TextMessage, make([]byte, 100), true, false)
@@ -2994,7 +3084,14 @@ func TestWriteFrameWithCompressLargePayloadErrors(t *testing.T) {
 	t.Run("Data write fails for large payload", func(t *testing.T) {
 		writeErr := errors.New("data write failed")
 		mock := &countingWriter{failOn: 2, err: writeErr}
-		conn := newConnFromRWC(mock, nil, true, 0, 32, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             mock,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  0,
+			writeBufferSize: 32,
+			writeBufferPool: nil,
+		})
 
 		conn.writeMu.Lock()
 		_, err := conn.writeFrameWithCompress(TextMessage, make([]byte, 100), true, false)
@@ -3012,10 +3109,14 @@ func TestNextReaderCompressedFragmentControlFrameErrors(t *testing.T) {
 		ctrlData   []byte
 		setHandler func(c *Conn, handlerErr error)
 	}{
-		{"Ping handler error during compressed continuation", byte(PingMessage), []byte("ping"),
-			func(c *Conn, e error) { c.SetPingHandler(func(_ string) error { return e }) }},
-		{"Pong handler error during compressed continuation", byte(PongMessage), []byte("pong"),
-			func(c *Conn, e error) { c.SetPongHandler(func(_ string) error { return e }) }},
+		{
+			"Ping handler error during compressed continuation", byte(PingMessage), []byte("ping"),
+			func(c *Conn, e error) { c.SetPingHandler(func(_ string) error { return e }) },
+		},
+		{
+			"Pong handler error during compressed continuation", byte(PongMessage), []byte("pong"),
+			func(c *Conn, e error) { c.SetPongHandler(func(_ string) error { return e }) },
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := []byte("hello world, this is a fragmented compressed test")

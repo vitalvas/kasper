@@ -1025,11 +1025,13 @@ func TestBuildPathParameters(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/items", &Parameter{
-				Name: "X-Tenant-ID", In: ParameterInHeader,
+				Name:   "X-Tenant-ID",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			}).
 			AddPathParameter("/items", &Parameter{
-				Name: "Accept-Language", In: ParameterInHeader,
+				Name:   "Accept-Language",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
@@ -1047,7 +1049,8 @@ func TestBuildPathParameters(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"}).
 			AddPathParameter("/users/{id}", &Parameter{
-				Name: "X-Request-ID", In: ParameterInHeader,
+				Name:   "X-Request-ID",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 
@@ -1082,7 +1085,8 @@ func TestBuildPathParameters(t *testing.T) {
 			SetPathDescription("/users/{id}", "A single user resource.").
 			AddPathServer("/users/{id}", Server{URL: "https://users.example.com"}).
 			AddPathParameter("/users/{id}", &Parameter{
-				Name: "X-Trace-ID", In: ParameterInHeader,
+				Name:   "X-Trace-ID",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 

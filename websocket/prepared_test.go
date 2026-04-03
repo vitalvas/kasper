@@ -289,7 +289,14 @@ func TestWritePreparedMessageWriteErrOnFailure(t *testing.T) {
 	t.Run("writeErr set after WritePreparedMessage failure", func(t *testing.T) {
 		writeErr := errors.New("write failed")
 		mock := &failingWriterPM{err: writeErr}
-		conn := newConnFromRWC(mock, nil, true, 1024, 1024, nil)
+		conn := newConnFromRWC(connConfig{
+			rwc:             mock,
+			netConn:         nil,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+			writeBufferPool: nil,
+		})
 
 		pm, err := NewPreparedMessage(TextMessage, []byte("test"))
 		require.NoError(t, err)

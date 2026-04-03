@@ -133,7 +133,10 @@ func (s *Spec) AddPathParameter(path string, param *Parameter) *Spec {
 // See: https://spec.openapis.org/oas/v3.1.0#openapi-object (externalDocs)
 // See: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
 func (s *Spec) SetExternalDocs(url, description string) *Spec {
-	s.externalDocs = &ExternalDocs{URL: url, Description: description}
+	s.externalDocs = &ExternalDocs{
+		URL:         url,
+		Description: description,
+	}
 	return s
 }
 

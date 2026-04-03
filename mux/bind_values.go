@@ -101,7 +101,10 @@ var structFieldsCache sync.Map
 // getStructFields returns cached field metadata for the given struct type
 // and tag name. Builds and caches the metadata on first access.
 func getStructFields(rt reflect.Type, tagName string) []cachedField {
-	key := structCacheKey{typ: rt, tagName: tagName}
+	key := structCacheKey{
+		typ:     rt,
+		tagName: tagName,
+	}
 	if cached, ok := structFieldsCache.Load(key); ok {
 		return cached.([]cachedField)
 	}
@@ -371,7 +374,10 @@ func implementsTextUnmarshaler(t reflect.Type) bool {
 
 // parseFieldTag extracts metadata from the struct tag.
 func parseFieldTag(field reflect.StructField, tagName string, index int) fieldMeta {
-	meta := fieldMeta{index: index, name: field.Name}
+	meta := fieldMeta{
+		index: index,
+		name:  field.Name,
+	}
 
 	tag, ok := field.Tag.Lookup(tagName)
 	if !ok {

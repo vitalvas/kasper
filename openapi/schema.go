@@ -175,7 +175,10 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 	// Special cases first.
 	if t == reflect.TypeFor[time.Time]() {
-		return &Schema{Type: SchemaTypeString, Format: FormatDateTime}
+		return &Schema{
+			Type:   SchemaTypeString,
+			Format: FormatDateTime,
+		}
 	}
 
 	switch t.Kind() {
@@ -196,7 +199,10 @@ func (g *SchemaGenerator) generateInlineType(t reflect.Type) *Schema {
 
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
-			return &Schema{Type: SchemaTypeString, Format: FormatByte}
+			return &Schema{
+				Type:   SchemaTypeString,
+				Format: FormatByte,
+			}
 		}
 		return &Schema{
 			Type:  SchemaTypeArray,

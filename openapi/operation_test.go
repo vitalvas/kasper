@@ -165,7 +165,8 @@ func TestOperationBuilder(t *testing.T) {
 	t.Run("non-overlapping custom params are appended", func(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
-				Name: "page", In: ParameterInQuery,
+				Name:   "page",
+				In:     ParameterInQuery,
 				Schema: &Schema{Type: SchemaTypeInteger},
 			})
 
@@ -184,7 +185,8 @@ func TestOperationBuilder(t *testing.T) {
 	t.Run("same name different in location are not deduplicated", func(t *testing.T) {
 		b := newOperationBuilder().
 			Parameter(&Parameter{
-				Name: "id", In: ParameterInHeader,
+				Name:   "id",
+				In:     ParameterInHeader,
 				Schema: &Schema{Type: SchemaTypeString},
 			})
 

@@ -266,7 +266,14 @@ func verifyRFCVector(
 	assert.Equal(t, expectedEncodedMsg, encoded, "encoded message mismatch")
 
 	// Step 2: Verify blinding matches.
-	blindedMsg, state, err := fixedBlind(variant, pub, preparedMsg, salt, r, rInv)
+	blindedMsg, state, err := fixedBlind(fixedBlindParams{
+		variant:     variant,
+		pub:         pub,
+		preparedMsg: preparedMsg,
+		salt:        salt,
+		r:           r,
+		rInv:        rInv,
+	})
 	require.NoError(t, err)
 	assert.Equal(t, expectedBlindedMsg, blindedMsg, "blinded message mismatch")
 

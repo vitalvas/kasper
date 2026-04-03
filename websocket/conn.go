@@ -192,25 +192,50 @@ type Conn struct {
 	compressionLevel   int
 }
 
+type connConfig struct {
+	rwc             io.ReadWriteCloser
+	netConn         net.Conn
+	isServer        bool
+	readBufferSize  int
+	writeBufferSize int
+	writeBufferPool BufferPool
+}
+
 func newConn(conn net.Conn, isServer bool, readBufferSize, writeBufferSize int) *Conn {
-	return newConnWithPool(conn, isServer, readBufferSize, writeBufferSize, nil)
+	return newConnFromRWC(connConfig{
+		rwc:             conn,
+		netConn:         conn,
+		isServer:        isServer,
+		readBufferSize:  readBufferSize,
+		writeBufferSize: writeBufferSize,
+	})
 }
 
 func newConnWithPool(conn net.Conn, isServer bool, readBufferSize, writeBufferSize int, writeBufferPool BufferPool) *Conn {
-	return newConnFromRWC(conn, conn, isServer, readBufferSize, writeBufferSize, writeBufferPool)
+	return newConnFromRWC(connConfig{
+		rwc:             conn,
+		netConn:         conn,
+		isServer:        isServer,
+		readBufferSize:  readBufferSize,
+		writeBufferSize: writeBufferSize,
+		writeBufferPool: writeBufferPool,
+	})
 }
 
-func newConnFromRWC(rwc io.ReadWriteCloser, netConn net.Conn, isServer bool, readBufferSize, writeBufferSize int, writeBufferPool BufferPool) *Conn {
+func newConnFromRWC(cfg connConfig) *Conn {
+	readBufferSize := cfg.readBufferSize
 	if readBufferSize <= 0 {
 		readBufferSize = defaultReadBufferSize
 	}
+
+	writeBufferSize := cfg.writeBufferSize
 	if writeBufferSize <= 0 {
 		writeBufferSize = defaultWriteBufferSize
 	}
 
 	var writeBuf []byte
-	if writeBufferPool != nil {
-		if buf, ok := writeBufferPool.Get().([]byte); ok && len(buf) >= writeBufferSize+maxFrameHeaderSize {
+	if cfg.writeBufferPool != nil {
+		if buf, ok := cfg.writeBufferPool.Get().([]byte); ok && len(buf) >= writeBufferSize+maxFrameHeaderSize {
 			writeBuf = buf[:writeBufferSize+maxFrameHeaderSize]
 		}
 	}
@@ -218,9 +243,9 @@ func newConnFromRWC(rwc io.ReadWriteCloser, netConn net.Conn, isServer bool, rea
 		writeBuf = make([]byte, writeBufferSize+maxFrameHeaderSize)
 	}
 
-	var br io.Reader = rwc
-	if netConn != nil {
-		br = netConn
+	var br io.Reader = cfg.rwc
+	if cfg.netConn != nil {
+		br = cfg.netConn
 	}
 
 	// Wrap with a buffered reader if not already buffered.
@@ -230,14 +255,14 @@ func newConnFromRWC(rwc io.ReadWriteCloser, netConn net.Conn, isServer bool, rea
 	}
 
 	c := &Conn{
-		rwc:              rwc,
-		netConn:          netConn,
+		rwc:              cfg.rwc,
+		netConn:          cfg.netConn,
 		br:               br,
-		isServer:         isServer,
+		isServer:         cfg.isServer,
 		readBuf:          make([]byte, readBufferSize),
 		writeBuf:         writeBuf,
 		writePos:         maxFrameHeaderSize,
-		writeBufferPool:  writeBufferPool,
+		writeBufferPool:  cfg.writeBufferPool,
 		compressionLevel: 1,
 	}
 
@@ -500,7 +525,10 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 	}
 
 	c.writeFrameType = messageType
-	return &messageWriter{c: c, compress: c.writeCompress && c.compressionEnabled}, nil
+	return &messageWriter{
+		c:        c,
+		compress: c.writeCompress && c.compressionEnabled,
+	}, nil
 }
 
 // ReadMessage reads the next message from the connection.
@@ -592,7 +620,10 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 			if err := c.closeHandler(code, text); err != nil {
 				return 0, nil, err
 			}
-			c.readErr = &CloseError{Code: code, Text: text}
+			c.readErr = &CloseError{
+				Code: code,
+				Text: text,
+			}
 			return 0, nil, c.readErr
 		case TextMessage, BinaryMessage:
 			c.readMsgType = frameType
@@ -639,7 +670,10 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 						if err := c.closeHandler(code, text); err != nil {
 							return 0, nil, err
 						}
-						c.readErr = &CloseError{Code: code, Text: text}
+						c.readErr = &CloseError{
+							Code: code,
+							Text: text,
+						}
 						return 0, nil, c.readErr
 					case continuationFrame:
 						// Expected continuation frame.
@@ -664,7 +698,12 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 					}
 					return 0, nil, decErr
 				}
-				c.reader = &messageReader{c: c, buf: payload, final: true, compressed: false}
+				c.reader = &messageReader{
+					c:          c,
+					buf:        payload,
+					final:      true,
+					compressed: false,
+				}
 			case compressed:
 				// Single frame compressed message, enforcing read limit
 				// to prevent decompression bombs.
@@ -676,10 +715,20 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 					}
 					return 0, nil, decErr
 				}
-				c.reader = &messageReader{c: c, buf: payload, final: final, compressed: false}
+				c.reader = &messageReader{
+					c:          c,
+					buf:        payload,
+					final:      final,
+					compressed: false,
+				}
 			default:
 				// Uncompressed message.
-				c.reader = &messageReader{c: c, buf: payload, final: final, compressed: false}
+				c.reader = &messageReader{
+					c:          c,
+					buf:        payload,
+					final:      final,
+					compressed: false,
+				}
 			}
 			return frameType, c.reader, nil
 		case continuationFrame:
@@ -1034,7 +1083,10 @@ func (r *messageReader) Read(p []byte) (int, error) {
 			if err := r.c.closeHandler(code, text); err != nil {
 				return 0, err
 			}
-			closeErr := &CloseError{Code: code, Text: text}
+			closeErr := &CloseError{
+				Code: code,
+				Text: text,
+			}
 			r.c.readErr = closeErr
 			return 0, closeErr
 		case continuationFrame:

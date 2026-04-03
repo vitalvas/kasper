@@ -134,52 +134,63 @@ func Blind(variant Variant, pub *rsa.PublicKey, random io.Reader, preparedMsg []
 	return blindedMsg, state, nil
 }
 
+// fixedBlindParams holds predetermined cryptographic parameters for test
+// vector validation per RFC 9474.
+type fixedBlindParams struct {
+	variant     Variant
+	pub         *rsa.PublicKey
+	preparedMsg []byte
+	salt        []byte
+	r           *big.Int
+	rInv        *big.Int
+}
+
 // fixedBlind is like [Blind] but uses predetermined cryptographic parameters
 // instead of random ones. It is used for RFC 9474 test vector validation.
 //
 // The salt is used directly in PSS encoding (instead of random generation).
 // r and rInv are used as the blinding factor and its inverse (instead of
 // random generation). The caller must ensure r * rInv ≡ 1 (mod n).
-func fixedBlind(variant Variant, pub *rsa.PublicKey, preparedMsg, salt []byte, r, rInv *big.Int) ([]byte, *State, error) {
-	if err := validatePublicKey(pub); err != nil {
+func fixedBlind(p fixedBlindParams) ([]byte, *State, error) {
+	if err := validatePublicKey(p.pub); err != nil {
 		return nil, nil, err
 	}
 
-	sLen, err := validateVariant(variant)
+	sLen, err := validateVariant(p.variant)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if len(preparedMsg) == 0 {
+	if len(p.preparedMsg) == 0 {
 		return nil, nil, fmt.Errorf("%w: prepared message must not be empty", ErrInvalidInput)
 	}
 
-	if len(salt) != sLen {
-		return nil, nil, fmt.Errorf("%w: salt must be %d bytes, got %d", ErrInvalidInput, sLen, len(salt))
+	if len(p.salt) != sLen {
+		return nil, nil, fmt.Errorf("%w: salt must be %d bytes, got %d", ErrInvalidInput, sLen, len(p.salt))
 	}
 
-	kLen := keyLen(pub)
+	kLen := keyLen(p.pub)
 
-	mHash := sha512.Sum384(preparedMsg)
+	mHash := sha512.Sum384(p.preparedMsg)
 
-	emBits := pub.N.BitLen() - 1
-	encoded, err := emsaPSSEncodeWithSalt(mHash[:], emBits, salt)
+	emBits := p.pub.N.BitLen() - 1
+	encoded, err := emsaPSSEncodeWithSalt(mHash[:], emBits, p.salt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrBlindingFailed, err)
 	}
 
 	m := os2ip(encoded)
 
-	gcd := new(big.Int).GCD(nil, nil, m, pub.N)
+	gcd := new(big.Int).GCD(nil, nil, m, p.pub.N)
 	if gcd.Cmp(bigOne) != 0 {
 		return nil, nil, fmt.Errorf("%w: encoded message not coprime to modulus", ErrBlindingFailed)
 	}
 
-	e := big.NewInt(int64(pub.E))
-	rE := new(big.Int).Exp(r, e, pub.N)
+	e := big.NewInt(int64(p.pub.E))
+	rE := new(big.Int).Exp(p.r, e, p.pub.N)
 
 	x := new(big.Int).Mul(m, rE)
-	x.Mod(x, pub.N)
+	x.Mod(x, p.pub.N)
 
 	blindedMsg, err := i2osp(x, kLen)
 	if err != nil {
@@ -187,8 +198,8 @@ func fixedBlind(variant Variant, pub *rsa.PublicKey, preparedMsg, salt []byte, r
 	}
 
 	state := &State{
-		blindInv: rInv,
-		inputMsg: preparedMsg,
+		blindInv: p.rInv,
+		inputMsg: p.preparedMsg,
 	}
 
 	return blindedMsg, state, nil

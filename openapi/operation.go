@@ -302,7 +302,10 @@ func (b *OperationBuilder) Security(reqs ...SecurityRequirement) *OperationBuild
 //
 // See: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
 func (b *OperationBuilder) ExternalDocs(url, description string) *OperationBuilder {
-	b.meta.externalDocs = &ExternalDocs{URL: url, Description: description}
+	b.meta.externalDocs = &ExternalDocs{
+		URL:         url,
+		Description: description,
+	}
 	return b
 }
 

@@ -274,7 +274,14 @@ func TestRouteRegexpMatch(t *testing.T) {
 	}{
 		{name: "path match", template: "/users/{id}", regexpType: regexpTypePath, requestURL: "/users/42", expected: true},
 		{name: "path no match", template: "/users/{id:[0-9]+}", regexpType: regexpTypePath, requestURL: "/users/abc", expected: false},
-		{name: "host match", template: "{sub}.example.com", regexpType: regexpTypeHost, requestURL: "http://api.example.com/", host: "api.example.com", expected: true},
+		{
+			name:       "host match",
+			template:   "{sub}.example.com",
+			regexpType: regexpTypeHost,
+			requestURL: "http://api.example.com/",
+			host:       "api.example.com",
+			expected:   true,
+		},
 		{name: "query match", template: "page={page:[0-9]+}", regexpType: regexpTypeQuery, requestURL: "/search?page=42", expected: true},
 		{name: "query no match", template: "page={page:[0-9]+}", regexpType: regexpTypeQuery, requestURL: "/search?page=abc", expected: false},
 		{name: "query missing key", template: "page={page:[0-9]+}", regexpType: regexpTypeQuery, requestURL: "/search", expected: false},

@@ -90,7 +90,10 @@ func parseIPAllowNets(entries []string) ([]*net.IPNet, error) {
 				mask = net.CIDRMask(32, 32)
 			}
 
-			nets = append(nets, &net.IPNet{IP: ip, Mask: mask})
+			nets = append(nets, &net.IPNet{
+				IP:   ip,
+				Mask: mask,
+			})
 		}
 	}
 

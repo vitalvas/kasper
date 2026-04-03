@@ -191,22 +191,47 @@ func TestFixedBlind(t *testing.T) {
 	msg := []byte("fixed blind test")
 
 	t.Run("nil public key", func(t *testing.T) {
-		_, _, err := fixedBlind(VariantSHA384PSSDeterministic, nil, msg, make([]byte, 48), big.NewInt(1), big.NewInt(1))
+		_, _, err := fixedBlind(fixedBlindParams{
+			variant:     VariantSHA384PSSDeterministic,
+			preparedMsg: msg,
+			salt:        make([]byte, 48),
+			r:           big.NewInt(1),
+			rInv:        big.NewInt(1),
+		})
 		assert.ErrorIs(t, err, ErrInvalidKey)
 	})
 
 	t.Run("unsupported variant", func(t *testing.T) {
-		_, _, err := fixedBlind(Variant("bad"), pub, msg, nil, big.NewInt(1), big.NewInt(1))
+		_, _, err := fixedBlind(fixedBlindParams{
+			variant:     Variant("bad"),
+			pub:         pub,
+			preparedMsg: msg,
+			r:           big.NewInt(1),
+			rInv:        big.NewInt(1),
+		})
 		assert.ErrorIs(t, err, ErrUnsupportedVariant)
 	})
 
 	t.Run("empty message", func(t *testing.T) {
-		_, _, err := fixedBlind(VariantSHA384PSSDeterministic, pub, nil, make([]byte, 48), big.NewInt(1), big.NewInt(1))
+		_, _, err := fixedBlind(fixedBlindParams{
+			variant: VariantSHA384PSSDeterministic,
+			pub:     pub,
+			salt:    make([]byte, 48),
+			r:       big.NewInt(1),
+			rInv:    big.NewInt(1),
+		})
 		assert.ErrorIs(t, err, ErrInvalidInput)
 	})
 
 	t.Run("wrong salt length", func(t *testing.T) {
-		_, _, err := fixedBlind(VariantSHA384PSSDeterministic, pub, msg, make([]byte, 10), big.NewInt(1), big.NewInt(1))
+		_, _, err := fixedBlind(fixedBlindParams{
+			variant:     VariantSHA384PSSDeterministic,
+			pub:         pub,
+			preparedMsg: msg,
+			salt:        make([]byte, 10),
+			r:           big.NewInt(1),
+			rInv:        big.NewInt(1),
+		})
 		assert.ErrorIs(t, err, ErrInvalidInput)
 	})
 }

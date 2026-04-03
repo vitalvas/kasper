@@ -1065,8 +1065,11 @@ func BenchmarkEncode(b *testing.B) {
 
 	small := "hello"
 	medium := map[string]string{
-		"sub": "user-123", "email": "user@example.com",
-		"name": "Alice Smith", "role": "admin", "tenant": "acme",
+		"sub":    "user-123",
+		"email":  "user@example.com",
+		"name":   "Alice Smith",
+		"role":   "admin",
+		"tenant": "acme",
 	}
 	large := make(map[string]string, 50)
 	for i := range 50 {
@@ -1111,8 +1114,11 @@ func BenchmarkDecode(b *testing.B) {
 
 	smallEnc, _ := sc.Encode("hello")
 	mediumEnc, _ := sc.Encode(map[string]string{
-		"sub": "user-123", "email": "user@example.com",
-		"name": "Alice Smith", "role": "admin", "tenant": "acme",
+		"sub":    "user-123",
+		"email":  "user@example.com",
+		"name":   "Alice Smith",
+		"role":   "admin",
+		"tenant": "acme",
 	})
 	largeData := make(map[string]string, 50)
 	for i := range 50 {

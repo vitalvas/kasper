@@ -815,7 +815,7 @@ func TestNewConnFromBufioBufferedData(t *testing.T) {
 		bw := bufio.NewWriter(new(bytes.Buffer))
 		brw := bufio.NewReadWriter(br, bw)
 
-		conn := newConnFromBufio(server, brw, true, 0, 0, nil)
+		conn := newConnFromBufio(server, brw, connConfig{isServer: true, readBufferSize: 0, writeBufferSize: 0, writeBufferPool: nil})
 		require.NotNil(t, conn)
 
 		// The conn.br should be the buffered reader, not the raw netConn.
@@ -831,7 +831,7 @@ func TestNewConnFromBufioBufferedData(t *testing.T) {
 		bw := bufio.NewWriter(new(bytes.Buffer))
 		brw := bufio.NewReadWriter(br, bw)
 
-		conn := newConnFromBufio(server, brw, true, 0, 0, nil)
+		conn := newConnFromBufio(server, brw, connConfig{isServer: true, readBufferSize: 0, writeBufferSize: 0, writeBufferPool: nil})
 		require.NotNil(t, conn)
 
 		// With no buffered data, conn.br should NOT be the brw.Reader.
