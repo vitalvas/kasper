@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/vitalvas/kasper/compare/v0.11.1...v0.11.2) (2026-04-07)
+
+
+### Bug Fixes
+
+* **websocket:** fix StartKeepalive closing connection despite server responding to pings ([332ab0d](https://github.com/vitalvas/kasper/commit/332ab0de76fef9566f0c306aac4b2d09869ef50d))
+
 ## [0.11.1](https://github.com/vitalvas/kasper/compare/v0.11.0...v0.11.1) (2026-04-07)
 
 
