@@ -2345,13 +2345,14 @@ func TestStartKeepalive(t *testing.T) {
 		conn.Close()
 	})
 
-	t.Run("Closes on pong timeout", func(t *testing.T) {
+	t.Run("ReadMessage returns timeout when pong not received", func(t *testing.T) {
 		server, client := net.Pipe()
 
 		conn := newConn(server, true, 1024, 1024)
+		// interval=30ms, pongTimeout=10ms → read deadline set to now+40ms.
 		conn.StartKeepalive(30*time.Millisecond, 10*time.Millisecond)
 
-		// Read pings but don't respond with pong.
+		// Drain pings from the client side but do not send pong responses.
 		go func() {
 			buf := make([]byte, 100)
 			for {
@@ -2363,10 +2364,44 @@ func TestStartKeepalive(t *testing.T) {
 			}
 		}()
 
-		// Wait for keepalive to detect timeout and close.
-		time.Sleep(150 * time.Millisecond)
-		assert.True(t, conn.IsClosed())
+		// ReadMessage must return a timeout error once the read deadline expires.
+		_, _, err := conn.ReadMessage()
+		require.Error(t, err)
+		var netErr net.Error
+		require.True(t, errors.As(err, &netErr), "expected net.Error, got %T: %v", err, err)
+		assert.True(t, netErr.Timeout(), "expected timeout error")
+
 		client.Close()
+		conn.Close()
+	})
+
+	t.Run("Pong resets read deadline", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		tracked := &deadlineTrackingConn{Conn: server}
+		conn := newConnFromRWC(connConfig{
+			rwc:             tracked,
+			netConn:         tracked,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+		})
+
+		before := time.Now()
+		conn.StartKeepalive(50*time.Millisecond, 20*time.Millisecond)
+
+		// Directly invoke the pong handler to simulate a received pong frame.
+		require.NoError(t, conn.pongHandler(""))
+
+		tracked.mu.Lock()
+		deadline := tracked.lastReadDeadline
+		tracked.mu.Unlock()
+
+		// Deadline must be reset to roughly now + interval + pongTimeout = now+70ms.
+		assert.True(t, deadline.After(before.Add(60*time.Millisecond)),
+			"pong handler must extend read deadline; got %v", deadline)
 	})
 }
 
@@ -2443,14 +2478,14 @@ func TestReadMessageContext(t *testing.T) {
 }
 
 func TestStartKeepaliveRaceSafety(t *testing.T) {
-	t.Run("Concurrent pong and keepalive check", func(_ *testing.T) {
+	t.Run("Concurrent pong deadline resets", func(_ *testing.T) {
 		server, client := net.Pipe()
-		defer client.Close()
 
 		conn := newConn(server, true, 1024, 1024)
 		conn.StartKeepalive(50*time.Millisecond, 200*time.Millisecond)
 
-		// Simulate concurrent pong responses to exercise the atomic lastPong.
+		// Simulate concurrent pong responses to verify that concurrent
+		// SetReadDeadline calls via the pong handler are race-safe.
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
@@ -2462,6 +2497,8 @@ func TestStartKeepaliveRaceSafety(t *testing.T) {
 		}()
 
 		wg.Wait()
+		// Close client first so conn.Close() does not block on the pipe write.
+		client.Close()
 		conn.Close()
 	})
 }

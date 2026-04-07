@@ -365,13 +365,25 @@ func (c *Conn) SetReadLimit(limit int64) {
 // StartKeepalive sends periodic ping frames to detect dead connections.
 // The interval specifies how often pings are sent. The pongTimeout specifies
 // how long to wait for a pong response before considering the connection dead.
-// The goroutine stops when the connection is closed.
+//
+// On each received pong (processed by the caller's read loop via ReadMessage),
+// the read deadline is extended by interval+pongTimeout. If no pong arrives
+// within that window, the next ReadMessage call returns a timeout error.
+//
+// The goroutine stops when the connection is closed or a ping write fails.
 func (c *Conn) StartKeepalive(interval, pongTimeout time.Duration) {
-	var lastPong atomic.Int64
-	lastPong.Store(time.Now().UnixNano())
+	wait := interval + pongTimeout
+
+	// Set the initial read deadline before the first ping is sent.
+	// This bounds how long we wait for the server to respond.
+	_ = c.SetReadDeadline(time.Now().Add(wait))
+
+	// Each received pong extends the deadline by another full window.
+	// SetReadDeadline returns ErrDeadlineNotSupported on HTTP/2 connections;
+	// the error is intentionally ignored there since HTTP/2 has its own
+	// keepalive mechanism.
 	c.SetPongHandler(func(_ string) error {
-		lastPong.Store(time.Now().UnixNano())
-		return nil
+		return c.SetReadDeadline(time.Now().Add(wait))
 	})
 
 	go func() {
@@ -380,12 +392,6 @@ func (c *Conn) StartKeepalive(interval, pongTimeout time.Duration) {
 
 		for range ticker.C {
 			if c.IsClosed() {
-				return
-			}
-
-			elapsed := time.Since(time.Unix(0, lastPong.Load()))
-			if elapsed > interval+pongTimeout {
-				_ = c.Close()
 				return
 			}
 
