@@ -69,6 +69,9 @@ var (
 	ErrPayloadLengthOverflow     = errors.New("websocket: payload length overflow")
 	ErrInvalidUTF8               = errors.New("websocket: invalid UTF-8 in text message")
 	ErrDeadlineNotSupported      = errors.New("websocket: deadline not supported on this connection")
+	ErrMessageTypeForbidden      = errors.New("websocket: message type forbidden by policy")
+	ErrFrameSizeExceeded         = errors.New("websocket: frame payload exceeds size limit")
+	ErrNonEmptyPingPayload       = errors.New("websocket: non-empty ping payload not allowed")
 )
 
 // CloseError represents a WebSocket close error.
@@ -158,6 +161,39 @@ const (
 	continuationFrame = 0
 )
 
+// MessageTypePolicy controls which data frame types are accepted on a connection.
+type MessageTypePolicy int
+
+const (
+	// MessageTypePolicyAny allows both text and binary frames (default).
+	MessageTypePolicyAny MessageTypePolicy = iota
+	// MessageTypePolicyBinary rejects text frames with CloseProtocolError.
+	MessageTypePolicyBinary
+	// MessageTypePolicyText rejects binary frames with CloseProtocolError.
+	MessageTypePolicyText
+)
+
+// KeepaliveOptions configures the behaviour of StartKeepalive.
+type KeepaliveOptions struct {
+	// Interval between outgoing ping frames.
+	Interval time.Duration
+
+	// PongTimeout is how long after a ping is sent to wait for a pong before
+	// the read deadline expires. Zero disables deadline enforcement so that
+	// missing pong responses are tolerated (pings act as pure heartbeats).
+	PongTimeout time.Duration
+
+	// PingPayload is called before each ping to obtain the frame payload.
+	// The server will echo it back in the pong, allowing the caller to
+	// implement round-trip latency measurement or other signalling.
+	// Nil sends an empty payload.
+	PingPayload func() []byte
+
+	// OnPong is called with the raw pong payload each time a pong is received.
+	// Nil ignores the payload.
+	OnPong func(payload []byte)
+}
+
 // Conn represents a WebSocket connection.
 type Conn struct {
 	rwc         io.ReadWriteCloser // underlying connection
@@ -190,6 +226,8 @@ type Conn struct {
 
 	compressionEnabled bool
 	compressionLevel   int
+	msgTypePolicy      MessageTypePolicy
+	maxFrameSize       int64
 }
 
 type connConfig struct {
@@ -362,44 +400,84 @@ func (c *Conn) SetReadLimit(limit int64) {
 	c.readLimit = limit
 }
 
-// StartKeepalive sends periodic ping frames to detect dead connections.
-// The interval specifies how often pings are sent. The pongTimeout specifies
-// how long to wait for a pong response before considering the connection dead.
+// SetMaxFrameSize sets the maximum payload size in bytes for a single WebSocket
+// frame, enforced on both reads and writes. Zero disables the limit.
+// On read, a frame exceeding the limit closes the connection with CloseProtocolError
+// and returns ErrFrameSizeExceeded. On write, ErrFrameSizeExceeded is returned
+// without sending the frame.
+func (c *Conn) SetMaxFrameSize(limit int64) {
+	c.maxFrameSize = limit
+}
+
+// StartKeepalive sends periodic ping frames to keep the connection alive.
 //
-// On each received pong (processed by the caller's read loop via ReadMessage),
-// the read deadline is extended by interval+pongTimeout. If no pong arrives
-// within that window, the next ReadMessage call returns a timeout error.
+// When opts.PongTimeout > 0, the read deadline is set to
+// opts.Interval+opts.PongTimeout on startup and is extended on every received
+// pong. If no pong arrives within that window, the next ReadMessage call
+// returns a timeout error. When opts.PongTimeout == 0, missing pong responses
+// are silently tolerated and no read deadline is set (pure heartbeat mode).
+//
+// When opts.PingPayload is set, the returned bytes are used as the ping frame
+// payload on each send. The server echoes the payload back in the pong frame;
+// opts.OnPong receives that payload and can be used for latency measurement or
+// other signalling.
 //
 // The goroutine stops when the connection is closed or a ping write fails.
-func (c *Conn) StartKeepalive(interval, pongTimeout time.Duration) {
-	wait := interval + pongTimeout
-
-	// Set the initial read deadline before the first ping is sent.
-	// This bounds how long we wait for the server to respond.
-	_ = c.SetReadDeadline(time.Now().Add(wait))
-
-	// Each received pong extends the deadline by another full window.
-	// SetReadDeadline returns ErrDeadlineNotSupported on HTTP/2 connections;
-	// the error is intentionally ignored there since HTTP/2 has its own
-	// keepalive mechanism.
-	c.SetPongHandler(func(_ string) error {
-		return c.SetReadDeadline(time.Now().Add(wait))
-	})
+func (c *Conn) StartKeepalive(opts KeepaliveOptions) {
+	if opts.PongTimeout > 0 {
+		wait := opts.Interval + opts.PongTimeout
+		// Set the initial read deadline before the first ping is sent.
+		// SetReadDeadline returns ErrDeadlineNotSupported on HTTP/2 connections;
+		// the error is intentionally ignored since HTTP/2 has its own keepalive.
+		_ = c.SetReadDeadline(time.Now().Add(wait))
+		c.SetPongHandler(func(payload string) error {
+			if opts.OnPong != nil {
+				opts.OnPong([]byte(payload))
+			}
+			return c.SetReadDeadline(time.Now().Add(wait))
+		})
+	} else {
+		// Pong tolerance mode: missing pongs are not an error.
+		c.SetPongHandler(func(payload string) error {
+			if opts.OnPong != nil {
+				opts.OnPong([]byte(payload))
+			}
+			return nil
+		})
+	}
 
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(opts.Interval)
 		defer ticker.Stop()
+
+		writeTimeout := opts.Interval
+		if opts.PongTimeout > 0 {
+			writeTimeout = opts.PongTimeout
+		}
 
 		for range ticker.C {
 			if c.IsClosed() {
 				return
 			}
 
-			if err := c.WriteControl(PingMessage, nil, time.Now().Add(pongTimeout)); err != nil {
+			var payload []byte
+			if opts.PingPayload != nil {
+				payload = opts.PingPayload()
+			}
+
+			if err := c.WriteControl(PingMessage, payload, time.Now().Add(writeTimeout)); err != nil {
 				return
 			}
 		}
 	}()
+}
+
+// SetMessageTypePolicy sets the policy for accepted data frame types.
+// MessageTypePolicyBinary closes the connection with CloseProtocolError when a
+// text frame is received. MessageTypePolicyText does the same for binary frames.
+// The default MessageTypePolicyAny accepts both.
+func (c *Conn) SetMessageTypePolicy(policy MessageTypePolicy) {
+	c.msgTypePolicy = policy
 }
 
 // SetPingHandler sets the handler for ping messages received from the peer.
@@ -457,6 +535,12 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	}
 	if len(data) > maxControlFramePayloadSize {
 		return ErrControlFramePayloadTooBig
+	}
+	// Close frames are exempt: the close handshake must complete regardless of
+	// the data frame size limit. Ping/pong payloads are user-controlled, so
+	// the limit applies to them.
+	if messageType != CloseMessage && c.maxFrameSize > 0 && int64(len(data)) > c.maxFrameSize {
+		return ErrFrameSizeExceeded
 	}
 
 	c.writeMu.Lock()
@@ -597,6 +681,9 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 	for {
 		frameType, payload, final, compressed, err := c.readFrame()
 		if err != nil {
+			if errors.Is(err, ErrFrameSizeExceeded) {
+				_ = c.CloseWithMessage(CloseProtocolError, "frame payload exceeds size limit")
+			}
 			c.readErr = err
 			return 0, nil, err
 		}
@@ -632,6 +719,13 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 			}
 			return 0, nil, c.readErr
 		case TextMessage, BinaryMessage:
+			if (c.msgTypePolicy == MessageTypePolicyBinary && frameType == TextMessage) ||
+				(c.msgTypePolicy == MessageTypePolicyText && frameType == BinaryMessage) {
+				_ = c.CloseWithMessage(CloseProtocolError, "message type forbidden by policy")
+				c.readErr = ErrMessageTypeForbidden
+				return 0, nil, c.readErr
+			}
+
 			c.readMsgType = frameType
 			c.readFinal = final
 			c.readCompress = compressed
@@ -647,6 +741,9 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 				for !final {
 					ft, p, f, _, readErr := c.readFrame()
 					if readErr != nil {
+						if errors.Is(readErr, ErrFrameSizeExceeded) {
+							_ = c.CloseWithMessage(CloseProtocolError, "frame payload exceeds size limit")
+						}
 						c.readErr = readErr
 						return 0, nil, readErr
 					}
@@ -826,6 +923,11 @@ func (c *Conn) readFrame() (frameType int, payload []byte, final bool, compresse
 		return 0, nil, false, false, ErrInvalidClosePayload
 	}
 
+	// Check per-frame size limit (0 means unlimited).
+	if c.maxFrameSize > 0 && payloadLen > c.maxFrameSize {
+		return 0, nil, false, false, ErrFrameSizeExceeded
+	}
+
 	// Check read limit (0 means unlimited).
 	if c.readLimit > 0 && payloadLen > c.readLimit {
 		return 0, nil, false, false, ErrReadLimit
@@ -971,6 +1073,11 @@ func (c *Conn) writeFrameWithCompress(frameType int, data []byte, final bool, co
 		}
 	}
 
+	// Check per-frame size limit against the wire payload (post-compression).
+	if c.maxFrameSize > 0 && int64(len(data)) > c.maxFrameSize {
+		return 0, ErrFrameSizeExceeded
+	}
+
 	// Use writeBuf for header to reduce allocations.
 	// writeBuf has maxFrameHeaderSize bytes at the beginning for the header.
 	headerLen := 2
@@ -1060,6 +1167,9 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		// Compressed fragmented messages are fully read in NextReader.
 		frameType, payload, final, _, err := r.c.readFrame()
 		if err != nil {
+			if errors.Is(err, ErrFrameSizeExceeded) {
+				_ = r.c.CloseWithMessage(CloseProtocolError, "frame payload exceeds size limit")
+			}
 			r.c.readErr = err
 			return 0, err
 		}

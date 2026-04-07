@@ -1105,3 +1105,330 @@ func TestHTTP2ConnAdapter(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func upgradeConn(t *testing.T, u *Upgrader) (*Conn, net.Conn) {
+	t.Helper()
+
+	server, client := net.Pipe()
+
+	hijacker := &mockHijacker{
+		ResponseWriter: httptest.NewRecorder(),
+		conn:           server,
+		reader:         bufio.NewReader(strings.NewReader("")),
+		writer:         bufio.NewWriter(io.Discard),
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Connection", "upgrade")
+	r.Header.Set("Upgrade", "websocket")
+	r.Header.Set("Sec-WebSocket-Version", "13")
+	r.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+	conn, err := u.Upgrade(hijacker, r, nil)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+
+	return conn, client
+}
+
+func TestUpgraderMessageTypePolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		policy     MessageTypePolicy
+		sendOpcode byte
+		wantErr    bool
+	}{
+		{
+			name:       "Binary policy rejects text",
+			policy:     MessageTypePolicyBinary,
+			sendOpcode: byte(TextMessage),
+			wantErr:    true,
+		},
+		{
+			name:       "Binary policy allows binary",
+			policy:     MessageTypePolicyBinary,
+			sendOpcode: byte(BinaryMessage),
+			wantErr:    false,
+		},
+		{
+			name:       "Text policy rejects binary",
+			policy:     MessageTypePolicyText,
+			sendOpcode: byte(BinaryMessage),
+			wantErr:    true,
+		},
+		{
+			name:       "Text policy allows text",
+			policy:     MessageTypePolicyText,
+			sendOpcode: byte(TextMessage),
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, client := upgradeConn(t, &Upgrader{MessageTypePolicy: tt.policy})
+
+			// Drain server writes so CloseWithMessage does not block.
+			go func() {
+				buf := make([]byte, 256)
+				for {
+					if _, err := client.Read(buf); err != nil {
+						return
+					}
+				}
+			}()
+
+			go func() {
+				frame := buildMaskedFrame(tt.sendOpcode, []byte("data"), true)
+				_, _ = client.Write(frame)
+			}()
+
+			_, _, err := conn.ReadMessage()
+			if tt.wantErr {
+				assert.ErrorIs(t, err, ErrMessageTypeForbidden)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			client.Close()
+			conn.Close()
+		})
+	}
+}
+
+func TestUpgraderDisablePongReply(t *testing.T) {
+	t.Run("Pong reply enabled by default", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{})
+
+		// Read from the client concurrently so the pong write does not block.
+		pongCh := make(chan []byte, 1)
+		go func() {
+			buf := make([]byte, 16)
+			_ = client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			n, err := client.Read(buf)
+			if err == nil {
+				pongCh <- buf[:n]
+			}
+		}()
+
+		// Trigger the ping handler — default must send a pong.
+		require.NoError(t, conn.pingHandler("hello"))
+
+		data := <-pongCh
+		assert.Equal(t, byte(finalBit|PongMessage), data[0], "expected pong frame")
+
+		client.Close()
+		conn.Close()
+	})
+
+	t.Run("Pong reply disabled", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{DisablePongReply: true})
+
+		// Trigger the ping handler — must not write anything.
+		require.NoError(t, conn.pingHandler("hello"))
+
+		// Nothing should be written; read must time out.
+		buf := make([]byte, 16)
+		_ = client.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		_, err := client.Read(buf)
+		require.Error(t, err)
+		var netErr net.Error
+		require.True(t, errors.As(err, &netErr))
+		assert.True(t, netErr.Timeout(), "expected timeout — no pong should be sent")
+
+		client.Close()
+		conn.Close()
+	})
+}
+
+func TestUpgraderRequireEmptyPingPayload(t *testing.T) {
+	t.Run("Empty payload accepted", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{RequireEmptyPingPayload: true})
+
+		// Drain server writes so pong does not block.
+		go func() {
+			buf := make([]byte, 64)
+			for {
+				if _, err := client.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+
+		require.NoError(t, conn.pingHandler(""))
+
+		client.Close()
+		conn.Close()
+	})
+
+	t.Run("Non-empty payload rejected", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{RequireEmptyPingPayload: true})
+
+		// Drain server writes so CloseWithMessage does not block.
+		go func() {
+			buf := make([]byte, 64)
+			for {
+				if _, err := client.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+
+		err := conn.pingHandler("payload")
+		assert.ErrorIs(t, err, ErrNonEmptyPingPayload)
+
+		client.Close()
+		conn.Close()
+	})
+}
+
+func TestUpgraderEmptyPongPayload(t *testing.T) {
+	t.Run("Pong payload is empty regardless of ping payload", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{EmptyPongPayload: true})
+
+		pongCh := make(chan []byte, 1)
+		go func() {
+			buf := make([]byte, 32)
+			_ = client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			n, err := client.Read(buf)
+			if err == nil {
+				pongCh <- buf[:n]
+			}
+		}()
+
+		require.NoError(t, conn.pingHandler("hello"))
+
+		data := <-pongCh
+		require.True(t, len(data) >= 2, "expected pong frame")
+		assert.Equal(t, byte(finalBit|PongMessage), data[0], "expected pong opcode")
+		// Payload length bits: data[1] & 0x7f — must be zero.
+		assert.Equal(t, byte(0), data[1]&0x7f, "pong payload must be empty")
+
+		client.Close()
+		conn.Close()
+	})
+}
+
+func TestUpgraderPingHandler(t *testing.T) {
+	t.Run("Custom handler controls pong payload", func(t *testing.T) {
+		called := false
+		var receivedPayload []byte
+
+		conn, client := upgradeConn(t, &Upgrader{
+			PingHandler: func(payload []byte) ([]byte, error) {
+				called = true
+				receivedPayload = payload
+				return []byte("custom"), nil
+			},
+		})
+
+		pongCh := make(chan []byte, 1)
+		go func() {
+			buf := make([]byte, 32)
+			_ = client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			n, err := client.Read(buf)
+			if err == nil {
+				pongCh <- buf[:n]
+			}
+		}()
+
+		require.NoError(t, conn.pingHandler("ping"))
+
+		data := <-pongCh
+		assert.True(t, called)
+		assert.Equal(t, []byte("ping"), receivedPayload)
+		assert.Equal(t, byte(finalBit|PongMessage), data[0])
+		// Payload: data[2:2+payloadLen]
+		payloadLen := int(data[1] & 0x7f)
+		assert.Equal(t, []byte("custom"), data[2:2+payloadLen])
+
+		client.Close()
+		conn.Close()
+	})
+
+	t.Run("RequireEmptyPingPayload enforced before PingHandler", func(t *testing.T) {
+		called := false
+		conn, client := upgradeConn(t, &Upgrader{
+			RequireEmptyPingPayload: true,
+			PingHandler: func(_ []byte) ([]byte, error) {
+				called = true
+				return nil, nil
+			},
+		})
+
+		// Drain server writes so CloseWithMessage does not block.
+		go func() {
+			buf := make([]byte, 64)
+			for {
+				if _, err := client.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+
+		err := conn.pingHandler("nonempty")
+		assert.ErrorIs(t, err, ErrNonEmptyPingPayload)
+		assert.False(t, called, "PingHandler must not be called when payload check fails")
+
+		client.Close()
+		conn.Close()
+	})
+
+	t.Run("Handler error propagated", func(t *testing.T) {
+		handlerErr := errors.New("handler error")
+		conn, client := upgradeConn(t, &Upgrader{
+			PingHandler: func(_ []byte) ([]byte, error) {
+				return nil, handlerErr
+			},
+		})
+
+		err := conn.pingHandler("")
+		assert.ErrorIs(t, err, handlerErr)
+
+		client.Close()
+		conn.Close()
+	})
+}
+
+func TestUpgraderMaxFrameSize(t *testing.T) {
+	t.Run("Frame within limit accepted", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{MaxFrameSize: 16})
+
+		go func() {
+			frame := buildMaskedFrame(byte(BinaryMessage), []byte("hello"), true)
+			_, _ = client.Write(frame)
+		}()
+
+		_, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, []byte("hello"), msg)
+
+		client.Close()
+		conn.Close()
+	})
+
+	t.Run("Frame exceeding limit rejected", func(t *testing.T) {
+		conn, client := upgradeConn(t, &Upgrader{MaxFrameSize: 4})
+
+		// Drain server writes so error close frame does not block.
+		go func() {
+			buf := make([]byte, 256)
+			for {
+				if _, err := client.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+
+		go func() {
+			frame := buildMaskedFrame(byte(BinaryMessage), []byte("toolong"), true)
+			_, _ = client.Write(frame)
+		}()
+
+		_, _, err := conn.ReadMessage()
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+
+		client.Close()
+		conn.Close()
+	})
+}

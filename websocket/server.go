@@ -49,6 +49,92 @@ type Upgrader struct {
 	// EnableCompression specifies if the server should attempt to negotiate
 	// per message compression (RFC 7692).
 	EnableCompression bool
+
+	// MessageTypePolicy is applied to every accepted connection.
+	// The zero value MessageTypePolicyAny imposes no restriction.
+	MessageTypePolicy MessageTypePolicy
+
+	// MaxFrameSize sets the maximum payload size in bytes for a single
+	// WebSocket frame on every accepted connection. Zero disables the limit.
+	MaxFrameSize int64
+
+	// DisablePongReply disables the automatic pong response to client ping
+	// frames. By default the server echoes a pong with the ping payload per
+	// RFC 6455, section 5.5.3.
+	DisablePongReply bool
+
+	// RequireEmptyPingPayload closes the connection with CloseProtocolError
+	// when a ping frame carrying a non-empty payload is received.
+	RequireEmptyPingPayload bool
+
+	// EmptyPongPayload sends an empty pong payload regardless of the ping
+	// payload. By default the ping payload is echoed per RFC 6455.
+	// Ignored when PingHandler is set.
+	EmptyPongPayload bool
+
+	// PingHandler is called for each received ping frame with the raw payload
+	// bytes. The returned bytes are used as the pong payload; returning nil
+	// sends an empty pong. If PingHandler is set, DisablePongReply and
+	// EmptyPongPayload are ignored. RequireEmptyPingPayload is still enforced
+	// before PingHandler is called.
+	PingHandler func(payload []byte) ([]byte, error)
+}
+
+// applyConnPolicy applies all per-connection policies from the Upgrader to conn.
+func (u *Upgrader) applyConnPolicy(conn *Conn) {
+	conn.SetMessageTypePolicy(u.MessageTypePolicy)
+	if u.MaxFrameSize > 0 {
+		conn.SetMaxFrameSize(u.MaxFrameSize)
+	}
+	u.applyPingPolicy(conn)
+}
+
+// applyPingPolicy configures the ping handler on conn according to the
+// Upgrader's ping/pong fields. Priority (highest first):
+//  1. PingHandler — full control; RequireEmptyPingPayload is still pre-checked
+//  2. DisablePongReply — no pong sent
+//  3. RequireEmptyPingPayload / EmptyPongPayload — convenience options
+//  4. No fields set — default RFC 6455 echo behaviour
+func (u *Upgrader) applyPingPolicy(conn *Conn) {
+	requireEmpty := u.RequireEmptyPingPayload
+
+	if u.PingHandler != nil {
+		h := u.PingHandler
+		conn.SetPingHandler(func(appData string) error {
+			if requireEmpty && len(appData) != 0 {
+				_ = conn.CloseWithMessage(CloseProtocolError, "non-empty ping payload not allowed")
+				return ErrNonEmptyPingPayload
+			}
+			pong, err := h([]byte(appData))
+			if err != nil {
+				return err
+			}
+			return conn.WriteControl(PongMessage, pong, time.Now().Add(5*time.Second))
+		})
+		return
+	}
+
+	emptyPong := u.EmptyPongPayload
+	disable := u.DisablePongReply
+
+	if !requireEmpty && !emptyPong && !disable {
+		return // default echo behaviour
+	}
+
+	conn.SetPingHandler(func(appData string) error {
+		if requireEmpty && len(appData) != 0 {
+			_ = conn.CloseWithMessage(CloseProtocolError, "non-empty ping payload not allowed")
+			return ErrNonEmptyPingPayload
+		}
+		if disable {
+			return nil
+		}
+		var payload []byte
+		if !emptyPong {
+			payload = []byte(appData)
+		}
+		return conn.WriteControl(PongMessage, payload, time.Now().Add(5*time.Second))
+	})
 }
 
 func (u *Upgrader) returnError(w http.ResponseWriter, r *http.Request, status int, reason error) {
@@ -191,6 +277,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	})
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
+	u.applyConnPolicy(conn)
 
 	return conn, nil
 }
@@ -295,6 +382,7 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 	})
 	conn.subprotocol = subprotocol
 	conn.compressionEnabled = compress
+	u.applyConnPolicy(conn)
 
 	return conn, nil
 }

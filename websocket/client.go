@@ -70,6 +70,10 @@ type Dialer struct {
 	// Jar specifies the cookie jar.
 	// If nil, cookies are not sent in requests and ignored in responses.
 	Jar http.CookieJar
+
+	// MaxFrameSize sets the maximum payload size in bytes for a single
+	// WebSocket frame. Zero disables the limit.
+	MaxFrameSize int64
 }
 
 // Dial creates a new client connection to the WebSocket server.
@@ -104,20 +108,28 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 		client = http.DefaultClient
 	}
 
+	var conn *Conn
+	var resp *http.Response
+
 	// Check if transport is HTTP/2.
 	if d.isHTTP2(client) {
-		return d.dialHTTP2(ctx, client, u, requestHeader)
+		conn, resp, err = d.dialHTTP2(ctx, client, u, requestHeader)
+	} else if proxyURL := d.getProxyURL(u); proxyURL != nil {
+		// Check if proxy is configured - need special handling for WebSocket.
+		conn, resp, err = d.dialWithProxy(ctx, u, proxyURL, requestHeader)
+	} else {
+		// Direct dial with raw net.Conn, preserving the connection for
+		// LocalAddr, RemoteAddr, UnderlyingConn, and deadline access.
+		conn, resp, err = d.dialDirect(ctx, u, requestHeader)
 	}
 
-	// Check if proxy is configured - need special handling for WebSocket.
-	proxyURL := d.getProxyURL(u)
-	if proxyURL != nil {
-		return d.dialWithProxy(ctx, u, proxyURL, requestHeader)
+	if err != nil {
+		return nil, resp, err
 	}
-
-	// Direct dial with raw net.Conn, preserving the connection for
-	// LocalAddr, RemoteAddr, UnderlyingConn, and deadline access.
-	return d.dialDirect(ctx, u, requestHeader)
+	if d.MaxFrameSize > 0 {
+		conn.SetMaxFrameSize(d.MaxFrameSize)
+	}
+	return conn, resp, nil
 }
 
 // isHTTP2 checks if the client's transport is HTTP/2.

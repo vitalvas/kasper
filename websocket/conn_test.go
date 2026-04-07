@@ -2328,7 +2328,10 @@ func TestStartKeepalive(t *testing.T) {
 		server, client := net.Pipe()
 
 		conn := newConn(server, true, 1024, 1024)
-		conn.StartKeepalive(50*time.Millisecond, 100*time.Millisecond)
+		conn.StartKeepalive(KeepaliveOptions{
+			Interval:    50 * time.Millisecond,
+			PongTimeout: 100 * time.Millisecond,
+		})
 
 		// Read a ping frame from client side.
 		buf := make([]byte, 100)
@@ -2350,7 +2353,10 @@ func TestStartKeepalive(t *testing.T) {
 
 		conn := newConn(server, true, 1024, 1024)
 		// interval=30ms, pongTimeout=10ms → read deadline set to now+40ms.
-		conn.StartKeepalive(30*time.Millisecond, 10*time.Millisecond)
+		conn.StartKeepalive(KeepaliveOptions{
+			Interval:    30 * time.Millisecond,
+			PongTimeout: 10 * time.Millisecond,
+		})
 
 		// Drain pings from the client side but do not send pong responses.
 		go func() {
@@ -2390,7 +2396,10 @@ func TestStartKeepalive(t *testing.T) {
 		})
 
 		before := time.Now()
-		conn.StartKeepalive(50*time.Millisecond, 20*time.Millisecond)
+		conn.StartKeepalive(KeepaliveOptions{
+			Interval:    50 * time.Millisecond,
+			PongTimeout: 20 * time.Millisecond,
+		})
 
 		// Directly invoke the pong handler to simulate a received pong frame.
 		require.NoError(t, conn.pongHandler(""))
@@ -2402,6 +2411,62 @@ func TestStartKeepalive(t *testing.T) {
 		// Deadline must be reset to roughly now + interval + pongTimeout = now+70ms.
 		assert.True(t, deadline.After(before.Add(60*time.Millisecond)),
 			"pong handler must extend read deadline; got %v", deadline)
+	})
+
+	t.Run("Pong tolerance mode does not set read deadline", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		tracked := &deadlineTrackingConn{Conn: server}
+		conn := newConnFromRWC(connConfig{
+			rwc:             tracked,
+			netConn:         tracked,
+			isServer:        true,
+			readBufferSize:  1024,
+			writeBufferSize: 1024,
+		})
+
+		// PongTimeout=0 enables tolerance mode.
+		conn.StartKeepalive(KeepaliveOptions{Interval: 50 * time.Millisecond})
+
+		tracked.mu.Lock()
+		deadline := tracked.lastReadDeadline
+		tracked.mu.Unlock()
+
+		assert.True(t, deadline.IsZero(), "pong tolerance mode must not set a read deadline")
+	})
+
+	t.Run("Ping payload is sent and echoed to OnPong", func(t *testing.T) {
+		server, client := net.Pipe()
+
+		conn := newConn(server, true, 1024, 1024)
+
+		payload := []byte("hello")
+		var gotPayload []byte
+		conn.StartKeepalive(KeepaliveOptions{
+			Interval:    30 * time.Millisecond,
+			PongTimeout: 100 * time.Millisecond,
+			PingPayload: func() []byte { return payload },
+			OnPong:      func(p []byte) { gotPayload = p },
+		})
+
+		// Read the ping frame from the client side and verify the payload.
+		buf := make([]byte, 100)
+		_ = client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		n, err := client.Read(buf)
+		require.NoError(t, err)
+		require.Greater(t, n, 0)
+		assert.Equal(t, byte(finalBit|PingMessage), buf[0])
+		// Payload starts at byte 2 for an unmasked server frame.
+		assert.Equal(t, payload, buf[2:2+len(payload)])
+
+		// Invoke the pong handler directly to simulate the echoed pong.
+		require.NoError(t, conn.pongHandler(string(payload)))
+		assert.Equal(t, payload, gotPayload)
+
+		client.Close()
+		conn.Close()
 	})
 }
 
@@ -2482,7 +2547,10 @@ func TestStartKeepaliveRaceSafety(t *testing.T) {
 		server, client := net.Pipe()
 
 		conn := newConn(server, true, 1024, 1024)
-		conn.StartKeepalive(50*time.Millisecond, 200*time.Millisecond)
+		conn.StartKeepalive(KeepaliveOptions{
+			Interval:    50 * time.Millisecond,
+			PongTimeout: 200 * time.Millisecond,
+		})
 
 		// Simulate concurrent pong responses to verify that concurrent
 		// SetReadDeadline calls via the pong handler are race-safe.
@@ -2501,6 +2569,89 @@ func TestStartKeepaliveRaceSafety(t *testing.T) {
 		client.Close()
 		conn.Close()
 	})
+}
+
+func TestSetMessageTypePolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		policy      MessageTypePolicy
+		sendOpcode  byte
+		wantErr     bool
+		wantErrType error
+	}{
+		{
+			name:       "Any policy allows text",
+			policy:     MessageTypePolicyAny,
+			sendOpcode: byte(TextMessage),
+			wantErr:    false,
+		},
+		{
+			name:       "Any policy allows binary",
+			policy:     MessageTypePolicyAny,
+			sendOpcode: byte(BinaryMessage),
+			wantErr:    false,
+		},
+		{
+			name:        "Binary policy rejects text",
+			policy:      MessageTypePolicyBinary,
+			sendOpcode:  byte(TextMessage),
+			wantErr:     true,
+			wantErrType: ErrMessageTypeForbidden,
+		},
+		{
+			name:       "Binary policy allows binary",
+			policy:     MessageTypePolicyBinary,
+			sendOpcode: byte(BinaryMessage),
+			wantErr:    false,
+		},
+		{
+			name:        "Text policy rejects binary",
+			policy:      MessageTypePolicyText,
+			sendOpcode:  byte(BinaryMessage),
+			wantErr:     true,
+			wantErrType: ErrMessageTypeForbidden,
+		},
+		{
+			name:       "Text policy allows text",
+			policy:     MessageTypePolicyText,
+			sendOpcode: byte(TextMessage),
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, client := net.Pipe()
+
+			conn := newConn(server, true, 1024, 1024)
+			conn.SetMessageTypePolicy(tt.policy)
+
+			// Drain client so close frames sent by the server are consumed promptly.
+			go func() {
+				buf := make([]byte, 256)
+				for {
+					if _, err := client.Read(buf); err != nil {
+						return
+					}
+				}
+			}()
+
+			go func() {
+				frame := buildMaskedFrame(tt.sendOpcode, []byte("data"), true)
+				_, _ = client.Write(frame)
+			}()
+
+			_, _, err := conn.ReadMessage()
+			if tt.wantErr {
+				require.ErrorIs(t, err, tt.wantErrType)
+			} else {
+				require.NoError(t, err)
+			}
+
+			client.Close()
+			conn.Close()
+		})
+	}
 }
 
 func TestCloseCodeValidationInFragmentedRead(t *testing.T) {
@@ -3308,6 +3459,141 @@ func TestMessageReaderControlFrameErrors(t *testing.T) {
 		// readErr should be set so subsequent reads fail immediately.
 		_, _, err = conn.NextReader()
 		assert.ErrorAs(t, err, &closeErr)
+	})
+}
+
+func TestSetMaxFrameSize(t *testing.T) {
+	t.Run("Read frame within limit", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(BinaryMessage), []byte("hello"), true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(16)
+
+		_, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, []byte("hello"), msg)
+	})
+
+	t.Run("Read frame exceeding limit", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(BinaryMessage), []byte("toolong"), true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(4)
+
+		_, _, err := conn.ReadMessage()
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+
+		// A CloseProtocolError frame must have been sent to the peer.
+		written := mock.writeBuf.Bytes()
+		require.True(t, len(written) >= 2, "expected close frame to be written")
+		assert.Equal(t, byte(finalBit|CloseMessage), written[0], "expected close frame opcode")
+		payloadLen := int(written[1] & 0x7f)
+		require.True(t, payloadLen >= 2)
+		closeCode := int(written[2])<<8 | int(written[3])
+		assert.Equal(t, CloseProtocolError, closeCode)
+	})
+
+	t.Run("Write frame within limit", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, false, 0, 0)
+		conn.SetMaxFrameSize(16)
+
+		err := conn.WriteMessage(BinaryMessage, []byte("hello"))
+		require.NoError(t, err)
+	})
+
+	t.Run("Write frame exceeding limit", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, false, 0, 0)
+		conn.SetMaxFrameSize(4)
+
+		err := conn.WriteMessage(BinaryMessage, []byte("toolong"))
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+	})
+
+	t.Run("WriteControl ping frame exceeding limit", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(1)
+
+		err := conn.WriteControl(PingMessage, []byte("ab"), time.Now().Add(time.Second))
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+		assert.Empty(t, mock.writeBuf.Bytes(), "no frame should be written")
+	})
+
+	t.Run("WriteControl close frame exempt from limit", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(1)
+
+		// Close frames must always be sendable regardless of the frame size limit.
+		closePayload := []byte{CloseNormalClosure >> 8, CloseNormalClosure & 0xff}
+		err := conn.WriteControl(CloseMessage, closePayload, time.Now().Add(time.Second))
+		require.NoError(t, err)
+		assert.NotEmpty(t, mock.writeBuf.Bytes(), "close frame must be written")
+	})
+
+	t.Run("Continuation frame exceeding limit sends close frame", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(BinaryMessage), []byte("ab"), false))
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), []byte("toolong"), true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(4)
+
+		_, reader, err := conn.NextReader()
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(reader)
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+
+		written := mock.writeBuf.Bytes()
+		require.True(t, len(written) >= 4, "expected close frame to be written")
+		assert.Equal(t, byte(finalBit|CloseMessage), written[0])
+		closeCode := int(written[2])<<8 | int(written[3])
+		assert.Equal(t, CloseProtocolError, closeCode)
+	})
+
+	t.Run("Compressed continuation frame exceeding limit sends close frame", func(t *testing.T) {
+		original := []byte("hello world, this is a fragmented compressed test message")
+		compressed, err := compressData(original, -1)
+		require.NoError(t, err)
+
+		half := len(compressed) / 2
+		part1 := compressed[:half]
+		part2 := make([]byte, 200) // oversized continuation frame
+
+		var buf bytes.Buffer
+		buf.Write(buildMaskedFrameRaw(byte(BinaryMessage)|rsv1Bit, part1))
+		buf.Write(buildMaskedFrameRaw(byte(continuationFrame)|finalBit, part2))
+
+		mock := &mockConn{readBuf: &buf, writeBuf: &bytes.Buffer{}}
+		conn := newConn(mock, true, 1024, 1024)
+		conn.compressionEnabled = true
+		conn.SetMaxFrameSize(int64(half - 1))
+
+		_, _, err = conn.NextReader()
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+
+		written := mock.writeBuf.Bytes()
+		require.True(t, len(written) >= 4, "expected close frame to be written")
+		assert.Equal(t, byte(finalBit|CloseMessage), written[0])
+		closeCode := int(written[2])<<8 | int(written[3])
+		assert.Equal(t, CloseProtocolError, closeCode)
+	})
+
+	t.Run("Zero limit disables check", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(BinaryMessage), make([]byte, 100), true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(0)
+
+		_, msg, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Len(t, msg, 100)
 	})
 }
 
