@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vitalvas/kasper/compare/v0.11.2...v0.12.0) (2026-04-07)
+
+
+### Features
+
+* **websocket:** add ping payload, message type policy, server ping/pong controls, and frame size limit ([fa00b92](https://github.com/vitalvas/kasper/commit/fa00b920516d0f246498a3e7da37d233423a68b4))
+
 ## [0.11.2](https://github.com/vitalvas/kasper/compare/v0.11.1...v0.11.2) (2026-04-07)
 
 
