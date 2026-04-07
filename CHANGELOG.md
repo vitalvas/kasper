@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/vitalvas/kasper/compare/v0.11.0...v0.11.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* **websocket:** preserve custom header key casing in handshake ([3f6eda7](https://github.com/vitalvas/kasper/commit/3f6eda7d38928855b2dd475d22b3d536722a29f6))
+
 ## [0.11.0](https://github.com/vitalvas/kasper/compare/v0.10.0...v0.11.0) (2026-04-03)
 
 
