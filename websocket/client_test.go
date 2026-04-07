@@ -1056,6 +1056,21 @@ func TestDialerBuildHandshakeHeaders(t *testing.T) {
 		assert.Empty(t, req.Header.Get("Sec-WebSocket-Protocol"))
 		assert.Empty(t, req.Header.Get("Sec-WebSocket-Extensions"))
 	})
+
+	t.Run("Preserves original header key casing", func(t *testing.T) {
+		d := &Dialer{}
+		req := &http.Request{Header: make(http.Header)}
+
+		customHeaders := http.Header{
+			"access-token":     {"tok123"},
+			"local-proxy-mode": {"source"},
+		}
+		d.buildHandshakeHeaders(req, customHeaders, "key")
+
+		assert.Equal(t, []string{"tok123"}, req.Header["access-token"], "lowercase key access-token must be preserved")
+		assert.Equal(t, []string{"source"}, req.Header["local-proxy-mode"], "lowercase key local-proxy-mode must be preserved")
+		assert.Empty(t, req.Header["Access-Token"], "canonicalized key must not be present")
+	})
 }
 
 func TestDialerValidateHTTP1Response(t *testing.T) {

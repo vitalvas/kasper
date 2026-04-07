@@ -447,10 +447,12 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 // buildHandshakeHeaders sets the required WebSocket handshake headers on the request
 // per RFC 6455, section 4.1.
 func (d *Dialer) buildHandshakeHeaders(req *http.Request, requestHeader http.Header, challengeKey string) {
+	// Copy headers directly into the map to preserve original key casing.
+	// Using req.Header.Add would canonicalize keys via textproto.CanonicalMIMEHeaderKey,
+	// breaking services that require exact lowercase names (e.g. AWS IoT Secure
+	// Tunneling expects "access-token" and "local-proxy-mode").
 	for k, vs := range requestHeader {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
+		req.Header[k] = append(req.Header[k], vs...)
 	}
 
 	req.Header.Set("Upgrade", "websocket")
@@ -526,11 +528,9 @@ func (d *Dialer) dialHTTP2(ctx context.Context, client *http.Client, u *url.URL,
 	}
 	req = req.WithContext(ctx)
 
-	// Copy request headers.
+	// Copy request headers directly to preserve original key casing (see buildHandshakeHeaders).
 	for k, vs := range requestHeader {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
+		req.Header[k] = append(req.Header[k], vs...)
 	}
 
 	if len(d.Subprotocols) > 0 {

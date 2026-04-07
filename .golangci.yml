@@ -24,6 +24,10 @@ linters:
         - G402
   exclusions:
     generated: lax
+    rules:
+      - linters:
+          - staticcheck
+        text: "SA1008"
     presets:
       - comments
       - common-false-positives
