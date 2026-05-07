@@ -400,6 +400,35 @@
 //	    mux.ResponseXML(w, http.StatusOK, data)
 //	}
 //
+// # HTML Template Responses
+//
+// SetTemplates registers parsed templates for use by ResponseHTML.
+// Most applications call it once at startup. ResponseHTML renders the named
+// template into a buffer and writes the result with Content-Type
+// "text/html; charset=utf-8":
+//
+//	tmpl := template.Must(template.ParseFS(templateFS, "templates/*.html"))
+//	mux.SetTemplates(tmpl)
+//
+//	func handleLogin(w http.ResponseWriter, r *http.Request) {
+//	    mux.ResponseHTML(w, http.StatusOK, "login", LoginData{Error: "Invalid password"})
+//	}
+//
+// Uses html/template, which auto-escapes interpolated data. If SetTemplates
+// has not been called, the named template is missing, or template execution
+// fails, an HTTP 500 is written instead.
+//
+// For ad-hoc rendering without the global registry, ResponseHTMLTemplate
+// renders an already-parsed *template.Template (optionally selecting a named
+// template from the set), and ResponseHTMLString parses and renders an
+// inline template string:
+//
+//	mux.ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", data)
+//	mux.ResponseHTMLString(w, http.StatusOK, `<p>{{.}}</p>`, "Hello")
+//
+// ResponseHTMLString parses on every call -- prefer SetTemplates +
+// ResponseHTML or ResponseHTMLTemplate for templates rendered repeatedly.
+//
 // # Typed JSON Handlers
 //
 // HandleJSON combines [BindJSON] and [ResponseJSON] into a single generic

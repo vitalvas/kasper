@@ -14,6 +14,7 @@ HTTP request multiplexer with URL pattern matching.
 - Custom error handlers (404, 405)
 - Strict slash and path cleaning options
 - Typed JSON handler with generic request/response binding (`HandleJSON`)
+- HTML template responses (`SetTemplates`, `ResponseHTML`, `ResponseHTMLTemplate`, `ResponseHTMLString`)
 - Route metadata for attaching arbitrary key-value data
 - Walk function for route inspection
 
@@ -861,6 +862,46 @@ r.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 |----------|--------------|
 | `ResponseJSON` | `application/json` |
 | `ResponseXML` | `application/xml` |
+| `ResponseHTML` | `text/html; charset=utf-8` |
+
+### HTML Template Responses
+
+Register parsed templates once at startup with `SetTemplates`, then render named templates from handlers with `ResponseHTML`. Uses `html/template`, which automatically escapes interpolated data to prevent XSS:
+
+```go
+//go:embed templates/*.html
+var templateFS embed.FS
+
+tmpl := template.Must(template.ParseFS(templateFS, "templates/*.html"))
+mux.SetTemplates(tmpl)
+
+r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+    mux.ResponseHTML(w, http.StatusOK, "login", LoginData{Error: "Invalid password"})
+})
+
+r.HandleFunc("/forbidden", func(w http.ResponseWriter, r *http.Request) {
+    mux.ResponseHTML(w, http.StatusForbidden, "error", ErrorData{
+        Title:   "Access denied",
+        Message: "You do not have permission.",
+    })
+})
+```
+
+The template is rendered into a buffer first; if `SetTemplates` was never called, the named template is missing, or template execution fails, an HTTP 500 is written instead of a partially-flushed response.
+
+`SetTemplates` is safe to call concurrently and replaces the previously registered set; pass `nil` to clear it.
+
+For ad-hoc rendering without going through the global registry, use `ResponseHTMLTemplate` with an already-parsed template, or `ResponseHTMLString` to parse and render an inline template string:
+
+```go
+// Already-parsed template, optionally selecting a named template from the set.
+tmpl := template.Must(template.New("greeting").Parse(`<p>Hello, {{.}}!</p>`))
+mux.ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", "World")
+
+// Inline template string. Parsed on every call -- prefer SetTemplates for
+// templates rendered repeatedly.
+mux.ResponseHTMLString(w, http.StatusOK, `<p>{{.}}</p>`, "Hello")
+```
 
 ## Typed JSON Handlers
 

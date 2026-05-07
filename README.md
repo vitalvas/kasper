@@ -19,7 +19,7 @@ HTTP request multiplexer. API-compatible with gorilla/mux.
 | Path variables | Regex constraints and macros: `uuid`, `int`, `float`, `slug`, `alpha`, `alphanum`, `date`, `hex`, `domain` |
 | Matchers | Host, method, header, query, scheme, custom `MatcherFunc` |
 | Routing | Subrouters, middleware, named routes, URL building, `Reverse` from handlers, `Scheme` helper |
-| Request/Response | `BindJSON`, `BindXML`, `BindQuery`, `BindForm`, `ResponseJSON`, `ResponseXML` |
+| Request/Response | `BindJSON`, `BindXML`, `BindQuery`, `BindForm`, `ResponseJSON`, `ResponseXML`, `ResponseHTML` |
 | Values encoding | `EncodeQuery`, `EncodeForm` — struct to `url.Values` with dot notation |
 | Standards | Strict slash (RFC 7538), path cleaning (RFC 3986), route walking |
 

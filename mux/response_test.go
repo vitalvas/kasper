@@ -2,11 +2,13 @@ package mux
 
 import (
 	"encoding/xml"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResponseJSON(t *testing.T) {
@@ -79,6 +81,176 @@ func TestResponseJSON(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResponseHTML(t *testing.T) {
+	t.Cleanup(func() { SetTemplates(nil) })
+
+	tmpl := template.Must(template.New("hello").Parse(`<p>Hello, {{.Name}}!</p>`))
+	template.Must(tmpl.New("error").Parse(`<h1>{{.Title}}</h1><p>{{.Message}}</p>`))
+	template.Must(tmpl.New("broken").Parse(`{{.Missing.Field}}`))
+
+	t.Run("renders template with status and content-type", func(t *testing.T) {
+		SetTemplates(tmpl)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "hello", map[string]string{"Name": "World"})
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+		assert.Equal(t, "<p>Hello, World!</p>", w.Body.String())
+	})
+
+	t.Run("respects custom status code", func(t *testing.T) {
+		SetTemplates(tmpl)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusForbidden, "error", map[string]string{
+			"Title":   "Access denied",
+			"Message": "Nope.",
+		})
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "Access denied")
+		assert.Contains(t, w.Body.String(), "Nope.")
+	})
+
+	t.Run("escapes HTML in data", func(t *testing.T) {
+		SetTemplates(tmpl)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "hello", map[string]string{"Name": "<script>x</script>"})
+		assert.NotContains(t, w.Body.String(), "<script>")
+		assert.Contains(t, w.Body.String(), "&lt;script&gt;")
+	})
+
+	t.Run("returns 500 when templates not set", func(t *testing.T) {
+		SetTemplates(nil)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "hello", nil)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.NotEqual(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+	})
+
+	t.Run("returns 500 when template not found", func(t *testing.T) {
+		SetTemplates(tmpl)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "missing", nil)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("returns 500 on execution error", func(t *testing.T) {
+		SetTemplates(tmpl)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "broken", struct{}{})
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.NotContains(t, w.Body.String(), "<")
+	})
+}
+
+func TestResponseHTMLTemplate(t *testing.T) {
+	t.Run("renders single template", func(t *testing.T) {
+		tmpl := template.Must(template.New("page").Parse(`<p>{{.Name}}</p>`))
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", map[string]string{"Name": "Alice"})
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+		assert.Equal(t, "<p>Alice</p>", w.Body.String())
+	})
+
+	t.Run("renders named template from set", func(t *testing.T) {
+		tmpl := template.Must(template.New("root").Parse(`root`))
+		template.Must(tmpl.New("fragment").Parse(`<span>{{.}}</span>`))
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, tmpl, "fragment", "hi")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "<span>hi</span>", w.Body.String())
+	})
+
+	t.Run("escapes HTML in data", func(t *testing.T) {
+		tmpl := template.Must(template.New("p").Parse(`<p>{{.}}</p>`))
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", "<script>x</script>")
+		assert.NotContains(t, w.Body.String(), "<script>")
+		assert.Contains(t, w.Body.String(), "&lt;script&gt;")
+	})
+
+	t.Run("returns 500 when tmpl is nil", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, nil, "", nil)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("returns 500 when named template missing", func(t *testing.T) {
+		tmpl := template.Must(template.New("page").Parse(`hi`))
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, tmpl, "missing", nil)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("returns 500 on execution error", func(t *testing.T) {
+		tmpl := template.Must(template.New("broken").Parse(`{{.Missing.Field}}`))
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", struct{}{})
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.NotEqual(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+	})
+}
+
+func TestResponseHTMLString(t *testing.T) {
+	t.Run("parses and renders inline template", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLString(w, http.StatusOK, `<p>Hello, {{.Name}}!</p>`, map[string]string{"Name": "World"})
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+		assert.Equal(t, "<p>Hello, World!</p>", w.Body.String())
+	})
+
+	t.Run("respects custom status code", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLString(w, http.StatusTeapot, `<h1>{{.}}</h1>`, "I am a teapot")
+		assert.Equal(t, http.StatusTeapot, w.Code)
+		assert.Equal(t, "<h1>I am a teapot</h1>", w.Body.String())
+	})
+
+	t.Run("escapes HTML in data", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLString(w, http.StatusOK, `<p>{{.}}</p>`, "<script>x</script>")
+		assert.NotContains(t, w.Body.String(), "<script>")
+		assert.Contains(t, w.Body.String(), "&lt;script&gt;")
+	})
+
+	t.Run("returns 500 on parse error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLString(w, http.StatusOK, `{{ unclosed`, nil)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.NotEqual(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
+	})
+
+	t.Run("returns 500 on execution error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLString(w, http.StatusOK, `{{.Missing.Field}}`, struct{}{})
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestSetTemplates(t *testing.T) {
+	t.Cleanup(func() { SetTemplates(nil) })
+
+	t.Run("nil clears registry", func(t *testing.T) {
+		tmpl := template.Must(template.New("t").Parse("hi"))
+		SetTemplates(tmpl)
+		SetTemplates(nil)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "t", nil)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("replaces previously set templates", func(t *testing.T) {
+		first := template.Must(template.New("t").Parse("first"))
+		second := template.Must(template.New("t").Parse("second"))
+		SetTemplates(first)
+		SetTemplates(second)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "t", nil)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "second", w.Body.String())
+	})
 }
 
 func TestResponseXML(t *testing.T) {

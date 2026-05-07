@@ -28,6 +28,7 @@ const (
 	// Text types.
 	ContentTypeTextPlain       = "text/plain"
 	ContentTypeTextHTML        = "text/html"
+	ContentTypeTextHTMLUTF8    = "text/html; charset=utf-8"
 	ContentTypeTextCSS         = "text/css"
 	ContentTypeTextCSV         = "text/csv"
 	ContentTypeTextXML         = "text/xml"

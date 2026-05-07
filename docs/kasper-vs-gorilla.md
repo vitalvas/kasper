@@ -95,6 +95,8 @@ requires migration.
 | Tag options (`required`, `default`, `omitempty`) | No | Yes |
 | JSON response writing (`ResponseJSON`) | No | Yes |
 | XML response writing (`ResponseXML`) | No | Yes |
+| HTML template responses (`SetTemplates`, `ResponseHTML`) | No | Yes |
+| Inline HTML rendering (`ResponseHTMLTemplate`, `ResponseHTMLString`) | No | Yes |
 | Typed JSON handlers (`HandleJSON`) | No | Yes |
 | Response-only JSON handlers (`HandleJSONResponse`) | No | Yes |
 | Content-Type constants | No | Yes |
