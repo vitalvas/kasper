@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0](https://github.com/vitalvas/kasper/compare/v0.12.0...v0.13.0) (2026-05-07)
+
+
+### Features
+
+* **csrf:** add CSRF protection middleware ([24687e8](https://github.com/vitalvas/kasper/commit/24687e82233a3150c439b99db9023b0cc86a4464))
+* **mux:** add HTML template response helpers ([a1b3472](https://github.com/vitalvas/kasper/commit/a1b347226b559ee8a47b2280edfc2e9fae795b43))
+* **mux:** add Reverse and Scheme request helpers ([62dcf03](https://github.com/vitalvas/kasper/commit/62dcf03862564b702290627b206a81e78cc4c64f))
+* **securecookie:** add SignedCookie for HMAC-only signing ([3cfa377](https://github.com/vitalvas/kasper/commit/3cfa3777953013e439c29a961d2de0b4212b1d37))
+
 ## [0.12.0](https://github.com/vitalvas/kasper/compare/v0.11.2...v0.12.0) (2026-04-07)
 
 
