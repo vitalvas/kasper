@@ -3,6 +3,7 @@ package mux
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -68,6 +69,61 @@ func CurrentRoute(r *http.Request) *Route {
 		return rc.route
 	}
 	return nil
+}
+
+// ErrNoRouterInContext is returned by Reverse when the request has no router
+// in its context. This typically means Reverse was called outside of a handler
+// dispatched by a Router.
+var ErrNoRouterInContext = errors.New("mux: no router in request context")
+
+// ErrRouteNotFound is returned by Reverse when no route is registered with
+// the given name on the current router.
+var ErrRouteNotFound = errors.New("mux: route not found")
+
+// Reverse builds a URL path for the named route using the given key/value
+// pairs for route variables. It looks up the named route on the router that
+// handled the current request (see CurrentRouter), so it must be called from
+// inside a handler dispatched by the router.
+//
+// Returns ErrNoRouterInContext if the request has no router in its context,
+// or an error wrapping ErrRouteNotFound if the named route is not registered.
+//
+// Example:
+//
+//	r.HandleFunc("/products/{pk}", h).Name("product-detail")
+//	url, err := mux.Reverse(req, "product-detail", "pk", "123")
+//	// url == "/products/123"
+func Reverse(r *http.Request, name string, pairs ...string) (string, error) {
+	router := CurrentRouter(r)
+	if router == nil {
+		return "", ErrNoRouterInContext
+	}
+	route := router.Get(name)
+	if route == nil {
+		return "", fmt.Errorf("%w: %q", ErrRouteNotFound, name)
+	}
+	u, err := route.URL(pairs...)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+// Scheme returns the scheme of the current request: "https" if the request
+// arrived over TLS or if r.URL.Scheme has been populated (e.g., by the
+// muxhandlers.ProxyHeaders middleware from a trusted X-Forwarded-Proto
+// header), otherwise "http".
+//
+// When running behind a proxy, install muxhandlers.ProxyHeaders before the
+// router so r.URL.Scheme reflects the client-facing scheme.
+func Scheme(r *http.Request) string {
+	if r.URL != nil && r.URL.Scheme != "" {
+		return r.URL.Scheme
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
 
 // RequestMetadata returns the merged metadata for the current request.

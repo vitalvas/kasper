@@ -105,9 +105,11 @@ requires migration.
 | `CurrentRouter(r)` | No | Yes |
 | `SetURLVars(r, vars)` | Yes | Yes |
 | `RequestMetadata(r)` | No | Yes |
+| `Scheme(r)` | No | Yes |
 | **URL Building** | | |
 | Named routes | Yes | Yes |
 | `URL`, `URLHost`, `URLPath` | Yes | Yes |
+| `Reverse(r, name, pairs...)` from handlers | No | Yes |
 | Build-only routes | Yes | Yes |
 | **Route Inspection** | | |
 | `GetPathTemplate`, `GetPathRegexp` | Yes | Yes |
@@ -292,6 +294,8 @@ id, ok := mux.VarGet(r, "id")
 // kasper/mux only
 router := mux.CurrentRouter(r)
 md := mux.RequestMetadata(r)
+url, err := mux.Reverse(r, "product-detail", "pk", "123")
+scheme := mux.Scheme(r)
 ```
 
 ---

@@ -403,6 +403,48 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### CurrentRouter
+
+Returns the innermost router that handled the current request. For subrouters, this returns the subrouter, not the parent. Only works inside the handler of the matched route:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    router := mux.CurrentRouter(r)
+}
+```
+
+### Reverse
+
+Builds a URL path for a named route from inside a handler, using key/value pairs for route variables. Returns an error if the request has no router in context (`ErrNoRouterInContext`) or the named route is not registered (`ErrRouteNotFound`):
+
+```go
+r.HandleFunc("/products/{pk}", productDetail).Name("product-detail")
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    url, err := mux.Reverse(r, "product-detail", "pk", "123")
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    http.Redirect(w, r, url, http.StatusFound)
+}
+```
+
+Named routes registered on subrouters are also resolvable, since the named-route map is shared with the parent router.
+
+### Scheme
+
+Returns the scheme of the current request: `"https"` if the request arrived over TLS or `r.URL.Scheme` is populated (e.g., set by `muxhandlers.ProxyHeaders` from a trusted `X-Forwarded-Proto`), otherwise `"http"`:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    u := url.URL{Scheme: mux.Scheme(r), Host: r.Host, Path: r.URL.Path}
+    absolute := u.String()
+}
+```
+
+When running behind a proxy, install `muxhandlers.ProxyHeaders` before the router so `r.URL.Scheme` reflects the client-facing scheme.
+
 ### SetURLVars
 
 Sets URL variables on a request, intended for testing route handlers:
@@ -556,6 +598,8 @@ Build host or path components individually:
 hostURL, _ := route.URLHost("subdomain", "docs")
 pathURL, _ := route.URLPath("resource", "users")
 ```
+
+From inside a handler, use `mux.Reverse` to look up a named route on the current router and build its URL path in a single call. See [Reverse](#reverse).
 
 ## Route Inspection
 

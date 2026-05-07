@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -199,6 +200,317 @@ func TestMiddlewareFunc(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		handler.ServeHTTP(w, r)
 		assert.True(t, called)
+	})
+}
+
+func TestReverse(t *testing.T) {
+	t.Run("returns error when no router in context", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		_, err := Reverse(r, "x")
+		assert.ErrorIs(t, err, ErrNoRouterInContext)
+	})
+
+	t.Run("returns error for unknown route", func(t *testing.T) {
+		router := NewRouter()
+		var got error
+		router.HandleFunc("/test", func(_ http.ResponseWriter, r *http.Request) {
+			_, got = Reverse(r, "missing")
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.ErrorIs(t, got, ErrRouteNotFound)
+	})
+
+	t.Run("builds path for static named route", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/login", func(_ http.ResponseWriter, _ *http.Request) {}).Name("login")
+		var url string
+		router.HandleFunc("/test", func(_ http.ResponseWriter, r *http.Request) {
+			url, _ = Reverse(r, "login")
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, "/login", url)
+	})
+
+	t.Run("builds path with vars", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/products/{pk}", func(_ http.ResponseWriter, _ *http.Request) {}).Name("product-detail")
+		var url string
+		router.HandleFunc("/test", func(_ http.ResponseWriter, r *http.Request) {
+			url, _ = Reverse(r, "product-detail", "pk", "123")
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, "/products/123", url)
+	})
+
+	t.Run("returns error for missing var", func(t *testing.T) {
+		router := NewRouter()
+		router.HandleFunc("/products/{pk}", func(_ http.ResponseWriter, _ *http.Request) {}).Name("product-detail")
+		var got error
+		router.HandleFunc("/test", func(_ http.ResponseWriter, r *http.Request) {
+			_, got = Reverse(r, "product-detail")
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Error(t, got)
+	})
+
+	t.Run("resolves names registered on subrouter from parent handler", func(t *testing.T) {
+		router := NewRouter()
+		sub := router.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/users/{id}", func(_ http.ResponseWriter, _ *http.Request) {}).Name("user-detail")
+		var url string
+		router.HandleFunc("/test", func(_ http.ResponseWriter, r *http.Request) {
+			url, _ = Reverse(r, "user-detail", "id", "42")
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, "/api/users/42", url)
+	})
+}
+
+func TestReverseMacros(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string // path template
+		varName string
+		value   string
+		want    string
+	}{
+		{"uuid", "/items/{id:uuid}", "id", "550e8400-e29b-41d4-a716-446655440000", "/items/550e8400-e29b-41d4-a716-446655440000"},
+		{"int", "/page/{n:int}", "n", "42", "/page/42"},
+		{"float", "/value/{v:float}", "v", "3.14", "/value/3.14"},
+		{"float-leading-dot", "/value/{v:float}", "v", ".5", "/value/.5"},
+		{"slug", "/posts/{s:slug}", "s", "my-post-title", "/posts/my-post-title"},
+		{"alpha", "/names/{n:alpha}", "n", "hello", "/names/hello"},
+		{"alphanum", "/tokens/{t:alphanum}", "t", "abc123", "/tokens/abc123"},
+		{"date", "/events/{d:date}", "d", "2024-01-15", "/events/2024-01-15"},
+		{"hex", "/colors/{h:hex}", "h", "deadBEEF", "/colors/deadBEEF"},
+		{"domain", "/sites/{d:domain}", "d", "sub.example.co.uk", "/sites/sub.example.co.uk"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			router.HandleFunc(tt.pattern, func(_ http.ResponseWriter, _ *http.Request) {}).Name(tt.name)
+			var got string
+			var gotErr error
+			router.HandleFunc("/probe", func(_ http.ResponseWriter, r *http.Request) {
+				got, gotErr = Reverse(r, tt.name, tt.varName, tt.value)
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+			router.ServeHTTP(w, req)
+			require.NoError(t, gotErr)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestReverseMultipleVars(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		pairs   []string
+		want    string
+	}{
+		{
+			name:    "two-plain-vars",
+			pattern: "/articles/{category}/{id}",
+			pairs:   []string{"category", "tech", "id", "42"},
+			want:    "/articles/tech/42",
+		},
+		{
+			name:    "pairs-order-independent",
+			pattern: "/articles/{category}/{id}",
+			pairs:   []string{"id", "42", "category", "tech"},
+			want:    "/articles/tech/42",
+		},
+		{
+			name:    "mixed-macros",
+			pattern: "/users/{id:uuid}/posts/{n:int}",
+			pairs:   []string{"id", "550e8400-e29b-41d4-a716-446655440000", "n", "7"},
+			want:    "/users/550e8400-e29b-41d4-a716-446655440000/posts/7",
+		},
+		{
+			name:    "three-vars-mixed-types",
+			pattern: "/{year:int}/{month:int}/{slug:slug}",
+			pairs:   []string{"year", "2026", "month", "5", "slug", "hello-world"},
+			want:    "/2026/5/hello-world",
+		},
+		{
+			name:    "var-with-static-segments",
+			pattern: "/api/v1/users/{id:int}/comments/{cid:int}",
+			pairs:   []string{"id", "1", "cid", "99"},
+			want:    "/api/v1/users/1/comments/99",
+		},
+		{
+			name:    "macro-and-regex-mix",
+			pattern: "/files/{name:slug}/v{version:[0-9]+}",
+			pairs:   []string{"name", "report", "version", "3"},
+			want:    "/files/report/v3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			router.HandleFunc(tt.pattern, func(_ http.ResponseWriter, _ *http.Request) {}).Name(tt.name)
+			var got string
+			var gotErr error
+			router.HandleFunc("/probe", func(_ http.ResponseWriter, r *http.Request) {
+				got, gotErr = Reverse(r, tt.name, tt.pairs...)
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+			router.ServeHTTP(w, req)
+			require.NoError(t, gotErr)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestReverseMultipleVarsErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		pairs   []string
+	}{
+		{
+			name:    "missing-second-var",
+			pattern: "/articles/{category}/{id}",
+			pairs:   []string{"category", "tech"},
+		},
+		{
+			name:    "odd-number-of-pairs",
+			pattern: "/articles/{category}/{id}",
+			pairs:   []string{"category", "tech", "id"},
+		},
+		{
+			name:    "second-var-fails-macro",
+			pattern: "/users/{id:uuid}/posts/{n:int}",
+			pairs:   []string{"id", "550e8400-e29b-41d4-a716-446655440000", "n", "abc"},
+		},
+		{
+			name:    "unknown-var-name",
+			pattern: "/articles/{category}/{id}",
+			pairs:   []string{"category", "tech", "wrong", "42"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			router.HandleFunc(tt.pattern, func(_ http.ResponseWriter, _ *http.Request) {}).Name(tt.name)
+			var gotErr error
+			router.HandleFunc("/probe", func(_ http.ResponseWriter, r *http.Request) {
+				_, gotErr = Reverse(r, tt.name, tt.pairs...)
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+			router.ServeHTTP(w, req)
+			assert.Error(t, gotErr)
+		})
+	}
+}
+
+func TestReverseMacroValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		varName string
+		value   string
+	}{
+		{"uuid-rejects-non-uuid", "/items/{id:uuid}", "id", "not-a-uuid"},
+		{"int-rejects-letters", "/page/{n:int}", "n", "abc"},
+		{"int-rejects-negative", "/page/{n:int}", "n", "-1"},
+		{"slug-rejects-space", "/posts/{s:slug}", "s", "with space"},
+		{"alpha-rejects-digits", "/names/{n:alpha}", "n", "abc123"},
+		{"date-rejects-bad-format", "/events/{d:date}", "d", "2024/01/15"},
+		{"hex-rejects-non-hex", "/colors/{h:hex}", "h", "xyz"},
+		{"domain-rejects-empty", "/sites/{d:domain}", "d", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter()
+			router.HandleFunc(tt.pattern, func(_ http.ResponseWriter, _ *http.Request) {}).Name(tt.name)
+			var gotErr error
+			router.HandleFunc("/probe", func(_ http.ResponseWriter, r *http.Request) {
+				_, gotErr = Reverse(r, tt.name, tt.varName, tt.value)
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+			router.ServeHTTP(w, req)
+			assert.Error(t, gotErr)
+		})
+	}
+}
+
+func TestScheme(t *testing.T) {
+	t.Run("returns http for plain request", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.URL.Scheme = ""
+		r.TLS = nil
+		assert.Equal(t, "http", Scheme(r))
+	})
+
+	t.Run("returns https when r.TLS is set", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.URL.Scheme = ""
+		r.TLS = &tls.ConnectionState{}
+		assert.Equal(t, "https", Scheme(r))
+	})
+
+	t.Run("uses r.URL.Scheme when populated", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.URL.Scheme = "https"
+		r.TLS = nil
+		assert.Equal(t, "https", Scheme(r))
+	})
+
+	t.Run("URL.Scheme takes precedence over TLS", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.URL.Scheme = "http"
+		r.TLS = &tls.ConnectionState{}
+		assert.Equal(t, "http", Scheme(r))
+	})
+}
+
+func FuzzReverse(f *testing.F) {
+	router := NewRouter()
+	router.HandleFunc("/articles/{category}/{id:[0-9]+}", func(_ http.ResponseWriter, _ *http.Request) {}).Name("article")
+	router.HandleFunc("/users/{id:uuid}", func(_ http.ResponseWriter, _ *http.Request) {}).Name("user")
+	router.HandleFunc("/posts/{slug:slug}", func(_ http.ResponseWriter, _ *http.Request) {}).Name("post")
+	router.HandleFunc("/static", func(_ http.ResponseWriter, _ *http.Request) {}).Name("static")
+
+	probe := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	router.HandleFunc("/probe", func(_ http.ResponseWriter, r *http.Request) {
+		probe = r
+	})
+	router.ServeHTTP(httptest.NewRecorder(), probe)
+
+	f.Add("article", "category", "tech", "id", "42")
+	f.Add("user", "id", "550e8400-e29b-41d4-a716-446655440000", "", "")
+	f.Add("post", "slug", "hello-world", "", "")
+	f.Add("static", "", "", "", "")
+	f.Add("missing", "x", "y", "", "")
+	f.Add("", "", "", "", "")
+
+	f.Fuzz(func(_ *testing.T, name, k1, v1, k2, v2 string) {
+		pairs := []string{k1, v1, k2, v2}
+		_, _ = Reverse(probe, name, pairs...)
+		_, _ = Reverse(probe, name)
+		_, _ = Reverse(probe, name, k1)
+		_, _ = Reverse(probe, name, k1, v1)
+		_ = Scheme(probe)
 	})
 }
 

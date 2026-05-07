@@ -274,6 +274,27 @@
 //	route := mux.CurrentRoute(r)
 //	tpl, _ := route.GetPathTemplate()
 //
+// CurrentRouter returns the innermost router that handled the current
+// request. For subrouters, this returns the subrouter, not the parent:
+//
+//	router := mux.CurrentRouter(r)
+//
+// Reverse builds a URL path for a named route from inside a handler, using
+// key/value pairs for route variables. Returns ErrNoRouterInContext if the
+// request has no router in context, or an error wrapping ErrRouteNotFound
+// if the named route is not registered:
+//
+//	r.HandleFunc("/products/{pk}", productDetail).Name("product-detail")
+//	url, err := mux.Reverse(r, "product-detail", "pk", "123")
+//	// url == "/products/123"
+//
+// Scheme returns the scheme of the current request: "https" if the request
+// arrived over TLS or r.URL.Scheme is populated (e.g., set by
+// muxhandlers.ProxyHeaders from a trusted X-Forwarded-Proto header),
+// otherwise "http":
+//
+//	scheme := mux.Scheme(r)
+//
 // SetURLVars sets the URL variables for the given request, intended for
 // testing route handlers:
 //
