@@ -125,6 +125,22 @@ HTTP middleware for the mux router.
 
 ---
 
+## csrf
+
+Cross-Site Request Forgery protection middleware for the mux router.
+
+| Feature | Standard | Details |
+|---------|----------|---------|
+| Origin validation | RFC 6454 | Primary defense; trusted origin list with wildcard subdomain support |
+| Referer fallback | RFC 9110 | HTTPS-only fallback when Origin is absent |
+| Signed token cookie | -- | AES-GCM via kasper/securecookie, HttpOnly + SameSite=Lax by default |
+| Token transport | -- | `X-CSRF-Token` header or `csrf_token` form field |
+| BREACH defense | -- | Per-request masked token rotation |
+| Helpers | -- | `Token`, `TemplateField`, `Rotate` |
+| Configurable | -- | Custom cookie attributes, safe methods, header/field names, error handler |
+
+---
+
 ## securecookie
 
 Authenticated and encrypted cookie values using AES-GCM.

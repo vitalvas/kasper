@@ -13,7 +13,7 @@ Kasper adds features on top without breaking the existing API.
 | `gorilla/handlers` | `kasper/muxhandlers` | New implementation, different API |
 | `gorilla/sessions` | -- | No Kasper equivalent |
 | `gorilla/securecookie` | `kasper/securecookie` | New implementation, different API |
-| `gorilla/csrf` | -- | No Kasper equivalent |
+| `gorilla/csrf` | `kasper/csrf` | New implementation, different API |
 | `gorilla/schema` | `kasper/mux` | `BindQuery`, `BindForm`, `EncodeQuery`, `EncodeForm` with dot notation |
 | `gorilla/feeds` | -- | No Kasper equivalent |
 | `gorilla/rpc` | -- | No Kasper equivalent |
@@ -457,6 +457,68 @@ HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530). No G
 | Server middleware | `mux.MiddlewareFunc` for automatic request verification |
 | Nonce generation | Replay attack prevention |
 | Component coverage | Method, authority, path, query, scheme, target URI, headers |
+
+---
+
+## csrf
+
+gorilla/csrf and kasper/csrf both protect against Cross-Site Request Forgery but use different validation models and cookie cryptography.
+
+### CSRF Feature Comparison
+
+| Feature | gorilla/csrf | kasper/csrf |
+|---------|:------------:|:-----------:|
+| **Validation Layers** | | |
+| `Origin` header check (RFC 6454) | No | Yes (primary) |
+| `Referer` fallback (HTTPS) | Yes | Yes |
+| Signed token cookie | Yes | Yes |
+| Constant-time comparison | Yes | Yes |
+| **Token Cookie** | | |
+| Cryptography | HMAC-SHA256 + AES-CTR (gorilla/securecookie) | AES-GCM (kasper/securecookie) |
+| Default SameSite | `LaxMode` | `LaxMode` |
+| Trusted origins with wildcards | Limited | Yes (`https://*.example.com`) |
+| Trusted origin predicate (`TrustedOriginFunc`) | No | Yes |
+| Strict scheme matching (CVE-2025-47909) | Bug (host-only) | Yes (scheme + host) |
+| `Origin: null` handling | Bug (rejected as parse error) | Yes (treated as missing per RFC 6454) |
+| **Token Transport** | | |
+| Header submission (`X-CSRF-Token`) | Yes | Yes |
+| Form field submission (`csrf_token`) | Yes | Yes (`csrf_token`, no dots) |
+| URL-safe base64 token | No (standard b64) | Yes (`base64.RawURLEncoding`) |
+| BREACH defense via masking | Yes | Yes |
+| **Helpers** | | |
+| Raw token (`Token`) | Yes | Yes |
+| Hidden form field (`TemplateField`) | Yes | Yes |
+| Token rotation (`Rotate`) | No | Yes |
+| Manual validation (`Validate`) | No | Yes |
+| `Token` available in error handler (SPA bootstrap) | Inconsistent | Yes |
+| **Configuration** | | |
+| Lazy cookie issuance | No | Yes (`Lazy: true`) |
+| Custom error handler | Yes (`ErrorHandler`) | Yes |
+| Custom safe methods | No | Yes |
+| Reverse-proxy aware (via `muxhandlers.ProxyHeaders`) | Manual | Yes (documented) |
+
+### CSRF Migration
+
+```go
+// gorilla/csrf
+csrfMiddleware := csrf.Protect(
+    key,
+    csrf.Secure(true),
+    csrf.TrustedOrigins([]string{"example.com"}),
+)
+r.Use(csrfMiddleware)
+token := csrf.Token(r)
+field := csrf.TemplateField(r)
+
+// kasper/csrf
+r.Use(csrf.Middleware(csrf.Config{
+    Key:            key,
+    TrustedOrigins: []string{"https://example.com", "https://*.example.com"},
+}))
+token := csrf.Token(r)
+field := csrf.TemplateField(r)
+csrf.Rotate(w, r) // not in gorilla/csrf
+```
 
 ---
 
