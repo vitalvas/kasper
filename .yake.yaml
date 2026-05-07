@@ -1,3 +1,5 @@
 policy:
   getter_naming:
     enable: false
+  private_exported_methods:
+    enable: false
