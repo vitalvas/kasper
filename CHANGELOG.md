@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/vitalvas/kasper/compare/v0.13.0...v0.13.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **mux:** apply route middleware once when subrouter dispatches ([dc31cce](https://github.com/vitalvas/kasper/commit/dc31cce183515724514cba04dc491a6d0c521c6d))
+
 ## [0.13.0](https://github.com/vitalvas/kasper/compare/v0.12.0...v0.13.0) (2026-05-07)
 
 
