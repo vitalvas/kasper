@@ -151,7 +151,7 @@ func (s *SecureCookie) SetSerializer(sz Serializer) *SecureCookie {
 		return s
 	}
 
-	if v := reflect.ValueOf(sz); v.Kind() == reflect.Ptr && v.IsNil() {
+	if v := reflect.ValueOf(sz); v.Kind() == reflect.Pointer && v.IsNil() {
 		return s
 	}
 
@@ -382,5 +382,5 @@ func isNilCodec(c Codec) bool {
 
 	v := reflect.ValueOf(c)
 
-	return v.Kind() == reflect.Ptr && v.IsNil()
+	return v.Kind() == reflect.Pointer && v.IsNil()
 }

@@ -131,7 +131,7 @@ func buildStructFields(rt reflect.Type, tagName string) []cachedField {
 		}
 
 		fieldType := sf.Type
-		isPtr := fieldType.Kind() == reflect.Ptr
+		isPtr := fieldType.Kind() == reflect.Pointer
 		if isPtr {
 			fieldType = fieldType.Elem()
 		}
@@ -170,7 +170,7 @@ func buildStructFields(rt reflect.Type, tagName string) []cachedField {
 // using the specified struct tag name.
 func decodeValues(src map[string][]string, v any, tagName string) error {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
 		return ErrBindNotPointerToStruct
 	}
 
@@ -410,7 +410,7 @@ func setFieldValue(fv reflect.Value, vals []string) error {
 		return setSliceField(fv, vals)
 	}
 
-	if fv.Kind() == reflect.Ptr {
+	if fv.Kind() == reflect.Pointer {
 		return setPtrField(fv, vals[0])
 	}
 
@@ -490,7 +490,7 @@ func setSliceField(fv reflect.Value, vals []string) error {
 
 	for i, val := range vals {
 		elem := slice.Index(i)
-		if elemType.Kind() == reflect.Ptr {
+		if elemType.Kind() == reflect.Pointer {
 			p := reflect.New(elemType.Elem())
 			if err := setBasicField(p.Elem(), val); err != nil {
 				return err
@@ -510,7 +510,7 @@ func setSliceField(fv reflect.Value, vals []string) error {
 // encodeValues encodes a struct into url.Values using the specified tag name.
 func encodeValues(v any, tagName string) (url.Values, error) {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
+	if rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return nil, ErrEncodeNotStruct
 		}
@@ -557,7 +557,7 @@ func encodeStruct(dst url.Values, rv reflect.Value, tagName, prefix string) erro
 			continue
 		}
 
-		if fv.Kind() == reflect.Ptr {
+		if fv.Kind() == reflect.Pointer {
 			if fv.IsNil() {
 				continue
 			}
@@ -619,7 +619,7 @@ func formatValue(v reflect.Value) string {
 		}
 	}
 
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return ""
 		}
