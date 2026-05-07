@@ -1,13 +1,19 @@
 # securecookie
 
-Authenticated and encrypted cookie values using AES-GCM.
+Authenticated cookie values. Two modes:
+
+- `SecureCookie` -- AES-GCM authenticated **encryption** (payload secret + tamper-proof).
+- `SignedCookie` -- HMAC-SHA256 authenticated **signing** (payload readable + tamper-proof).
+
+Use `SecureCookie` for sensitive data (PII, tokens, credentials). Use `SignedCookie` for already-opaque payloads (JWTs, opaque IDs) where confidentiality is unnecessary; you save the AES key schedule and avoid double-encrypting opaque data.
 
 ## Features
 
-- AES-GCM authenticated encryption (AES-128, AES-192, AES-256)
+- AES-GCM authenticated encryption (AES-128, AES-192, AES-256) -- `SecureCookie`
+- HMAC-SHA256 authenticated signing -- `SignedCookie`
 - Optional additional authenticated data (AAD) binding (user ID, cookie name, tenant, etc.)
 - Embedded timestamp with configurable MaxAge, MinAge, and future-timestamp rejection
-- Key rotation via multi-codec encode/decode
+- Key rotation via multi-codec encode/decode (both modes)
 - Pluggable serialization (JSON by default)
 - Entropy-adaptive compression (deflate for compressible data, skipped for high-entropy payloads)
 - Cryptographically random key generation
@@ -21,7 +27,7 @@ go get github.com/vitalvas/kasper/securecookie
 
 ## Usage
 
-### Basic Encode/Decode
+### Basic Encode/Decode (encrypted)
 
 ```go
 key, _ := securecookie.GenerateKey(32) // 16 for AES-128, 24 for AES-192, 32 for AES-256
@@ -32,6 +38,23 @@ encoded, _ := sc.Encode(map[string]string{"user": "alice"})
 var dst map[string]string
 _ = sc.Decode(encoded, &dst)
 ```
+
+### Signed-only Encode/Decode (HMAC, no encryption)
+
+Use `SignedCookie` when the payload is already opaque (JWTs, server-issued IDs) or non-sensitive. The cookie is tamper-proof but readable.
+
+```go
+key, _ := securecookie.GenerateSignedKey(32) // 32 bytes recommended
+sc, _ := securecookie.NewSigned(key)
+
+encoded, _ := sc.Encode("eyJhbGciOiJ...") // a JWT
+// encoded contains the JWT visible in base64; HMAC-SHA256 prevents tampering.
+
+var dst string
+_ = sc.Decode(encoded, &dst)
+```
+
+`SignedCookie` shares the same fluent API as `SecureCookie` (`MaxAge`, `MinAge`, `MaxLength`, `SetSerializer`, `AdditionalData`) and satisfies the same `Codec` interface, so it composes with `EncodeMulti` / `DecodeMulti` and graceful key rotation via `SignedCodecsFromKeys`.
 
 ### Configuration
 
@@ -67,6 +90,12 @@ Keys can have different sizes (e.g., rotating from AES-128 to AES-256):
 
 ```go
 codecs, _ := securecookie.CodecsFromKeys(newKey256, oldKey128)
+```
+
+Use `SignedCodecsFromKeys` for the same pattern with signing-only codecs:
+
+```go
+codecs, _ := securecookie.SignedCodecsFromKeys(currentKey, previousKey)
 ```
 
 ### Custom Serializer
@@ -139,9 +168,18 @@ Small payloads (< 32 B) and high-entropy data (> 6.5 bits/byte) are stored raw w
 
 ## Security
 
-- AES-GCM provides authenticated encryption: tampering is detected automatically
-- Optional AAD binding via `AdditionalData` (e.g., bind to user ID or cookie name)
+| Property | `SecureCookie` (AES-GCM) | `SignedCookie` (HMAC-SHA256) |
+|---|:---:|:---:|
+| Tamper detection | Yes | Yes |
+| Confidentiality (payload secret) | Yes | **No** -- payload is readable |
+| Constant-time signature compare | Yes | Yes |
+| AAD binding | Yes | Yes |
+
+Common to both:
+
 - Future timestamps beyond 5 minutes of clock skew are rejected
 - Decompressed payloads are limited to 512 KB to prevent zip-bomb attacks
-- Generate keys with `GenerateKey(32)` and store them securely
+- Generate keys with `GenerateKey(32)` / `GenerateSignedKey(32)` and store them securely
 - Always transmit cookies over HTTPS with HttpOnly and Secure flags
+
+Pick `SecureCookie` whenever the cookie body could include anything sensitive. Reach for `SignedCookie` only for opaque or non-sensitive payloads.

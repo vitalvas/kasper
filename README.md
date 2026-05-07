@@ -143,13 +143,14 @@ Cross-Site Request Forgery protection middleware for the mux router.
 
 ## securecookie
 
-Authenticated and encrypted cookie values using AES-GCM.
+Authenticated cookie values: AES-GCM encryption (`SecureCookie`) or HMAC-SHA256 signing (`SignedCookie`).
 
 | Feature | Details |
 |---------|---------|
-| Encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM |
-| AAD | Optional binding to user ID, cookie name, tenant, etc. |
+| Encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM (`SecureCookie`) |
+| Signing | HMAC-SHA256 (`SignedCookie`) for opaque/non-sensitive payloads |
+| AAD | Optional binding to user ID, cookie name, tenant, etc. (both modes) |
 | Timestamps | MaxAge, MinAge, future-timestamp rejection (5 min skew) |
-| Key rotation | Multi-codec encode/decode via `CodecsFromKeys` |
+| Key rotation | Multi-codec via `CodecsFromKeys` / `SignedCodecsFromKeys` |
 | Serialization | JSON (default), pluggable `Serializer` interface |
-| Key generation | `GenerateKey(size)` with cryptographic randomness |
+| Key generation | `GenerateKey(size)` / `GenerateSignedKey(size)` |

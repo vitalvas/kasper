@@ -1,13 +1,14 @@
-// Package securecookie provides authenticated and encrypted cookie values
-// using AES-GCM.
+// Package securecookie provides authenticated cookie values in two modes:
 //
-// Cookies are encrypted with AES-GCM (authenticated encryption with
-// associated data), which provides both confidentiality and integrity in
-// a single pass. Three key sizes are supported:
+//   - [SecureCookie] -- AES-GCM authenticated encryption: payload is secret
+//     and tamper-proof. Use for sensitive data (PII, credentials, tokens).
+//     Three key sizes: 16 (AES-128), 24 (AES-192), or 32 (AES-256) bytes.
 //
-//   - 16 bytes: AES-128-GCM
-//   - 24 bytes: AES-192-GCM
-//   - 32 bytes: AES-256-GCM
+//   - [SignedCookie] -- HMAC-SHA256 authenticated signing: payload is
+//     readable but tamper-proof. Use when the payload is already opaque
+//     (JWTs, server-issued opaque IDs) or non-sensitive. Saves the AES key
+//     schedule and avoids double-encrypting opaque data. Any non-empty key
+//     is accepted; 32 bytes is recommended.
 //
 // # Basic Usage
 //
@@ -28,12 +29,24 @@
 //	   MinAge(10).       // reject cookies younger than 10 seconds
 //	   MaxLength(8192)   // max encoded value length in bytes
 //
+// # Signed-Only Mode
+//
+// [NewSigned] creates a [SignedCookie] for HMAC-SHA256 signing without
+// encryption. Same fluent API and same [Codec] interface as [SecureCookie]:
+//
+//	key, _ := securecookie.GenerateSignedKey(32)
+//	sc, _ := securecookie.NewSigned(key)
+//	encoded, _ := sc.Encode("eyJhbGciOiJ...") // a JWT
+//	var dst string
+//	_ = sc.Decode(encoded, &dst)
+//
 // # Key Rotation
 //
-// [CodecsFromKeys] creates a [Codec] slice from multiple AES keys.
-// [EncodeMulti] always encodes with the first (newest) key.
-// [DecodeMulti] tries each key in order until one succeeds, enabling
-// seamless key rotation without invalidating existing cookies:
+// [CodecsFromKeys] (encrypted) and [SignedCodecsFromKeys] (signed) create
+// a [Codec] slice from multiple keys. [EncodeMulti] always encodes with
+// the first (newest) key. [DecodeMulti] tries each key in order until one
+// succeeds, enabling seamless rotation without invalidating existing
+// cookies:
 //
 //	codecs, _ := securecookie.CodecsFromKeys(currentKey, previousKey)
 //	encoded, _ := securecookie.EncodeMulti(value, codecs...)

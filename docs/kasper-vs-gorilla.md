@@ -535,7 +535,7 @@ gorilla/securecookie and kasper/securecookie both provide authenticated, encrypt
 | Authentication | HMAC-SHA256 (separate step) | GCM auth tag (built-in) |
 | Key count | 2 (hash key + block key) | 1 |
 | Key sizes | Hash: 32-64 B, Block: 16/24/32 B | 16/24/32 B (AES-128/192/256) |
-| Auth-only mode (no encryption) | Yes (nil block key) | No (always encrypted) |
+| Auth-only mode (no encryption) | Yes (nil block key) | Yes (`SignedCookie`, HMAC-SHA256) |
 | **Timestamps** | | |
 | Embedded timestamp | Yes | Yes |
 | MaxAge | Yes (default 30 days) | Yes (default 30 days) |
@@ -579,13 +579,15 @@ gorilla/securecookie and kasper/securecookie both provide authenticated, encrypt
 
 | API | gorilla/securecookie | kasper/securecookie |
 |-----|----------------------|---------------------|
-| Constructor | `New(hashKey, blockKey []byte) *SecureCookie` | `New(key []byte) (*SecureCookie, error)` |
+| Constructor (encrypted) | `New(hashKey, blockKey []byte) *SecureCookie` | `New(key []byte) (*SecureCookie, error)` |
+| Constructor (sign-only) | N/A (use `New(hashKey, nil)`) | `NewSigned(key []byte) (*SignedCookie, error)` |
 | Encode | `Encode(name string, value any) (string, error)` | `Encode(value any) (string, error)` |
 | Decode | `Decode(name, value string, dst any) error` | `Decode(value string, dst any) error` |
 | Multi-encode | `EncodeMulti(name string, value any, codecs ...Codec) (string, error)` | `EncodeMulti(value any, codecs ...Codec) (string, error)` |
 | Multi-decode | `DecodeMulti(name, value string, dst any, codecs ...Codec) error` | `DecodeMulti(value string, dst any, codecs ...Codec) error` |
-| Codec factory | `CodecsFromPairs(keyPairs ...[]byte) []Codec` | `CodecsFromKeys(keys ...[]byte) ([]Codec, error)` |
-| Key generation | `GenerateRandomKey(length int) []byte` | `GenerateKey(size int) ([]byte, error)` |
+| Codec factory (encrypted) | `CodecsFromPairs(keyPairs ...[]byte) []Codec` | `CodecsFromKeys(keys ...[]byte) ([]Codec, error)` |
+| Codec factory (sign-only) | N/A | `SignedCodecsFromKeys(keys ...[]byte) ([]Codec, error)` |
+| Key generation | `GenerateRandomKey(length int) []byte` | `GenerateKey` (encrypted) / `GenerateSignedKey` (sign-only) |
 | AAD | N/A (cookie name always used) | `AdditionalData(data []byte) *SecureCookie` |
 | Serializer | `SetSerializer(sz Serializer) *SecureCookie` | `SetSerializer(sz Serializer) *SecureCookie` |
 | MaxAge | `MaxAge(value int) *SecureCookie` | `MaxAge(seconds int) *SecureCookie` |
