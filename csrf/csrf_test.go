@@ -1305,6 +1305,105 @@ func TestHostCookiePrefixEnforcement(t *testing.T) {
 	}
 }
 
+// TestRouterIntegration is a regression test for a bug where the CSRF
+// middleware applied via mux.With() on a subrouter route ran twice per
+// request: once when the subrouter dispatched and again when the parent
+// router re-applied route-level middleware. The duplicate execution
+// issued two cookies per request, leaving the form embedded with the
+// inner middleware's token while the browser stored the outer cookie,
+// producing a "token mismatch" 403 on submit.
+//
+// All three middleware-application patterns must round-trip a CSRF
+// validation correctly.
+func TestRouterIntegration(t *testing.T) {
+	getHandler := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `value="%s"`, Token(r))
+	}
+	postHandler := func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "ok")
+	}
+
+	patterns := []struct {
+		name  string
+		setup func(r *mux.Router, mw mux.MiddlewareFunc)
+		path  string
+	}{
+		{
+			name: "Root With()",
+			setup: func(r *mux.Router, mw mux.MiddlewareFunc) {
+				r.With(mw).HandleFunc("/login", getHandler).Methods(http.MethodGet)
+				r.With(mw).HandleFunc("/login", postHandler).Methods(http.MethodPost)
+			},
+			path: "/login",
+		},
+		{
+			name: "Subrouter Use()",
+			setup: func(r *mux.Router, mw mux.MiddlewareFunc) {
+				r.Route("/auth", func(sub *mux.Router) {
+					sub.Use(mw)
+					sub.HandleFunc("/login", getHandler).Methods(http.MethodGet)
+					sub.HandleFunc("/login", postHandler).Methods(http.MethodPost)
+				})
+			},
+			path: "/auth/login",
+		},
+		{
+			name: "Subrouter With()",
+			setup: func(r *mux.Router, mw mux.MiddlewareFunc) {
+				r.Route("/auth", func(sub *mux.Router) {
+					sub.With(mw).HandleFunc("/login", getHandler).Methods(http.MethodGet)
+					sub.With(mw).HandleFunc("/login", postHandler).Methods(http.MethodPost)
+				})
+			},
+			path: "/auth/login",
+		},
+	}
+
+	for _, p := range patterns {
+		t.Run(p.name, func(t *testing.T) {
+			r := mux.NewRouter()
+			p.setup(r, Middleware(Config{Key: newTestKey(t)}))
+
+			// GET to obtain cookie + token.
+			getReq := httptest.NewRequest(http.MethodGet, p.path, nil)
+			getW := httptest.NewRecorder()
+			r.ServeHTTP(getW, getReq)
+			require.Equal(t, http.StatusOK, getW.Code)
+
+			// Exactly one Set-Cookie header for the CSRF cookie.
+			var csrfCookies []*http.Cookie
+			for _, c := range getW.Result().Cookies() {
+				if c.Name == "csrf_token" {
+					csrfCookies = append(csrfCookies, c)
+				}
+			}
+			require.Len(t, csrfCookies, 1, "middleware must issue exactly one cookie")
+
+			// Extract token from response body.
+			body := getW.Body.String()
+			start := strings.Index(body, `value="`) + len(`value="`)
+			require.Greater(t, start, len(`value="`)-1)
+			end := strings.Index(body[start:], `"`)
+			token := body[start : start+end]
+			require.NotEmpty(t, token)
+
+			// POST with form-field token + cookie.
+			form := url.Values{"csrf_token": {token}}
+			postReq := httptest.NewRequest(http.MethodPost, p.path, strings.NewReader(form.Encode()))
+			postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			postReq.Header.Set("Origin", "http://example.com")
+			postReq.Host = "example.com"
+			postReq.AddCookie(csrfCookies[0])
+
+			postW := httptest.NewRecorder()
+			r.ServeHTTP(postW, postReq)
+			assert.Equal(t, http.StatusOK, postW.Code,
+				"body=%s", postW.Body.String())
+		})
+	}
+}
+
 // --- Fuzz tests ---
 
 // FuzzValidate exercises Validate with arbitrary header inputs to confirm

@@ -818,3 +818,259 @@ func TestRouterWith(t *testing.T) {
 		assert.Equal(t, []string{"router", "with", "sub-use", "handler"}, order)
 	})
 }
+
+// TestSubrouterWithMiddlewareRunsOnce is a regression test for a bug where
+// Route.Use middleware on a subrouter route was applied twice during
+// dispatch: once by the subrouter (which owns the route) and again by the
+// parent router. The duplicate execution broke stateful middleware like
+// CSRF protection, which would issue two cookies and produce two distinct
+// validation states.
+//
+// Every middleware-application pattern (Route/Group, Use/With, chained,
+// nested) must invoke the middleware exactly once per request.
+func TestSubrouterWithMiddlewareRunsOnce(t *testing.T) {
+	okHandler := func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "ok")
+	}
+
+	patterns := []struct {
+		name  string
+		setup func(r *Router, count *int) string // returns the path to hit
+	}{
+		{
+			name: "Root With()",
+			setup: func(r *Router, count *int) string {
+				r.With(countingMiddleware(count)).HandleFunc("/login", okHandler)
+				return "/login"
+			},
+		},
+		{
+			name: "Root Use()",
+			setup: func(r *Router, count *int) string {
+				r.Use(countingMiddleware(count))
+				r.HandleFunc("/login", okHandler)
+				return "/login"
+			},
+		},
+		{
+			name: "Route() Subrouter + Use()",
+			setup: func(r *Router, count *int) string {
+				r.Route("/auth", func(sub *Router) {
+					sub.Use(countingMiddleware(count))
+					sub.HandleFunc("/login", okHandler)
+				})
+				return "/auth/login"
+			},
+		},
+		{
+			name: "Route() Subrouter + With()",
+			setup: func(r *Router, count *int) string {
+				mw := countingMiddleware(count)
+				r.Route("/auth", func(sub *Router) {
+					sub.With(mw).HandleFunc("/login", okHandler)
+				})
+				return "/auth/login"
+			},
+		},
+		{
+			name: "Group() + Use()",
+			setup: func(r *Router, count *int) string {
+				r.Group(func(sub *Router) {
+					sub.Use(countingMiddleware(count))
+					sub.HandleFunc("/login", okHandler)
+				})
+				return "/login"
+			},
+		},
+		{
+			name: "Group() + With()",
+			setup: func(r *Router, count *int) string {
+				mw := countingMiddleware(count)
+				r.Group(func(sub *Router) {
+					sub.With(mw).HandleFunc("/login", okHandler)
+				})
+				return "/login"
+			},
+		},
+		{
+			name: "With(mw).Route() — middleware applied via With on subrouter",
+			setup: func(r *Router, count *int) string {
+				r.With(countingMiddleware(count)).Route("/auth", func(sub *Router) {
+					sub.HandleFunc("/login", okHandler)
+				})
+				return "/auth/login"
+			},
+		},
+		{
+			name: "With(mw).Group() — middleware applied via With on group",
+			setup: func(r *Router, count *int) string {
+				r.With(countingMiddleware(count)).Group(func(sub *Router) {
+					sub.HandleFunc("/login", okHandler)
+				})
+				return "/login"
+			},
+		},
+		{
+			name: "Chained With() on root — single middleware",
+			setup: func(r *Router, count *int) string {
+				r.With(countingMiddleware(count)).With().HandleFunc("/login", okHandler)
+				return "/login"
+			},
+		},
+		{
+			name: "Chained With() on subrouter route — single middleware",
+			setup: func(r *Router, count *int) string {
+				mw := countingMiddleware(count)
+				r.Route("/auth", func(sub *Router) {
+					sub.With(mw).With().HandleFunc("/login", okHandler)
+				})
+				return "/auth/login"
+			},
+		},
+		{
+			name: "Nested Route() — middleware on innermost only",
+			setup: func(r *Router, count *int) string {
+				r.Route("/api", func(api *Router) {
+					api.Route("/v1", func(v1 *Router) {
+						v1.Use(countingMiddleware(count))
+						v1.HandleFunc("/login", okHandler)
+					})
+				})
+				return "/api/v1/login"
+			},
+		},
+		{
+			name: "Nested Route() — middleware via With on inner route",
+			setup: func(r *Router, count *int) string {
+				mw := countingMiddleware(count)
+				r.Route("/api", func(api *Router) {
+					api.Route("/v1", func(v1 *Router) {
+						v1.With(mw).HandleFunc("/login", okHandler)
+					})
+				})
+				return "/api/v1/login"
+			},
+		},
+		{
+			name: "Route inside Group — middleware on outer Group via With",
+			setup: func(r *Router, count *int) string {
+				mw := countingMiddleware(count)
+				r.With(mw).Group(func(sub *Router) {
+					sub.Route("/api", func(api *Router) {
+						api.HandleFunc("/login", okHandler)
+					})
+				})
+				return "/api/login"
+			},
+		},
+		{
+			name: "chained Route().Route() — middleware on outer chain",
+			setup: func(r *Router, count *int) string {
+				r.Route("/api", func(api *Router) {
+					api.HandleFunc("/health", okHandler)
+				}).Route("/admin", func(admin *Router) {
+					admin.With(countingMiddleware(count)).HandleFunc("/login", okHandler)
+				})
+				return "/admin/login"
+			},
+		},
+	}
+
+	for _, p := range patterns {
+		t.Run(p.name, func(t *testing.T) {
+			r := NewRouter()
+			count := 0
+			path := p.setup(r, &count)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			r.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, 1, count, "middleware must run exactly once per request")
+		})
+	}
+}
+
+// TestStackedMiddlewareCountsExact verifies that combinations of router-level
+// (Use), inline (With), and route-level (Route.Use) middleware each run
+// exactly once and in the documented outermost-to-innermost order, even
+// when applied at different levels of a subrouter hierarchy.
+func TestStackedMiddlewareCountsExact(t *testing.T) {
+	okHandler := func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "ok")
+	}
+
+	tests := []struct {
+		name  string
+		setup func(r *Router, counts *[3]int) string
+		// expected counts for [outer, middle, inner].
+		want [3]int
+	}{
+		{
+			name: "root Use + With + Route.Use — all three layers",
+			setup: func(r *Router, counts *[3]int) string {
+				r.Use(countingMiddleware(&counts[0]))
+				r.With(countingMiddleware(&counts[1])).
+					HandleFunc("/login", okHandler).
+					Use(countingMiddleware(&counts[2]))
+				return "/login"
+			},
+			want: [3]int{1, 1, 1},
+		},
+		{
+			name: "subrouter Use + With on inner route + nested",
+			setup: func(r *Router, counts *[3]int) string {
+				r.Use(countingMiddleware(&counts[0]))
+				r.Route("/auth", func(sub *Router) {
+					sub.Use(countingMiddleware(&counts[1]))
+					sub.With(countingMiddleware(&counts[2])).HandleFunc("/login", okHandler)
+				})
+				return "/auth/login"
+			},
+			want: [3]int{1, 1, 1},
+		},
+		{
+			// Route inside Group: the Group has shared middleware, the
+			// inner Route adds a path prefix and its own middleware via
+			// With, the leaf route also has its own. All three layers
+			// must fire exactly once.
+			name: "Group + nested Route + With on inner",
+			setup: func(r *Router, counts *[3]int) string {
+				r.Use(countingMiddleware(&counts[0]))
+				r.Group(func(grp *Router) {
+					grp.Use(countingMiddleware(&counts[1]))
+					grp.Route("/auth", func(sub *Router) {
+						sub.With(countingMiddleware(&counts[2])).HandleFunc("/login", okHandler)
+					})
+				})
+				return "/auth/login"
+			},
+			want: [3]int{1, 1, 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRouter()
+			counts := [3]int{}
+			path := tt.setup(r, &counts)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			r.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tt.want, counts, "each layer must run exactly the expected number of times")
+		})
+	}
+}
+
+func countingMiddleware(count *int) MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			*count++
+			next.ServeHTTP(w, r)
+		})
+	}
+}

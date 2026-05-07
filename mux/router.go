@@ -154,12 +154,23 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 		}
 		if route.Match(req, match) {
 			if match.Handler != nil {
-				needsWrap := len(r.middlewares) > 0 || len(match.Route.middlewares) > 0
+				// Apply route-level middleware only when the matched route
+				// belongs to this router. When the route belongs to a
+				// subrouter (i.e., we delegated through Route.Match into
+				// a Router-handler), the subrouter has already wrapped
+				// the handler with its own route-level middleware; this
+				// router only adds its own router-level middleware on top.
+				ownsRoute := match.Route.parent == r
+				needsWrap := len(r.middlewares) > 0 ||
+					(ownsRoute && len(match.Route.middlewares) > 0)
 				if needsWrap {
 					if cached, ok := r.handlerCache.Load(match.Route); ok {
 						match.Handler = cached.(http.Handler)
 					} else {
-						wrapped := match.Route.applyMiddleware(match.Handler)
+						wrapped := match.Handler
+						if ownsRoute {
+							wrapped = match.Route.applyMiddleware(wrapped)
+						}
 						wrapped = r.applyMiddleware(wrapped)
 						r.handlerCache.Store(match.Route, wrapped)
 						match.Handler = wrapped
