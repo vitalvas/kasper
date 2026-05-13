@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/vitalvas/kasper/compare/v0.13.1...v0.13.2) (2026-05-13)
+
+
+### Bug Fixes
+
+* **mux:** use subrouter MethodNotAllowedHandler on method mismatch ([39a7023](https://github.com/vitalvas/kasper/commit/39a70230f0fa44325d20afd73c0cd14b7dc0e927))
+
 ## [0.13.1](https://github.com/vitalvas/kasper/compare/v0.13.0...v0.13.1) (2026-05-07)
 
 
