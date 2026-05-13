@@ -1640,4 +1640,69 @@ func TestRouteSubrouter(t *testing.T) {
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 	})
+
+	t.Run("subrouter MethodNotAllowedHandler is used on method mismatch", func(t *testing.T) {
+		router := NewRouter()
+		sub := router.PathPrefix("/api").Subrouter()
+		sub.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("custom 405"))
+		})
+		sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/data", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "custom 405", w.Body.String())
+		assert.Contains(t, w.Header().Get("Allow"), http.MethodPost)
+	})
+
+	t.Run("subrouter middleware runs on MethodNotAllowedHandler", func(t *testing.T) {
+		router := NewRouter()
+		sub := router.PathPrefix("/api").Subrouter()
+
+		var middlewareRan bool
+		sub.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				middlewareRan = true
+				next.ServeHTTP(w, r)
+			})
+		})
+		sub.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		})
+		sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/data", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.True(t, middlewareRan, "subrouter middleware should run for MethodNotAllowedHandler")
+	})
+
+	t.Run("subrouter without MethodNotAllowedHandler falls back to parent", func(t *testing.T) {
+		router := NewRouter()
+		router.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("parent 405"))
+		})
+		sub := router.PathPrefix("/api").Subrouter()
+		sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/data", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "parent 405", w.Body.String())
+	})
 }

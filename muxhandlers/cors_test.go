@@ -743,3 +743,77 @@ func BenchmarkCORSMiddleware(b *testing.B) {
 		}
 	})
 }
+
+func TestCORSMiddlewareSubrouter(t *testing.T) {
+	t.Run("preflight on subrouter path", func(t *testing.T) {
+		r := mux.NewRouter()
+
+		r.Route("/api/v1", func(sub *mux.Router) {
+			corsMw, err := CORSMiddleware(sub, CORSConfig{
+				AllowedOrigins: []string{"https://example.com"},
+			})
+			require.NoError(t, err)
+			sub.Use(corsMw)
+			sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "ok")
+			}).Methods(http.MethodPost)
+		})
+
+		req := httptest.NewRequest(http.MethodOptions, "/api/v1/data", nil)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, "https://example.com", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("actual request on subrouter path", func(t *testing.T) {
+		r := mux.NewRouter()
+
+		r.Route("/api/v1", func(sub *mux.Router) {
+			corsMw, err := CORSMiddleware(sub, CORSConfig{
+				AllowedOrigins: []string{"https://example.com"},
+			})
+			require.NoError(t, err)
+			sub.Use(corsMw)
+			sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "ok")
+			}).Methods(http.MethodPost)
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/data", nil)
+		req.Header.Set("Origin", "https://example.com")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "https://example.com", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "ok", w.Body.String())
+	})
+
+	t.Run("disallowed origin on subrouter preflight", func(t *testing.T) {
+		r := mux.NewRouter()
+
+		r.Route("/api/v1", func(sub *mux.Router) {
+			corsMw, err := CORSMiddleware(sub, CORSConfig{
+				AllowedOrigins: []string{"https://example.com"},
+			})
+			require.NoError(t, err)
+			sub.Use(corsMw)
+			sub.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, "ok")
+			}).Methods(http.MethodPost)
+		})
+
+		req := httptest.NewRequest(http.MethodOptions, "/api/v1/data", nil)
+		req.Header.Set("Origin", "https://evil.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+}

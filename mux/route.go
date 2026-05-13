@@ -101,12 +101,28 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 	}
 
 	// If the handler is a Router (subrouter), delegate to it.
-	// If the subrouter has a NotFoundHandler and the prefix matched but no
-	// sub-route matched (and it's not a method mismatch), use the subrouter's
-	// NotFoundHandler instead of propagating the 404 to the parent.
+	// If the subrouter has a MethodNotAllowedHandler and the prefix matched
+	// but the method did not match, use the subrouter's handler so that
+	// subrouter-level middleware (e.g. CORS) can intercept the 405.
+	// Similarly, if the subrouter has a NotFoundHandler and the prefix
+	// matched but no sub-route matched (and it's not a method mismatch),
+	// use the subrouter's NotFoundHandler instead of propagating to the parent.
 	if r.handler != nil {
 		if router, ok := r.handler.(*Router); ok {
 			if router.Match(req, match) {
+				return true
+			}
+			if match.MatchErr == ErrMethodMismatch && router.MethodNotAllowedHandler != nil {
+				allowed := allowedMethods(router, req)
+				match.Route = r
+				mnaHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("Allow", strings.Join(allowed, ", "))
+					router.MethodNotAllowedHandler.ServeHTTP(w, req)
+				})
+				match.Handler = router.applyMiddleware(mnaHandler)
+				match.MatchErr = nil
+				match.methodNotAllowed = false
+				r.regexp.setMatch(req, match, r)
 				return true
 			}
 			if router.NotFoundHandler != nil && match.MatchErr != ErrMethodMismatch {
