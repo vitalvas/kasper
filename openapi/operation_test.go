@@ -379,6 +379,78 @@ func TestRequestContent(t *testing.T) {
 		require.Contains(t, op.RequestBody.Content, "multipart/form-data")
 	})
 
+	t.Run("form data uses form struct tags", func(t *testing.T) {
+		type FormInput struct {
+			Username string `form:"user_name"`
+			Password string `form:"pass"`
+		}
+		b := newOperationBuilder().
+			RequestContent("application/x-www-form-urlencoded", FormInput{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "login", nil)
+
+		require.NotNil(t, op.RequestBody)
+		schema := op.RequestBody.Content["application/x-www-form-urlencoded"].Schema
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "user_name")
+		assert.Contains(t, schema.Properties, "pass")
+	})
+
+	t.Run("multipart form data uses form struct tags", func(t *testing.T) {
+		type Upload struct {
+			File    string `form:"file_upload"`
+			Caption string `form:"caption" json:"caption_json"`
+		}
+		b := newOperationBuilder().
+			RequestContent("multipart/form-data", Upload{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "upload", nil)
+
+		require.NotNil(t, op.RequestBody)
+		schema := op.RequestBody.Content["multipart/form-data"].Schema
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "file_upload")
+		assert.Contains(t, schema.Properties, "caption")
+	})
+
+	t.Run("form data falls back to json tag", func(t *testing.T) {
+		type MixedForm struct {
+			Name  string `form:"name"`
+			Email string `json:"email_addr"`
+		}
+		b := newOperationBuilder().
+			RequestContent("application/x-www-form-urlencoded", MixedForm{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "submit", nil)
+
+		schema := op.RequestBody.Content["application/x-www-form-urlencoded"].Schema
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "name")
+		assert.Contains(t, schema.Properties, "email_addr")
+	})
+
+	t.Run("json content type ignores form tags", func(t *testing.T) {
+		type Input struct {
+			Name string `form:"form_name" json:"json_name"`
+		}
+		b := newOperationBuilder().
+			RequestContent("application/json", Input{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "create", nil)
+
+		schema := op.RequestBody.Content["application/json"].Schema
+		require.NotNil(t, schema)
+		// For JSON, should use $ref. Check the component schema.
+		ref := gen.Schemas()["Input"]
+		require.NotNil(t, ref)
+		assert.Contains(t, ref.Properties, "json_name")
+		assert.NotContains(t, ref.Properties, "form_name")
+	})
+
 	t.Run("binary with explicit schema", func(t *testing.T) {
 		b := newOperationBuilder().
 			RequestContent("application/octet-stream", &Schema{

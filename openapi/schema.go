@@ -47,6 +47,14 @@ type SchemaGenerator struct {
 	visited   map[reflect.Type]bool
 	typeNames map[reflect.Type]string // type -> chosen schema name
 	nameTypes map[string]reflect.Type // schema name -> type that claimed it
+
+	// fieldTag overrides the struct tag used for property names. When empty
+	// (default), the "json" tag is used. When set (e.g. "form"), the
+	// generator reads that tag first and falls back to "json" if absent.
+	// Schemas generated with a non-empty fieldTag are always inlined
+	// (never stored as $ref components) because their property names may
+	// differ from the canonical JSON representation.
+	fieldTag string
 }
 
 // NewSchemaGenerator creates a new schema generator.
@@ -132,7 +140,9 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 	}
 
 	// Named struct types → $ref (except time.Time which is a special case).
-	if t.Kind() == reflect.Struct && t != reflect.TypeFor[time.Time]() {
+	// When fieldTag is set, property names differ from the canonical JSON
+	// representation, so we skip $ref and always generate inline.
+	if t.Kind() == reflect.Struct && t != reflect.TypeFor[time.Time]() && g.fieldTag == "" {
 		name := g.schemaName(t)
 		if name != "" {
 			// Generate the schema if not already visited.
@@ -267,11 +277,11 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 		}
 
 		// Handle embedded structs: inline only when the field has no
-		// explicit json tag name. encoding/json treats an anonymous field
+		// explicit tag name. encoding/json treats an anonymous field
 		// with a tag name as a regular named field, not inlined.
 		if field.Anonymous {
-			jsonName, _ := parseJSONTag(field.Tag.Get("json"))
-			if jsonName == "" {
+			tagName, _ := parseJSONTag(g.fieldTagValue(field))
+			if tagName == "" {
 				ft := field.Type
 				isPtr := ft.Kind() == reflect.Pointer
 				if isPtr {
@@ -287,12 +297,12 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 			}
 		}
 
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "-" {
+		tag := g.fieldTagValue(field)
+		if tag == "-" {
 			continue
 		}
 
-		name, opts := parseJSONTag(jsonTag)
+		name, opts := parseJSONTag(tag)
 		if name == "" {
 			name = field.Name
 		}
@@ -316,6 +326,17 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 			schema.Required = append(schema.Required, name)
 		}
 	}
+}
+
+// fieldTagValue returns the struct tag value to use for field naming.
+// When fieldTag is set, it reads that tag first and falls back to "json".
+func (g *SchemaGenerator) fieldTagValue(field reflect.StructField) string {
+	if g.fieldTag != "" {
+		if v := field.Tag.Get(g.fieldTag); v != "" {
+			return v
+		}
+	}
+	return field.Tag.Get("json")
 }
 
 type jsonTagOpts struct {

@@ -207,6 +207,84 @@ func TestGenerateStruct(t *testing.T) {
 		require.NotNil(t, schema)
 		assert.Contains(t, schema.Properties, "FieldName")
 	})
+
+	t.Run("fieldTag uses form tag for property names", func(t *testing.T) {
+		type FormInput struct {
+			Username string `form:"user_name"`
+			Email    string `form:"email_addr"`
+		}
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(FormInput{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "user_name")
+		assert.Contains(t, schema.Properties, "email_addr")
+		assert.Len(t, schema.Properties, 2)
+	})
+
+	t.Run("fieldTag falls back to json tag", func(t *testing.T) {
+		type MixedInput struct {
+			Username string `form:"user_name"`
+			Email    string `json:"email"`
+		}
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(MixedInput{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "user_name")
+		assert.Contains(t, schema.Properties, "email")
+	})
+
+	t.Run("fieldTag falls back to field name when no tags", func(t *testing.T) {
+		type NoTagInput struct {
+			Username string
+		}
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(NoTagInput{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "Username")
+	})
+
+	t.Run("fieldTag generates inline schema for named structs", func(t *testing.T) {
+		type FormData struct {
+			Name string `form:"name"`
+		}
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(FormData{})
+		require.NotNil(t, schema)
+		// Should be inline (not $ref) when fieldTag is set.
+		assert.Empty(t, schema.Ref)
+		assert.Equal(t, SchemaTypeObject, schema.Type)
+		assert.Empty(t, g.Schemas(), "fieldTag schemas should not be stored as components")
+	})
+
+	t.Run("fieldTag respects form dash to skip field", func(t *testing.T) {
+		type SkipField struct {
+			Public  string `form:"public"`
+			Private string `form:"-"`
+		}
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(SkipField{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "public")
+		assert.NotContains(t, schema.Properties, "Private")
+		assert.Len(t, schema.Properties, 1)
+	})
+
+	t.Run("fieldTag respects omitempty", func(t *testing.T) {
+		type OmitInput struct {
+			Required string `form:"required"`
+			Optional string `form:"optional,omitempty"`
+		}
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(OmitInput{})
+		require.NotNil(t, schema)
+		assert.Equal(t, []string{"required"}, schema.Required)
+	})
 }
 
 type EmbeddedBase struct {

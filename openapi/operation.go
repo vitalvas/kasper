@@ -3,6 +3,7 @@ package openapi
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/vitalvas/kasper/mux"
 )
@@ -372,6 +373,13 @@ func mergeParameters(auto, custom []*Parameter) []*Parameter {
 	return merged
 }
 
+// isFormContentType reports whether the content type is a form encoding
+// that uses "form" struct tags for field names.
+func isFormContentType(ct string) bool {
+	return strings.HasPrefix(ct, "multipart/form-data") ||
+		strings.HasPrefix(ct, "application/x-www-form-urlencoded")
+}
+
 // resolveSchema returns a Schema for the given body value. If body is a
 // *Schema it is used directly; otherwise the schema generator produces one
 // via reflection.
@@ -441,9 +449,13 @@ func (b *OperationBuilder) buildOperation(gen *SchemaGenerator, operationID stri
 		}
 		for ct, body := range b.meta.requestContents {
 			mt := &MediaType{}
+			if isFormContentType(ct) {
+				gen.fieldTag = "form"
+			}
 			if schema := resolveSchema(gen, body); schema != nil {
 				mt.Schema = schema
 			}
+			gen.fieldTag = ""
 			op.RequestBody.Content[ct] = mt
 		}
 	}
