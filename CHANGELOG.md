@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/vitalvas/kasper/compare/v0.13.2...v0.14.0) (2026-05-14)
+
+
+### Features
+
+* **openapi:** use form struct tags for form content type schemas ([8d137b9](https://github.com/vitalvas/kasper/commit/8d137b9b58d2ca56bd512b58c8aa57bf07a9058b))
+
 ## [0.13.2](https://github.com/vitalvas/kasper/compare/v0.13.1...v0.13.2) (2026-05-13)
 
 
