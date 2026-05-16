@@ -1360,6 +1360,86 @@ r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
 }))
 ```
 
+## Graceful Shutdown Middleware
+
+`GracefulShutdownMiddleware` returns the middleware together with a
+`*Drainer` control surface. Requests arriving before `Drain()` flow
+through unchanged and are counted in `Drainer.InFlight`; requests
+arriving after `Drain()` receive a `503 Service Unavailable` with
+`Connection: close` so keep-alive clients reconnect to a healthy peer.
+`Bypass` forwards selected requests (typically `/healthz`, `/readyz`,
+`/metrics`) so the orchestrator can observe the drain. `Drainer.Wait`
+blocks until in-flight requests have completed or the supplied context
+fires, which is the natural pair for `http.Server.Shutdown`.
+
+### GracefulShutdownConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Bypass` | `func(*mux.Router, *http.Request) bool` | Return true to forward a request to the next handler during drain |
+| `Response` | `http.Handler` | Custom drain response; default headers are still applied before invocation |
+| `StatusCode` | `int` | Status for the default response; defaults to 503 |
+| `RetryAfter` | `time.Duration` | `Retry-After` header as delta-seconds; sub-second values round up to 1 |
+
+### Drainer
+
+| Method | Description |
+|--------|-------------|
+| `Drain()` | Begin rejecting new requests. Idempotent. |
+| `IsDraining() bool` | Report whether Drain has been called |
+| `InFlight() int64` | Number of requests currently inside the middleware |
+| `Wait(ctx context.Context) error` | Block until `InFlight` reaches zero or ctx is cancelled; returns `ctx.Err()` on cancel |
+
+### Graceful Shutdown Usage
+
+```go
+r := mux.NewRouter()
+
+mw, drainer := muxhandlers.GracefulShutdownMiddleware(r, muxhandlers.GracefulShutdownConfig{
+    RetryAfter: 15 * time.Second,
+    Bypass: func(_ *mux.Router, req *http.Request) bool {
+        return req.URL.Path == "/healthz" || req.URL.Path == "/readyz"
+    },
+})
+r.Use(mw)
+
+srv := &http.Server{Addr: ":8080", Handler: r}
+
+go func() {
+    if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        log.Fatal(err)
+    }
+}()
+
+stop := make(chan os.Signal, 1)
+signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+<-stop
+
+drainer.Drain()
+
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+if err := drainer.Wait(shutdownCtx); err != nil {
+    log.Printf("drain timed out with %d requests still in flight", drainer.InFlight())
+}
+_ = srv.Shutdown(shutdownCtx)
+```
+
+### Graceful Shutdown Usage with custom response
+
+```go
+mw, drainer := muxhandlers.GracefulShutdownMiddleware(r, muxhandlers.GracefulShutdownConfig{
+    Response: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusServiceUnavailable)
+        _, _ = w.Write([]byte(`{"draining":true}`))
+    }),
+})
+
+r.Use(mw)
+```
+
 ## Maintenance Mode Middleware
 
 `MaintenanceModeMiddleware` short-circuits matching requests with a

@@ -125,6 +125,7 @@ HTTP middleware for the mux router.
 | `AccessLogMiddleware` | -- | Structured access logs via `log/slog`, status/bytes/duration capture, header redaction, slow-request escalation, skip predicate |
 | `NoCacheMiddleware` | RFC 9111 | Forces `Cache-Control: no-store`, strips ETag/Last-Modified, optional legacy Pragma/Expires preset, skip predicate |
 | `MaintenanceModeMiddleware` | RFC 9110 | Toggleable 503 via Enabled predicate, Retry-After (duration or date), custom HTML/JSON Response, Bypass predicate |
+| `GracefulShutdownMiddleware` | RFC 9110 | Drainer with `Drain()`/`Wait(ctx)`/`InFlight()`, 503 + `Connection: close`, bypass for health probes |
 | `HTCPCPMiddleware` | RFC 2324, RFC 7168 | BREW/WHEN handling, 418 on coffee-to-teapot, configurable tea registry, April-1-only by default |
 
 ---

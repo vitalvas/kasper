@@ -441,6 +441,37 @@
 //	    },
 //	}))
 //
+// # Graceful Shutdown Middleware
+//
+// GracefulShutdownMiddleware intercepts new requests once Drain has
+// been called and a Drainer is the control surface returned alongside
+// the middleware. Requests arriving before Drain() flow through
+// unchanged and are counted in Drainer.InFlight; requests arriving
+// after Drain() receive a 503 with Connection: close (RFC 9110
+// Sections 15.6.4 and 7.6.1 respectively) so keep-alive clients
+// reconnect to a healthy peer. Bypass forwards selected requests
+// (typically /healthz, /readyz, /metrics) so the orchestrator can
+// observe the drain. Drainer.Wait blocks until in-flight requests
+// have completed or the supplied context fires.
+//
+//	mw, drainer := muxhandlers.GracefulShutdownMiddleware(r, muxhandlers.GracefulShutdownConfig{
+//	    RetryAfter: 15 * time.Second,
+//	    Bypass: func(_ *mux.Router, req *http.Request) bool {
+//	        return req.URL.Path == "/healthz" || req.URL.Path == "/readyz"
+//	    },
+//	})
+//	r.Use(mw)
+//
+//	stop := make(chan os.Signal, 1)
+//	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+//	<-stop
+//
+//	drainer.Drain()
+//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	defer cancel()
+//	_ = drainer.Wait(ctx)
+//	_ = srv.Shutdown(ctx)
+//
 // # Maintenance Mode Middleware
 //
 // MaintenanceModeMiddleware short-circuits matching requests with a
