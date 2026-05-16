@@ -413,4 +413,26 @@
 //	    log.Fatal(err)
 //	}
 //	r.Use(mw)
+//
+// # HTCPCP Middleware
+//
+// HTCPCPMiddleware implements the Hyper Text Coffee Pot Control Protocol
+// (RFC 2324) extended for tea efflux appliances (RFC 7168). It intercepts
+// BREW and WHEN requests and responds according to the configured pot
+// type. A teapot asked to brew coffee returns 418 I'm a Teapot; a
+// coffee pot asked for tea returns 406 Not Acceptable; an empty pot
+// returns 503 Service Unavailable with Retry-After. Non-HTCPCP methods
+// pass through unchanged.
+//
+// By default the middleware only activates on April 1 (the publication
+// date of both RFCs); on every other day it becomes a no-op. Override
+// ActiveOn to force-enable the protocol or restrict it further.
+//
+//	r.Route("/pot", func(pot *mux.Router) {
+//	    pot.Use(muxhandlers.HTCPCPMiddleware(muxhandlers.HTCPCPConfig{
+//	        PotType: muxhandlers.PotTeapot,
+//	        Teas:    []string{"earl-grey", "rooibos"},
+//	    }))
+//	    pot.HandleFunc("/", potStatusHandler)
+//	})
 package muxhandlers

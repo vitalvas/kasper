@@ -1236,3 +1236,71 @@ if err != nil {
 
 r.Use(mw)
 ```
+
+## HTCPCP Middleware
+
+`HTCPCPMiddleware` implements the Hyper Text Coffee Pot Control Protocol
+([RFC 2324](https://www.rfc-editor.org/rfc/rfc2324)) extended for tea
+efflux appliances ([RFC 7168](https://www.rfc-editor.org/rfc/rfc7168)).
+It intercepts `BREW` and `WHEN` requests and responds according to the
+configured pot type. Non-HTCPCP methods pass through unchanged.
+
+By default the middleware only activates on April 1 (the publication
+date of both RFCs); on every other day it becomes a no-op. Override
+`ActiveOn` to force-enable the protocol or restrict it further.
+
+### Response Matrix
+
+| Pot | Request | Response |
+|-----|---------|----------|
+| Teapot | `BREW` without `tea-*` addition | `418 I'm a Teapot` |
+| Teapot | `BREW` with supported `tea-*` variety | `200` + `message/teapot` |
+| Teapot | `BREW` with unsupported tea variety | `406 Not Acceptable` |
+| Coffee pot | `BREW` with `tea-*` addition | `406 Not Acceptable` |
+| Coffee pot | `BREW` without tea | `200` + `message/coffeepot` |
+| Either | `BREW` with `Empty: true` | `503` + `Retry-After` |
+| Either | `BREW` with addition not in `AvailableAdditions` | `406 Not Acceptable` |
+| Either | `WHEN` | `200` + `message/coffeepot` |
+| Either | Other methods (`GET`, `POST`, ...) | passthrough |
+
+### HTCPCPConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `PotType` | `PotType` | `PotCoffee` (default) or `PotTeapot` |
+| `Teas` | `[]string` | Tea varieties this teapot can brew; `nil` for a teapot uses `DefaultTeaVarieties` |
+| `AvailableAdditions` | `[]string` | Available additions per RFC 2324 Section 2.2.2.1; requests for other additions return 406 |
+| `Empty` | `bool` | When true, BREW returns 503 with `Retry-After` |
+| `RetryAfter` | `int` | `Retry-After` value in seconds; defaults to 60 |
+| `ActiveOn` | `func(time.Time) bool` | Predicate gating the middleware; `nil` = `IsAprilFirst` |
+| `Now` | `func() time.Time` | Clock source; `nil` = `time.Now`; intended for tests |
+
+### DefaultTeaVarieties
+
+`black`, `chai`, `earl-grey`, `english-breakfast`, `green`, `jasmine`,
+`oolong`, `peppermint`, `rooibos` (RFC 7168 Section 2.1.1).
+
+### HTCPCP Usage
+
+```go
+r := mux.NewRouter()
+
+r.Route("/pot", func(pot *mux.Router) {
+    pot.Use(muxhandlers.HTCPCPMiddleware(muxhandlers.HTCPCPConfig{
+        PotType: muxhandlers.PotTeapot,
+        Teas:    []string{"earl-grey", "rooibos"},
+    }))
+    pot.HandleFunc("/", potStatusHandler)
+})
+```
+
+### HTCPCP Usage with always-on override
+
+```go
+mw := muxhandlers.HTCPCPMiddleware(muxhandlers.HTCPCPConfig{
+    PotType:  muxhandlers.PotCoffee,
+    ActiveOn: func(_ time.Time) bool { return true }, // year-round
+})
+
+r.Use(mw)
+```

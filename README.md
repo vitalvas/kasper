@@ -122,6 +122,7 @@ HTTP middleware for the mux router.
 | `AcceptPatchMiddleware` | RFC 5789 | OPTIONS handler with Allow and Accept-Patch headers, auto-discovers methods from router |
 | `RedirectMiddleware` | -- | Path-based redirects with exact and wildcard matching, HTML meta-refresh body |
 | `CanonicalHostMiddleware` | -- | Redirects requests to canonical scheme and host, preserves path and query |
+| `HTCPCPMiddleware` | RFC 2324, RFC 7168 | BREW/WHEN handling, 418 on coffee-to-teapot, configurable tea registry, April-1-only by default |
 
 ---
 
