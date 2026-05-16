@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0](https://github.com/vitalvas/kasper/compare/v0.14.0...v0.15.0) (2026-05-16)
+
+
+### Features
+
+* **muxhandlers:** add AccessLogMiddleware ([caa1872](https://github.com/vitalvas/kasper/commit/caa18722ecf745f14186be5fb718f87c52f0ce5c))
+* **muxhandlers:** add GracefulShutdownMiddleware ([8cb678d](https://github.com/vitalvas/kasper/commit/8cb678db5e9b21dd666055adae29a67f8af9301a))
+* **muxhandlers:** add HTCPCP-TEA middleware ([f55d3b9](https://github.com/vitalvas/kasper/commit/f55d3b9d837018048c9d198c0329daa9bc060631))
+* **muxhandlers:** add MaintenanceModeMiddleware ([2633a8f](https://github.com/vitalvas/kasper/commit/2633a8ff564cb75490fe10ecccb010827d697b1a))
+* **muxhandlers:** add NoCacheMiddleware ([4ab7b29](https://github.com/vitalvas/kasper/commit/4ab7b295695a4238affcc343570b8494a3983ec8))
+
+
+### Bug Fixes
+
+* **mux:** align routing with RFC 9110 / 9111 / 9112 ([98394a9](https://github.com/vitalvas/kasper/commit/98394a9be032791a790c0618018c3e1b3069d201))
+* **muxhandlers:** correctness fixes on the new middleware ([2e55e4e](https://github.com/vitalvas/kasper/commit/2e55e4ef724df0d2c0d95fb3b4a8f5633566ea27))
+
 ## [0.14.0](https://github.com/vitalvas/kasper/compare/v0.13.2...v0.14.0) (2026-05-14)
 
 
