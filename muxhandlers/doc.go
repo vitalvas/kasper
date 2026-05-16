@@ -441,6 +441,25 @@
 //	    },
 //	}))
 //
+// # No-Cache Middleware
+//
+// NoCacheMiddleware forces responses to be uncacheable. It rewrites
+// caching headers on the response writer at the moment the handler
+// flushes its status line, overriding any Cache-Control, Pragma, or
+// Expires the handler may have set, and removes ETag and Last-Modified
+// so downstream caches cannot perform conditional revalidation. The
+// Modern preset emits Cache-Control: no-store per RFC 9111 Section
+// 5.2.2.5; Strict adds the legacy Pragma and Expires combo for
+// HTTP/1.0-era intermediaries.
+//
+//	r := mux.NewRouter()
+//	r.Use(muxhandlers.NoCacheMiddleware(r, muxhandlers.NoCacheConfig{
+//	    Preset: muxhandlers.NoCachePresetStrict,
+//	    Skip: func(_ *mux.Router, req *http.Request) bool {
+//	        return strings.HasPrefix(req.URL.Path, "/assets/")
+//	    },
+//	}))
+//
 // # HTCPCP Middleware
 //
 // HTCPCPMiddleware implements the Hyper Text Coffee Pot Control Protocol

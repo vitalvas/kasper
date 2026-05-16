@@ -1260,7 +1260,7 @@ always redacted when captured.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Logger` | `*slog.Logger` | Pre-configured slog logger; middleware inherits handler/output/format/level and pre-bound attrs from `.With`/`.WithGroup`; defaults to `slog.Default()` |
+| `Logger` | `*slog.Logger` | Pre-configured parent; inherits handler/output/format/level and `.With`/`.WithGroup` attrs; defaults to `slog.Default()` |
 | `LogFunc` | `func(*AccessLogEntry)` | Custom sink; bypasses slog entirely when set |
 | `Skip` | `func(*mux.Router, *http.Request) bool` | Return true to suppress logging; receives the router so it can inspect matched route metadata |
 | `IncludeHeaders` | `[]string` | Request headers to capture; case-insensitive; `nil` = none |
@@ -1358,6 +1358,74 @@ r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
         metrics.RecordRequest(e.RouteName, e.Status, e.Duration)
     },
 }))
+```
+
+## No-Cache Middleware
+
+`NoCacheMiddleware` forces responses to be uncacheable. It rewrites
+caching headers on the response writer at the moment the handler
+flushes its status line, overriding any `Cache-Control`, `Pragma`, or
+`Expires` the handler may have set, and removes `ETag` and
+`Last-Modified` so downstream caches cannot perform conditional
+revalidation. The Modern preset emits `Cache-Control: no-store` per
+RFC 9111 Section 5.2.2.5; Strict adds the legacy `Pragma` and `Expires`
+combo for HTTP/1.0-era intermediaries.
+
+### NoCachePreset
+
+| Preset | Emitted Headers |
+|--------|-----------------|
+| `NoCachePresetModern` (default) | `Cache-Control: no-store` |
+| `NoCachePresetStrict` | `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private`; `Pragma: no-cache`; `Expires: 0` |
+
+Both presets strip `ETag` and `Last-Modified` from the response.
+
+### NoCacheConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Preset` | `NoCachePreset` | Header set to emit; defaults to `NoCachePresetModern` |
+| `Skip` | `func(*mux.Router, *http.Request) bool` | Return true to leave the handler's caching headers untouched |
+
+### NoCache Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+r.Use(muxhandlers.NoCacheMiddleware(r, muxhandlers.NoCacheConfig{}))
+```
+
+### NoCache Usage with strict preset
+
+```go
+r.Use(muxhandlers.NoCacheMiddleware(r, muxhandlers.NoCacheConfig{
+    Preset: muxhandlers.NoCachePresetStrict,
+}))
+```
+
+### NoCache Usage with route metadata opt-out
+
+```go
+const allowCacheKey = "allow_cache"
+
+r := mux.NewRouter()
+
+r.Use(muxhandlers.NoCacheMiddleware(r, muxhandlers.NoCacheConfig{
+    Skip: func(_ *mux.Router, req *http.Request) bool {
+        route := mux.CurrentRoute(req)
+        if route == nil {
+            return false
+        }
+        allow, _ := route.GetMetadataValueOr(allowCacheKey, false).(bool)
+        return allow
+    },
+}))
+
+// Most routes get no-store; tag specific ones to keep their own cache headers.
+r.HandleFunc("/api/v1/users", dynamicHandler)
+r.HandleFunc("/assets/logo.png", staticHandler).Metadata(allowCacheKey, true)
 ```
 
 ## HTCPCP Middleware
