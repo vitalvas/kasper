@@ -274,14 +274,15 @@ func (r *Route) PathPrefix(tpl string) *Route {
 	return r
 }
 
-// Host adds a host matcher to the route per RFC 7230 Section 5.4.
+// Host adds a host matcher to the route per RFC 9110 Section 7.2.
 func (r *Route) Host(tpl string) *Route {
 	r.err = r.addRegexpMatcher(tpl, regexpTypeHost)
 	return r
 }
 
 // Methods adds a method matcher to the route. Methods are matched against
-// the request method token defined in RFC 7231 Section 4.
+// the request method token defined in RFC 9110 Section 9. Per RFC 9110
+// Section 9.3.2, declaring GET also implicitly accepts HEAD on the route.
 // Calling Methods multiple times replaces the previous method matcher.
 func (r *Route) Methods(methods ...string) *Route {
 	for i, m := range methods {
@@ -298,7 +299,7 @@ func (r *Route) Methods(methods ...string) *Route {
 	return r.addMatcher(methodMatcher(methods))
 }
 
-// Headers adds a matcher for request header values per RFC 7230 Section 3.2.
+// Headers adds a matcher for request header values per RFC 9110 Section 5.1.
 // It accepts pairs of header names and values. The value can be empty,
 // in which case the matcher will only check for the header presence.
 // Header keys are canonicalized at registration time so that matching
@@ -321,7 +322,7 @@ func (r *Route) Headers(pairs ...string) *Route {
 }
 
 // HeadersRegexp adds a matcher for request header values using regexps.
-// Header names are case-insensitive per RFC 7230 Section 3.2.
+// Header names are case-insensitive per RFC 9110 Section 5.1.
 // Header keys are canonicalized at registration time so that matching
 // against http.Header requires no per-request allocation.
 func (r *Route) HeadersRegexp(pairs ...string) *Route {
@@ -355,7 +356,7 @@ func (r *Route) Queries(pairs ...string) *Route {
 	return r
 }
 
-// Schemes adds a matcher for URL schemes per RFC 7230 Section 2.7.
+// Schemes adds a matcher for URL schemes per RFC 9110 Section 4.2.
 func (r *Route) Schemes(schemes ...string) *Route {
 	for i, s := range schemes {
 		schemes[i] = strings.ToLower(s)
@@ -794,16 +795,28 @@ func (r *Route) buildVars(m map[string]string) map[string]string {
 
 // --- Internal matchers ---
 
-// methodMatcher matches the request method token (RFC 7231 Section 4)
-// against a list of allowed methods.
+// methodMatcher matches the request method token (RFC 9110 Section 9)
+// against a list of allowed methods. Per RFC 9110 Section 9.1 and 9.3.2,
+// HEAD is treated as identical to GET for the purpose of routing: any
+// route that allows GET also implicitly allows HEAD, unless HEAD is
+// listed explicitly (in which case the literal list applies).
 type methodMatcher []string
 
 func (m methodMatcher) Match(r *http.Request, _ *RouteMatch) bool {
-	return matchInArray([]string(m), r.Method)
+	if matchInArray([]string(m), r.Method) {
+		return true
+	}
+	// RFC 9110 Section 9.3.2: the HEAD method is identical to GET except
+	// that the server MUST NOT send content in the response. A resource
+	// that supports GET MUST also support HEAD.
+	if r.Method == http.MethodHead && matchInArray([]string(m), http.MethodGet) {
+		return true
+	}
+	return false
 }
 
 // headerMatcher matches request headers against expected values.
-// Header names are case-insensitive per RFC 7230 Section 3.2.
+// Header names are case-insensitive per RFC 9110 Section 5.1.
 type headerMatcher map[string]string
 
 func (m headerMatcher) Match(r *http.Request, _ *RouteMatch) bool {
@@ -811,21 +824,21 @@ func (m headerMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 }
 
 // headerRegexMatcher matches request headers against regexp patterns.
-// Header names are case-insensitive per RFC 7230 Section 3.2.
+// Header names are case-insensitive per RFC 9110 Section 5.1.
 type headerRegexMatcher map[string]*regexp.Regexp
 
 func (m headerRegexMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 	return matchMapWithRegex(map[string]*regexp.Regexp(m), map[string][]string(r.Header), false)
 }
 
-// schemeMatcher matches the request URL scheme per RFC 7230 Section 2.7.
+// schemeMatcher matches the request URL scheme per RFC 9110 Section 4.2.
 // Schemes are case-insensitive per RFC 3986 Section 3.1.
 type schemeMatcher []string
 
 func (m schemeMatcher) Match(r *http.Request, _ *RouteMatch) bool {
 	scheme := r.URL.Scheme
 	// Infer scheme from TLS state when not explicitly set,
-	// per RFC 7230 Section 2.7.1 (http) and 2.7.2 (https).
+	// per RFC 9110 Section 4.2.1 (http) and 2.7.2 (https).
 	if scheme == "" {
 		if r.TLS != nil {
 			scheme = "https"

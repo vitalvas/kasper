@@ -211,7 +211,7 @@ func newRouteRegexp(tpl string, typ regexpType, options routeRegexpOptions) (*ro
 
 // Match checks whether the compiled regexp matches the request.
 // Matches against the query (RFC 3986 Section 3.4), host
-// (RFC 7230 Section 5.4), or path (RFC 3986 Section 3.3) component
+// (RFC 9110 Section 7.2), or path (RFC 3986 Section 3.3) component
 // depending on the regexp type.
 func (r *routeRegexp) Match(req *http.Request, m *RouteMatch) bool {
 	if r.matchQuery {
@@ -353,8 +353,8 @@ func checkDuplicateVars(vars []string) error {
 }
 
 // getHost returns the lowercased host (including port if present) per
-// RFC 7230 Section 5.4 (Host header field, host:port format).
-// For absolute-form requests (RFC 7230 Section 5.3.2), the host
+// RFC 9110 Section 7.2 (Host header field, host:port format).
+// For absolute-form requests (RFC 9112 Section 3.2.2), the host
 // is read from the request URL instead of the Host header.
 func getHost(r *http.Request) string {
 	host := r.Host

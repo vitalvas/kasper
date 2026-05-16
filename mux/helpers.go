@@ -111,7 +111,7 @@ func matchInArray(arr []string, value string) bool {
 
 // matchMapWithString returns true if the given key/value pairs exist in a
 // given map. When canonicalKey is true, keys are normalized per
-// RFC 7230 Section 3.2 (header field names are case-insensitive).
+// RFC 9110 Section 5.1 (header field names are case-insensitive).
 func matchMapWithString(toCheck map[string]string, toMatch map[string][]string, canonicalKey bool) bool {
 	for k, v := range toCheck {
 		// Check if key exists.
@@ -131,7 +131,7 @@ func matchMapWithString(toCheck map[string]string, toMatch map[string][]string, 
 
 // matchMapWithRegex returns true if the given key/regexp pairs match a
 // given map. When canonicalKey is true, keys are normalized per
-// RFC 7230 Section 3.2 (header field names are case-insensitive).
+// RFC 9110 Section 5.1 (header field names are case-insensitive).
 func matchMapWithRegex(toCheck map[string]*regexp.Regexp, toMatch map[string][]string, canonicalKey bool) bool {
 	for k, v := range toCheck {
 		if canonicalKey {
@@ -160,16 +160,25 @@ func matchAnyRegexp(re *regexp.Regexp, values []string) bool {
 
 // allowedMethods returns the HTTP methods that match the request path
 // but not the request method. Used to populate the Allow header field
-// required by RFC 7231 Section 6.5.5 on 405 responses.
-// The returned slice is sorted alphabetically per RFC 7231 Section 7.4.1.
+// required by RFC 9110 Section 15.5.6 on 405 responses.
+//
+// Candidate methods are collected from the route tree (declared via
+// Route.Methods), with HEAD implicitly added wherever GET is declared
+// per RFC 9110 Section 9.3.2. Each candidate is then verified against
+// the request via router.Match so that host, headers, queries, and
+// custom matchers are honored. The returned slice is sorted
+// alphabetically and deduplicated.
+//
+// This enumeration covers custom/extension methods (RFC 9110 Section
+// 16.1.1) without needing a hardcoded probe list.
 func allowedMethods(router *Router, req *http.Request) []string {
-	methods := []string{
-		http.MethodGet, http.MethodHead, http.MethodPost,
-		http.MethodPut, http.MethodPatch, http.MethodDelete,
-		http.MethodOptions,
+	candidates := collectCandidateMethods(router)
+	if len(candidates) == 0 {
+		return nil
 	}
-	var allowed []string
-	for _, method := range methods {
+
+	allowed := make([]string, 0, len(candidates))
+	for _, method := range candidates {
 		if method == req.Method {
 			continue
 		}
@@ -183,6 +192,48 @@ func allowedMethods(router *Router, req *http.Request) []string {
 	return allowed
 }
 
+// collectCandidateMethods walks the router tree and gathers every
+// HTTP method declared by any route, descending into subrouters via the
+// route handlers. HEAD is added whenever GET is declared, per RFC 9110
+// Section 9.3.2.
+func collectCandidateMethods(router *Router) []string {
+	seen := make(map[string]struct{})
+	collectCandidateMethodsInto(router, seen)
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for m := range seen {
+		out = append(out, m)
+	}
+	return out
+}
+
+func collectCandidateMethodsInto(router *Router, seen map[string]struct{}) {
+	for _, route := range router.routes {
+		if route.buildOnly {
+			continue
+		}
+		var hasGet bool
+		for _, m := range route.matchers {
+			if methods, ok := m.(methodMatcher); ok {
+				for _, method := range methods {
+					seen[method] = struct{}{}
+					if method == http.MethodGet {
+						hasGet = true
+					}
+				}
+			}
+		}
+		if hasGet {
+			seen[http.MethodHead] = struct{}{}
+		}
+		if sub, ok := route.handler.(*Router); ok {
+			collectCandidateMethodsInto(sub, seen)
+		}
+	}
+}
+
 // notFoundBody is the pre-allocated response body for 404 responses,
 // avoiding per-request allocations from fmt.Fprintln.
 var notFoundBody = []byte("404 page not found\n")
@@ -193,11 +244,15 @@ var defaultNotFoundHandler http.Handler = http.HandlerFunc(defaultNotFound)
 
 // defaultNotFound writes a 404 response without fmt.Fprintln overhead.
 // Equivalent to http.NotFound but uses a pre-allocated response body.
+// Sets Cache-Control: no-store because 404 is heuristically cacheable
+// per RFC 9111 Section 4.2.2 and shared caches/CDNs would otherwise
+// serve stale negatives after a route is added.
 func defaultNotFound(w http.ResponseWriter, _ *http.Request) {
 	h := w.Header()
 	delete(h, "Content-Length")
 	h.Set("Content-Type", "text/plain; charset=utf-8")
 	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNotFound)
 	w.Write(notFoundBody) //nolint:errcheck
 }
@@ -206,9 +261,12 @@ func defaultNotFound(w http.ResponseWriter, _ *http.Request) {
 var defaultMethodNotAllowedHandler http.Handler = http.HandlerFunc(methodNotAllowed)
 
 // methodNotAllowed replies to the request with an HTTP 405 method not allowed.
-// RFC 7231 Section 6.5.5: the Allow header is set by the caller (Router.ServeHTTP)
-// before this handler is invoked.
+// RFC 9110 Section 15.5.6: the Allow header is set by the caller
+// (Router.ServeHTTP) before this handler is invoked. Sets Cache-Control:
+// no-store because 405 is heuristically cacheable per RFC 9111 Section
+// 4.2.2 and the allowed-method set can change at runtime.
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusMethodNotAllowed)
 }
 

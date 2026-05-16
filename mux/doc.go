@@ -3,9 +3,15 @@
 //
 // The package implements routing semantics based on:
 //   - RFC 9110 (HTTP Semantics, successor to RFC 7231)
+//   - RFC 9111 (HTTP Caching, default Cache-Control on error responses)
 //   - RFC 9112 (HTTP/1.1, successor to RFC 7230)
 //   - RFC 3986 (URIs)
-//   - RFC 7538 (308 Permanent Redirect)
+//
+// Per RFC 9110 Section 9.3.2, HEAD requests are automatically routed
+// to any handler that declares GET. Per RFC 9110 Section 7.1, the
+// asterisk-form "OPTIONS *" returns the server-wide Allow set. Per
+// RFC 9110 Section 15.4.9, both path-cleaning and strict-slash use
+// 308 Permanent Redirect to preserve the request method.
 //
 // This package provides a drop-in replacement for gorilla/mux with full
 // API compatibility, including:
@@ -348,8 +354,8 @@
 //
 // StrictSlash defines the trailing slash behavior for new routes. When true,
 // if the route path is "/path/", accessing "/path" will redirect to "/path/"
-// and vice versa. Uses 308 Permanent Redirect (RFC 7538) to preserve the
-// original request method:
+// and vice versa. Uses 308 Permanent Redirect (RFC 9110 Section 15.4.9,
+// originally defined in RFC 7538) to preserve the original request method:
 //
 //	r.StrictSlash(true)
 //

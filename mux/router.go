@@ -4,6 +4,8 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -19,12 +21,12 @@ import (
 type Router struct {
 	// NotFoundHandler is called when no route matches.
 	// If nil, http.NotFoundHandler() is used.
-	// Corresponds to 404 Not Found per RFC 7231 Section 6.5.4.
+	// Corresponds to 404 Not Found per RFC 9110 Section 15.5.5.
 	NotFoundHandler http.Handler
 
 	// MethodNotAllowedHandler is called when a route matches the path
 	// but not the method. If nil, a default 405 handler is used.
-	// Per RFC 7231 Section 6.5.5, the Allow header is always set before
+	// Per RFC 9110 Section 15.5.6, the Allow header is always set before
 	// this handler is invoked.
 	MethodNotAllowedHandler http.Handler
 
@@ -50,12 +52,30 @@ func NewRouter() *Router {
 }
 
 // ServeHTTP dispatches the handler registered in the matched route.
-// Implements http.Handler per RFC 7230 Section 3.
+// Implements http.Handler per RFC 9112 Section 1.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// RFC 9112 Section 3.2.4 and RFC 9110 Section 7.1: the asterisk-form
+	// "OPTIONS *" requests server-wide options and does not refer to any
+	// particular resource. Handle it before path cleaning would rewrite
+	// the target. Per RFC 9110 Section 9.3.7 the response carries the
+	// supported methods in the Allow header.
+	if req.Method == http.MethodOptions && req.URL.Path == "*" {
+		methods := collectCandidateMethods(r)
+		// OPTIONS is always supported here even if no route declares it.
+		if !slices.Contains(methods, http.MethodOptions) {
+			methods = append(methods, http.MethodOptions)
+		}
+		sort.Strings(methods)
+		w.Header().Set("Allow", strings.Join(methods, ", "))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	// Normalize the request path per RFC 3986 Section 5.2.4
 	// (removing dot segments) unless SkipClean is enabled.
-	// Sends a 301 Moved Permanently redirect to the cleaned path,
-	// matching gorilla/mux behavior.
+	// Sends a 308 Permanent Redirect (RFC 9110 Section 15.4.9) to the
+	// cleaned path so the request method is preserved; 301 would allow
+	// user agents to change POST/PUT/PATCH/DELETE to GET.
 	if !r.skipClean {
 		path := req.URL.Path
 		if r.useEncodedPath {
@@ -65,7 +85,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			u := *req.URL
 			u.Path = cleaned
 			u.RawPath = ""
-			http.Redirect(w, req, u.String(), http.StatusMovedPermanently)
+			http.Redirect(w, req, u.String(), http.StatusPermanentRedirect)
 			return
 		}
 	}
@@ -89,7 +109,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	} else {
 		if match.methodNotAllowed {
-			// RFC 7231 Section 6.5.5: the origin server MUST generate an
+			// RFC 9110 Section 15.5.6: the origin server MUST generate an
 			// Allow header field in a 405 response.
 			allowed := allowedMethods(r, req)
 			w.Header().Set("Allow", strings.Join(allowed, ", "))
@@ -131,8 +151,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				} else {
 					u.Path = strings.TrimSuffix(u.Path, "/")
 				}
-				// RFC 7538 Section 3: 308 preserves the request method,
-				// unlike 301 which allows clients to change POST to GET.
+				// RFC 9110 Section 15.4.9: 308 preserves the request
+				// method, unlike 301 which allows clients to change
+				// POST to GET.
 				http.Redirect(w, req, u.String(), http.StatusPermanentRedirect)
 				return
 			}
@@ -143,8 +164,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // Match attempts to match the given request against the router's routes.
-// Distinguishes between 404 Not Found (RFC 7231 Section 6.5.4) and
-// 405 Method Not Allowed (RFC 7231 Section 6.5.5) by tracking method
+// Distinguishes between 404 Not Found (RFC 9110 Section 15.5.5) and
+// 405 Method Not Allowed (RFC 9110 Section 15.5.6) by tracking method
 // mismatches independently across route iteration.
 func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 	var methodNotAllowed bool
@@ -196,8 +217,8 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 
 // StrictSlash defines the trailing slash behavior for new routes.
 // When true, if the route path is "/path/", accessing "/path" will redirect
-// to "/path/" and vice versa. Uses 308 Permanent Redirect (RFC 7538) to
-// preserve the original request method.
+// to "/path/" and vice versa. Uses 308 Permanent Redirect (RFC 9110
+// Section 15.4.9) to preserve the original request method.
 func (r *Router) StrictSlash(value bool) *Router {
 	r.strictSlash = value
 	return r

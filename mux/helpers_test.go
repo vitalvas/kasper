@@ -306,7 +306,8 @@ func TestAllowedMethods(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
 		allowed := allowedMethods(r, req)
-		assert.Equal(t, []string{http.MethodGet, http.MethodPost}, allowed)
+		// HEAD is implicit per RFC 9110 Section 9.3.2 when GET is declared.
+		assert.Equal(t, []string{http.MethodGet, http.MethodHead, http.MethodPost}, allowed)
 	})
 
 	t.Run("excludes the request method", func(t *testing.T) {
@@ -315,7 +316,7 @@ func TestAllowedMethods(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/users", nil)
 		allowed := allowedMethods(r, req)
-		assert.Equal(t, []string{http.MethodPost}, allowed)
+		assert.Equal(t, []string{http.MethodHead, http.MethodPost}, allowed)
 	})
 
 	t.Run("returns empty for path with no matching routes", func(t *testing.T) {
@@ -325,6 +326,36 @@ func TestAllowedMethods(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/posts", nil)
 		allowed := allowedMethods(r, req)
 		assert.Empty(t, allowed)
+	})
+
+	t.Run("includes custom extension methods", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/items", func(_ http.ResponseWriter, _ *http.Request) {}).Methods("LINK", "UNLINK")
+
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		allowed := allowedMethods(r, req)
+		assert.Equal(t, []string{"LINK", "UNLINK"}, allowed)
+	})
+
+	t.Run("excludes HEAD when request is HEAD on GET route", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+		req := httptest.NewRequest(http.MethodHead, "/users", nil)
+		allowed := allowedMethods(r, req)
+		assert.Equal(t, []string{http.MethodGet}, allowed)
+	})
+
+	t.Run("ignores build-only routes", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).
+			Methods(http.MethodDelete).BuildOnly()
+
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		allowed := allowedMethods(r, req)
+		// DELETE registered build-only must not appear; GET + implicit HEAD only.
+		assert.Equal(t, []string{http.MethodGet, http.MethodHead}, allowed)
 	})
 }
 

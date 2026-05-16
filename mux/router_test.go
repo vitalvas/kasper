@@ -91,7 +91,7 @@ func TestRouterServeHTTP(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users/../users", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 		assert.Equal(t, "/users", w.Header().Get("Location"))
 	})
 
@@ -654,7 +654,7 @@ func TestRouterServeHTTPEncodedPathClean(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users/../users", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 		assert.Equal(t, "/users", w.Header().Get("Location"))
 	})
 }
@@ -919,7 +919,7 @@ func TestMethodNotAllowedAllowHeader(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		assert.Equal(t, "GET, POST", w.Header().Get("Allow"))
+		assert.Equal(t, "GET, HEAD, POST", w.Header().Get("Allow"))
 	})
 
 	t.Run("sets Allow header with custom handler", func(t *testing.T) {
@@ -935,7 +935,7 @@ func TestMethodNotAllowedAllowHeader(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		assert.Equal(t, "GET, POST", w.Header().Get("Allow"))
+		assert.Equal(t, "GET, HEAD, POST", w.Header().Get("Allow"))
 	})
 
 	t.Run("sets Allow header for subrouter routes", func(t *testing.T) {
@@ -948,7 +948,7 @@ func TestMethodNotAllowedAllowHeader(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/api/users", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		assert.Equal(t, "GET, POST", w.Header().Get("Allow"))
+		assert.Equal(t, "GET, HEAD, POST", w.Header().Get("Allow"))
 	})
 
 	t.Run("always sets Allow header even when empty per RFC 7231", func(t *testing.T) {
@@ -1099,7 +1099,7 @@ func TestRouterCleanPathRedirect(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "//users", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 		assert.Equal(t, "/users", w.Header().Get("Location"))
 	})
 
@@ -1124,7 +1124,7 @@ func TestRouterCleanPathRedirect(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/users/../users?page=1", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusMovedPermanently, w.Code)
+		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
 		assert.Equal(t, "/users?page=1", w.Header().Get("Location"))
 	})
 }
@@ -1409,6 +1409,135 @@ func TestRouterGroup(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "full", w.Body.String())
+	})
+}
+
+func TestRouterHEADImplicitFromGET(t *testing.T) {
+	t.Run("HEAD request matches GET-only route", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "user list")
+		}).Methods(http.MethodGet)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("HEAD does not match POST-only route", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("explicit HEAD route is matched when no GET registered", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Health", "ok")
+		}).Methods(http.MethodHead)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, "/health", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "ok", w.Header().Get("X-Health"))
+	})
+
+	t.Run("GET request does not implicitly match HEAD-only route", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/health", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodHead)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("HEAD response body is dropped by stdlib", func(t *testing.T) {
+		// Verifies the handler still runs (status + headers) but the
+		// transport-level body drop is exercised end-to-end.
+		r := NewRouter()
+		r.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Marker", "hit")
+			fmt.Fprint(w, "body")
+		}).Methods(http.MethodGet)
+
+		srv := httptest.NewServer(r)
+		defer srv.Close()
+
+		req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("%s/data", srv.URL), nil)
+		assert.NoError(t, err)
+		resp, err := srv.Client().Do(req)
+		assert.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "hit", resp.Header.Get("X-Marker"))
+		body := make([]byte, 16)
+		n, _ := resp.Body.Read(body)
+		assert.Equal(t, 0, n)
+	})
+}
+
+func TestRouterOptionsAsterisk(t *testing.T) {
+	t.Run("returns 204 with Allow listing registered methods", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		r.HandleFunc("/items", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodPost, http.MethodDelete)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "*", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		// DELETE, GET, HEAD (implicit from GET), OPTIONS (always), POST.
+		assert.Equal(t, "DELETE, GET, HEAD, OPTIONS, POST", w.Header().Get("Allow"))
+	})
+
+	t.Run("handled before path cleaning", func(t *testing.T) {
+		r := NewRouter()
+		// No routes registered; OPTIONS * must still return 204 with
+		// only OPTIONS in Allow.
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "*", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, "OPTIONS", w.Header().Get("Allow"))
+	})
+
+	t.Run("explicit OPTIONS route does not duplicate Allow entry", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/x", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodOptions)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "*", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, "OPTIONS", w.Header().Get("Allow"))
+	})
+}
+
+func TestRouterDefaultErrorCacheControl(t *testing.T) {
+	t.Run("default 404 sets Cache-Control: no-store", func(t *testing.T) {
+		r := NewRouter()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	})
+
+	t.Run("default 405 sets Cache-Control: no-store", func(t *testing.T) {
+		r := NewRouter()
+		r.HandleFunc("/users", func(_ http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/users", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 	})
 }
 

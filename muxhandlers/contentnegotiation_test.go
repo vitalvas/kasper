@@ -131,6 +131,10 @@ func TestContentNegotiationMiddleware(t *testing.T) {
 			if tt.wantSelected != "" {
 				assert.Equal(t, tt.wantSelected, selected)
 			}
+			// RFC 9110 Section 12.5.5: every response from a
+			// content-negotiating handler must include Vary: Accept,
+			// including 406 Not Acceptable.
+			assert.Equal(t, "Accept", w.Header().Get("Vary"))
 		})
 	}
 }

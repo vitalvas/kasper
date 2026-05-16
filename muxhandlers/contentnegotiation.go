@@ -50,6 +50,12 @@ func ContentNegotiationMiddleware(cfg ContentNegotiationConfig) mux.MiddlewareFu
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// RFC 9110 Section 12.5.5: a response whose representation
+			// selection depends on the Accept header MUST indicate so
+			// via Vary, so downstream caches do not serve the wrong
+			// representation to a different client.
+			w.Header().Add("Vary", "Accept")
+
 			accept := r.Header.Get("Accept")
 			selected := negotiate(accept, offered)
 			if selected == "" {

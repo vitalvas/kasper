@@ -184,12 +184,12 @@ type RouteMatch struct {
 
 	// MatchErr is set to ErrMethodMismatch when the request method
 	// does not match but the path does. This triggers a 405 response
-	// per RFC 7231 Section 6.5.5.
+	// per RFC 9110 Section 15.5.6.
 	MatchErr error
 
 	// methodNotAllowed signals that the router should respond with
-	// 405 Method Not Allowed (RFC 7231 Section 6.5.5) instead of
-	// 404 Not Found (RFC 7231 Section 6.5.4).
+	// 405 Method Not Allowed (RFC 9110 Section 15.5.6) instead of
+	// 404 Not Found (RFC 9110 Section 15.5.5).
 	methodNotAllowed bool
 
 	// parsedQuery caches the parsed query string to avoid repeated
@@ -233,11 +233,11 @@ type WalkFunc func(route *Route, router *Router, ancestors []*Route) error
 
 // ErrMethodMismatch is returned when the method in the request does not match
 // the method defined against the route. Triggers 405 Method Not Allowed
-// per RFC 7231 Section 6.5.5.
+// per RFC 9110 Section 15.5.6.
 var ErrMethodMismatch = errors.New("method is not allowed")
 
 // ErrNotFound is returned when no route match is found. Triggers 404 Not Found
-// per RFC 7231 Section 6.5.4.
+// per RFC 9110 Section 15.5.5.
 var ErrNotFound = errors.New("no matching route was found")
 
 // ErrMetadataKeyNotFound is returned when the specified metadata key
