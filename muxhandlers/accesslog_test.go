@@ -1,12 +1,14 @@
 package muxhandlers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -331,6 +333,322 @@ func TestAccessLogMiddleware(t *testing.T) {
 		entry := decodeLogLine(t, buf)
 		assert.Equal(t, float64(http.StatusCreated), entry["status"])
 	})
+}
+
+// fullResponseWriter is a test double that implements every optional
+// interface a real net/http server can provide, so we can assert that
+// the middleware wrappers forward them to the underlying writer.
+type fullResponseWriter struct {
+	*httptest.ResponseRecorder
+	flushed     bool
+	hijacked    bool
+	pushed      string
+	pushSupport bool
+}
+
+func (f *fullResponseWriter) Flush() {
+	f.flushed = true
+	f.ResponseRecorder.Flush()
+}
+
+func (f *fullResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	f.hijacked = true
+	server, client := net.Pipe()
+	_ = client.Close()
+	brw := bufio.NewReadWriter(bufio.NewReader(server), bufio.NewWriter(server))
+	return server, brw, nil
+}
+
+func (f *fullResponseWriter) Push(target string, _ *http.PushOptions) error {
+	if !f.pushSupport {
+		return http.ErrNotSupported
+	}
+	f.pushed = target
+	return nil
+}
+
+func TestAccessLogPreservesOptionalInterfaces(t *testing.T) {
+	t.Run("Flush is forwarded to the underlying writer", func(t *testing.T) {
+		full := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			f, ok := w.(http.Flusher)
+			if assert.True(t, ok, "wrapper must implement http.Flusher") {
+				f.Flush()
+			}
+		}))
+		h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/", nil))
+		assert.True(t, full.flushed)
+	})
+
+	t.Run("ResponseController.Flush works via Unwrap", func(t *testing.T) {
+		full := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			assert.NoError(t, http.NewResponseController(w).Flush())
+		}))
+		h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/", nil))
+		assert.True(t, full.flushed)
+	})
+
+	t.Run("Hijack is forwarded so WebSocket upgrades work", func(t *testing.T) {
+		full := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hj, ok := w.(http.Hijacker)
+			if assert.True(t, ok, "wrapper must implement http.Hijacker") {
+				conn, _, err := hj.Hijack()
+				assert.NoError(t, err)
+				if conn != nil {
+					_ = conn.Close()
+				}
+			}
+		}))
+		h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/", nil))
+		assert.True(t, full.hijacked)
+	})
+
+	t.Run("hijacked requests log hijacked=true with zero status", func(t *testing.T) {
+		// Regression: previously the wrapper reported Status=200 for
+		// every hijacked connection because the upgrader writes raw
+		// bytes (e.g. "HTTP/1.1 101 Switching Protocols") directly to
+		// the net.Conn and the wrapper never observes a WriteHeader.
+		// The wrapper must instead record Hijacked=true and emit an
+		// "hijacked" attr in slog output instead of a fabricated 200.
+		full := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+		logger, buf := newSlogCapture()
+		var captured *AccessLogEntry
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger:  logger,
+			LogFunc: func(e *AccessLogEntry) { captured = e },
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			assert.NoError(t, err)
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}))
+		h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/ws", nil))
+
+		// LogFunc captures the entry; slog is bypassed.
+		if assert.NotNil(t, captured) {
+			assert.True(t, captured.Hijacked, "Hijacked must be set")
+			assert.Equal(t, 0, captured.Status, "Status must be 0 when hijacked")
+		}
+		// And slog output (from a non-LogFunc run) should carry the
+		// hijacked attr instead of status.
+		captured = nil
+		mw = AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{Logger: logger})
+		full2 := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+		h = mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}))
+		h.ServeHTTP(full2, httptest.NewRequest(http.MethodGet, "/ws", nil))
+
+		entry := decodeLogLine(t, buf)
+		_, hasStatus := entry["status"]
+		assert.False(t, hasStatus, "status attr must be absent for hijacked entry")
+		assert.Equal(t, true, entry["hijacked"])
+	})
+
+	t.Run("Push is forwarded when supported", func(t *testing.T) {
+		full := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder(), pushSupport: true}
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			p, ok := w.(http.Pusher)
+			if assert.True(t, ok) {
+				assert.NoError(t, p.Push("/style.css", nil))
+			}
+		}))
+		h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/", nil))
+		assert.Equal(t, "/style.css", full.pushed)
+	})
+
+	t.Run("optional interfaces are advertised only when the underlying writer supports them", func(t *testing.T) {
+		// A bare httptest.NewRecorder implements Flusher but not
+		// Hijacker or Pusher. The wrapper must mirror that exactly:
+		// type assertions for absent capabilities must return ok=false,
+		// matching what the handler would see if no middleware were
+		// applied. Over-advertising would force a handler that does
+		// feature detection (e.g. WebSocket upgraders, SSE writers)
+		// into the wrong branch.
+		recorder := httptest.NewRecorder()
+		_, recorderHasFlush := http.ResponseWriter(recorder).(http.Flusher)
+		_, recorderHasHijack := http.ResponseWriter(recorder).(http.Hijacker)
+		_, recorderHasPush := http.ResponseWriter(recorder).(http.Pusher)
+		// Sanity-check the baseline so the assertions below have meaning.
+		assert.True(t, recorderHasFlush, "httptest.NewRecorder should implement Flusher")
+		assert.False(t, recorderHasHijack)
+		assert.False(t, recorderHasPush)
+
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, hasFlush := w.(http.Flusher)
+			_, hasHijack := w.(http.Hijacker)
+			_, hasPush := w.(http.Pusher)
+			assert.Equal(t, recorderHasFlush, hasFlush, "Flusher capability must match baseline")
+			assert.Equal(t, recorderHasHijack, hasHijack, "Hijacker must not be advertised when underlying writer lacks it")
+			assert.Equal(t, recorderHasPush, hasPush, "Pusher must not be advertised when underlying writer lacks it")
+		}))
+		h.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	})
+
+	t.Run("Unwrap exposes the embedded writer", func(t *testing.T) {
+		full := &fullResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{
+			Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)),
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			type unwrapper interface{ Unwrap() http.ResponseWriter }
+			u, ok := w.(unwrapper)
+			if assert.True(t, ok, "wrapper must implement Unwrap") {
+				assert.Same(t, http.ResponseWriter(full), u.Unwrap())
+			}
+		}))
+		h.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/", nil))
+	})
+}
+
+// capabilityWriter is a minimal http.ResponseWriter used to probe
+// every combination of optional interfaces accessLogWrap and
+// noCacheWrap must produce. Each capability is gated by a flag so a
+// single helper can synthesize all eight variants by composition.
+type capabilityWriter struct {
+	header http.Header
+}
+
+func (c *capabilityWriter) Header() http.Header       { return c.header }
+func (*capabilityWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (*capabilityWriter) WriteHeader(int)             {}
+
+type capWriterF struct{ *capabilityWriter }
+
+func (*capWriterF) Flush() {}
+
+type capWriterH struct{ *capabilityWriter }
+
+func (*capWriterH) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, http.ErrNotSupported
+}
+
+type capWriterP struct{ *capabilityWriter }
+
+func (*capWriterP) Push(string, *http.PushOptions) error { return http.ErrNotSupported }
+
+type capWriterFH struct {
+	*capabilityWriter
+	*capWriterF
+	*capWriterH
+}
+
+type capWriterFP struct {
+	*capabilityWriter
+	*capWriterF
+	*capWriterP
+}
+
+type capWriterHP struct {
+	*capabilityWriter
+	*capWriterH
+	*capWriterP
+}
+
+type capWriterFHP struct {
+	*capabilityWriter
+	*capWriterF
+	*capWriterH
+	*capWriterP
+}
+
+// makeCapabilityWriter returns an http.ResponseWriter that advertises
+// exactly the supplied capabilities. It is used to drive
+// accessLogWrap / noCacheWrap through every wrapper variant.
+//
+// Pointers are returned for the single- and combo-capability variants
+// because their Flush/Hijack/Push methods use pointer receivers, so
+// only the pointer types satisfy the corresponding http.* interfaces.
+func makeCapabilityWriter(flush, hijack, push bool) http.ResponseWriter {
+	base := &capabilityWriter{header: http.Header{}}
+	switch {
+	case flush && hijack && push:
+		return &capWriterFHP{capabilityWriter: base, capWriterF: &capWriterF{base}, capWriterH: &capWriterH{base}, capWriterP: &capWriterP{base}}
+	case flush && hijack:
+		return &capWriterFH{capabilityWriter: base, capWriterF: &capWriterF{base}, capWriterH: &capWriterH{base}}
+	case flush && push:
+		return &capWriterFP{capabilityWriter: base, capWriterF: &capWriterF{base}, capWriterP: &capWriterP{base}}
+	case hijack && push:
+		return &capWriterHP{capabilityWriter: base, capWriterH: &capWriterH{base}, capWriterP: &capWriterP{base}}
+	case flush:
+		return &capWriterF{base}
+	case hijack:
+		return &capWriterH{base}
+	case push:
+		return &capWriterP{base}
+	default:
+		return base
+	}
+}
+
+func TestAccessLogWrapVariants(t *testing.T) {
+	// Drive accessLogWrap through every non-empty subset of
+	// {Flusher, Hijacker, Pusher} plus the no-capability base case,
+	// asserting the wrapper exposes exactly the same capabilities.
+	cases := []struct {
+		name                  string
+		flush, hijack, push   bool
+		wantFlush, wantHijack bool
+		wantPush              bool
+	}{
+		{name: "none", flush: false, hijack: false, push: false},
+		{name: "flush only", flush: true, wantFlush: true},
+		{name: "hijack only", hijack: true, wantHijack: true},
+		{name: "push only", push: true, wantPush: true},
+		{name: "flush+hijack", flush: true, hijack: true, wantFlush: true, wantHijack: true},
+		{name: "flush+push", flush: true, push: true, wantFlush: true, wantPush: true},
+		{name: "hijack+push", hijack: true, push: true, wantHijack: true, wantPush: true},
+		{
+			name:       "all three",
+			flush:      true,
+			hijack:     true,
+			push:       true,
+			wantFlush:  true,
+			wantHijack: true,
+			wantPush:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := makeCapabilityWriter(tc.flush, tc.hijack, tc.push)
+			_, wrapped := accessLogWrap(inner)
+			_, hasFlush := wrapped.(http.Flusher)
+			_, hasHijack := wrapped.(http.Hijacker)
+			_, hasPush := wrapped.(http.Pusher)
+			assert.Equal(t, tc.wantFlush, hasFlush, "Flusher")
+			assert.Equal(t, tc.wantHijack, hasHijack, "Hijacker")
+			assert.Equal(t, tc.wantPush, hasPush, "Pusher")
+
+			// Every variant must expose Unwrap so
+			// http.ResponseController can reach the underlying writer.
+			type unwrapper interface{ Unwrap() http.ResponseWriter }
+			_, hasUnwrap := wrapped.(unwrapper)
+			assert.True(t, hasUnwrap, "Unwrap must be exposed by every variant")
+		})
+	}
 }
 
 func TestAccessLogCanonicalHeaderHelpers(t *testing.T) {

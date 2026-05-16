@@ -137,12 +137,21 @@ func GracefulShutdownMiddleware(router *mux.Router, cfg GracefulShutdownConfig) 
 
 	mw := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Increment inFlight before consulting the drain flag so
+			// the drain decision and in-flight registration are a
+			// single visible transition to Wait. If we observed
+			// draining=false but Drain runs and Wait sees inFlight==0
+			// in the window between the check and the increment, Wait
+			// would return prematurely while this goroutine continues
+			// into the handler. Incrementing first guarantees Wait
+			// either sees this request counted or never sees it run.
+			drainer.inFlight.Add(1)
 			if drainer.IsDraining() && (bypass == nil || !bypass(router, r)) {
+				drainer.inFlight.Add(-1)
 				writeDrainResponse(w, r, response, statusCode, retryAfter)
 				return
 			}
 
-			drainer.inFlight.Add(1)
 			defer drainer.inFlight.Add(-1)
 			next.ServeHTTP(w, r)
 		})

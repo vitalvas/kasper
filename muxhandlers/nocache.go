@@ -1,6 +1,8 @@
 package muxhandlers
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 
 	"github.com/vitalvas/kasper/mux"
@@ -84,8 +86,8 @@ func NoCacheMiddleware(router *mux.Router, cfg NoCacheConfig) mux.MiddlewareFunc
 				return
 			}
 
-			rewriter := &noCacheResponseWriter{ResponseWriter: w, apply: apply}
-			next.ServeHTTP(rewriter, r)
+			rewriter, wrapped := noCacheWrap(w, apply)
+			next.ServeHTTP(wrapped, r)
 
 			// If the handler returned without calling WriteHeader or
 			// Write, stdlib will treat it as 200 OK at flush time; make
@@ -123,9 +125,16 @@ func noCacheApplier(preset NoCachePreset) func(http.Header) {
 	}
 }
 
-// noCacheResponseWriter rewrites caching headers exactly once, at the
-// moment the response is committed (WriteHeader or the first Write).
-// It does not buffer the body — only header values are touched.
+// noCacheResponseWriter is the base wrapper that rewrites caching
+// headers exactly once, at the moment the response is committed
+// (WriteHeader or the first Write). It does not buffer the body —
+// only header values are touched. The base always exposes Unwrap so
+// http.ResponseController can reach optional methods on the inner
+// writer; Flusher, Hijacker, and Pusher are exposed through
+// noCacheWrap, which picks a wrapper variant matching only the
+// capabilities the inner writer actually advertises so handler-side
+// type assertions like w.(http.Hijacker) keep observing the right
+// ok value.
 type noCacheResponseWriter struct {
 	http.ResponseWriter
 	apply   func(http.Header)
@@ -133,17 +142,106 @@ type noCacheResponseWriter struct {
 }
 
 func (w *noCacheResponseWriter) WriteHeader(code int) {
-	if !w.applied {
-		w.apply(w.Header())
-		w.applied = true
-	}
+	w.ensureApplied()
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *noCacheResponseWriter) Write(b []byte) (int, error) {
+	w.ensureApplied()
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *noCacheResponseWriter) ensureApplied() {
 	if !w.applied {
 		w.apply(w.Header())
 		w.applied = true
 	}
-	return w.ResponseWriter.Write(b)
+}
+
+// Unwrap returns the underlying http.ResponseWriter so
+// http.ResponseController can reach optional methods the embedded
+// writer implements.
+func (w *noCacheResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// The seven no-cache wrapper variants cover every non-empty subset
+// of {Flusher, Hijacker, Pusher}. noCacheWrap picks the variant whose
+// method set matches the capabilities of the wrapped writer, so
+// handler-side type assertions like w.(http.Pusher) observe the same
+// ok value they would on the bare net/http writer.
+
+type noCacheFW struct{ *noCacheResponseWriter }
+
+func (w noCacheFW) Flush() {
+	w.ensureApplied()
+	w.ResponseWriter.(http.Flusher).Flush()
+}
+
+type noCacheHW struct{ *noCacheResponseWriter }
+
+func (w noCacheHW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.ensureApplied()
+	return w.ResponseWriter.(http.Hijacker).Hijack()
+}
+
+type noCachePW struct{ *noCacheResponseWriter }
+
+func (w noCachePW) Push(target string, opts *http.PushOptions) error {
+	return w.ResponseWriter.(http.Pusher).Push(target, opts)
+}
+
+type noCacheFHW struct {
+	*noCacheResponseWriter
+	noCacheFW
+	noCacheHW
+}
+
+type noCacheFPW struct {
+	*noCacheResponseWriter
+	noCacheFW
+	noCachePW
+}
+
+type noCacheHPW struct {
+	*noCacheResponseWriter
+	noCacheHW
+	noCachePW
+}
+
+type noCacheFHPW struct {
+	*noCacheResponseWriter
+	noCacheFW
+	noCacheHW
+	noCachePW
+}
+
+// noCacheWrap returns an http.ResponseWriter that wraps inner with
+// the no-cache header rewrite and exposes exactly the optional
+// interfaces the inner writer supports. The base rewriter is returned
+// alongside so callers can inspect rewriter.applied after the handler
+// has run.
+func noCacheWrap(inner http.ResponseWriter, apply func(http.Header)) (*noCacheResponseWriter, http.ResponseWriter) {
+	base := &noCacheResponseWriter{ResponseWriter: inner, apply: apply}
+	_, flush := inner.(http.Flusher)
+	_, hijack := inner.(http.Hijacker)
+	_, push := inner.(http.Pusher)
+	switch {
+	case flush && hijack && push:
+		return base, noCacheFHPW{noCacheResponseWriter: base, noCacheFW: noCacheFW{base}, noCacheHW: noCacheHW{base}, noCachePW: noCachePW{base}}
+	case flush && hijack:
+		return base, noCacheFHW{noCacheResponseWriter: base, noCacheFW: noCacheFW{base}, noCacheHW: noCacheHW{base}}
+	case flush && push:
+		return base, noCacheFPW{noCacheResponseWriter: base, noCacheFW: noCacheFW{base}, noCachePW: noCachePW{base}}
+	case hijack && push:
+		return base, noCacheHPW{noCacheResponseWriter: base, noCacheHW: noCacheHW{base}, noCachePW: noCachePW{base}}
+	case flush:
+		return base, noCacheFW{base}
+	case hijack:
+		return base, noCacheHW{base}
+	case push:
+		return base, noCachePW{base}
+	default:
+		return base, base
+	}
 }

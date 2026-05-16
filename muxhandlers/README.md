@@ -1279,7 +1279,8 @@ always redacted when captured.
 | `Host` | `string` | `r.Host` (post-proxy resolution when `ProxyHeadersMiddleware` is upstream) |
 | `Path` | `string` | `r.URL.Path` at handler entry |
 | `Query` | `string` | `r.URL.RawQuery` |
-| `Status` | `int` | Status code; defaults to 200 when handler exits without writing |
+| `Status` | `int` | Status code; defaults to 200 when handler exits without writing; 0 when `Hijacked` is true |
+| `Hijacked` | `bool` | True when the handler took over the connection via `http.Hijacker` (e.g. WebSocket upgrade); slog output emits `hijacked=true` instead of `status` |
 | `Bytes` | `int64` | Response body bytes written |
 | `Duration` | `time.Duration` | Handler execution time |
 | `RemoteAddr` | `string` | `r.RemoteAddr` (use `ProxyHeadersMiddleware` to resolve) |

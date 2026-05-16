@@ -256,6 +256,54 @@ func TestGracefulShutdownMiddleware(t *testing.T) {
 		assert.True(t, drainer.IsDraining())
 	})
 
+	t.Run("Wait does not return while a concurrent handler is still running", func(t *testing.T) {
+		// Regression for the race where IsDraining() was checked
+		// before inFlight.Add: a request could pass the drain check,
+		// stall, and let Wait observe inFlight=0 even though the
+		// handler was about to run. The fix increments inFlight
+		// first, so Wait either sees the request counted or never
+		// sees it execute. We exercise the contention with many
+		// short-lived requests racing against Drain.
+		mw, drainer := GracefulShutdownMiddleware(mux.NewRouter(), GracefulShutdownConfig{})
+
+		var handlerEntries atomic.Int64
+		var handlerExits atomic.Int64
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			handlerEntries.Add(1)
+			// Tiny artificial yield so the handler's body straddles
+			// any concurrent Drain/Wait the test triggers.
+			time.Sleep(50 * time.Microsecond)
+			w.WriteHeader(http.StatusOK)
+			handlerExits.Add(1)
+		}))
+
+		var wg sync.WaitGroup
+		const N = 200
+		for range N {
+			wg.Go(func() {
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+			})
+		}
+
+		// Sprinkle Drain across the request burst so some requests
+		// see draining=false and some see draining=true.
+		time.Sleep(time.Millisecond)
+		drainer.Drain()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		assert.NoError(t, drainer.Wait(ctx))
+
+		// After Wait returns, every handler that started must have
+		// exited. If Wait had returned while a handler was mid-flight,
+		// entries would exceed exits at this point.
+		assert.Equal(t, handlerEntries.Load(), handlerExits.Load(),
+			"Wait returned before all in-flight handlers completed")
+
+		wg.Wait()
+		assert.Equal(t, int64(0), drainer.InFlight())
+	})
+
 	t.Run("concurrent requests do not race InFlight", func(t *testing.T) {
 		mw, drainer := GracefulShutdownMiddleware(mux.NewRouter(), GracefulShutdownConfig{})
 		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

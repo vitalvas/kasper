@@ -1,8 +1,10 @@
 package muxhandlers
 
 import (
+	"bufio"
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -45,8 +47,20 @@ type AccessLogEntry struct {
 
 	// Status is the HTTP status code written by the handler. Defaults
 	// to 200 when the handler completed without calling WriteHeader,
-	// matching net/http behavior.
+	// matching net/http behavior. Set to 0 when Hijacked is true,
+	// because the upgrader writes the response bytes directly to the
+	// hijacked connection and the middleware cannot observe them.
 	Status int
+
+	// Hijacked is true when the handler hijacked the connection via
+	// http.Hijacker. The status code is no longer observable by the
+	// middleware once a hijack succeeds (the upgrader writes raw bytes
+	// to the underlying net.Conn), so Status is zeroed and downstream
+	// consumers should treat the entry as "connection upgraded /
+	// handed off" rather than a normal 2xx/4xx/5xx response. For
+	// WebSocket upgrades the wire status is typically 101 Switching
+	// Protocols.
+	Hijacked bool
 
 	// Bytes is the total number of response body bytes written.
 	Bytes int64
@@ -185,9 +199,9 @@ func AccessLogMiddleware(router *mux.Router, cfg AccessLogConfig) mux.Middleware
 			}
 
 			start := now()
-			recorder := &accessLogResponseWriter{ResponseWriter: w}
+			recorder, wrapped := accessLogWrap(w)
 
-			next.ServeHTTP(recorder, r)
+			next.ServeHTTP(wrapped, r)
 
 			end := now()
 			entry := buildAccessLogEntry(r, accessLogBuildArgs{
@@ -229,13 +243,16 @@ func buildAccessLogEntry(r *http.Request, args accessLogBuildArgs) *AccessLogEnt
 		Host:       r.Host,
 		Path:       r.URL.Path,
 		Query:      r.URL.RawQuery,
-		Status:     args.recorder.statusOrDefault(),
 		Bytes:      args.recorder.bytes,
 		Duration:   args.end.Sub(args.start),
 		RemoteAddr: r.RemoteAddr,
 		UserAgent:  r.UserAgent(),
 		Referer:    r.Referer(),
 		RequestID:  RequestIDFromContext(r.Context()),
+		Hijacked:   args.recorder.hijacked,
+	}
+	if !args.recorder.hijacked {
+		entry.Status = args.recorder.statusOrDefault()
 	}
 
 	if route := mux.CurrentRoute(r); route != nil {
@@ -281,10 +298,16 @@ func emitSlog(logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Dur
 	attrs := []slog.Attr{
 		slog.String("method", entry.Method),
 		slog.String("path", entry.Path),
-		slog.Int("status", entry.Status),
 		slog.Int64("bytes", entry.Bytes),
 		slog.Duration("duration", entry.Duration),
 		slog.String("remote_addr", entry.RemoteAddr),
+	}
+	if entry.Hijacked {
+		// Status is unknown after a hijack; mark the upgrade
+		// explicitly instead of pretending we observed 200.
+		attrs = append(attrs, slog.Bool("hijacked", true))
+	} else {
+		attrs = append(attrs, slog.Int("status", entry.Status))
 	}
 	if entry.Proto != "" {
 		attrs = append(attrs, slog.String("proto", entry.Proto))
@@ -321,18 +344,21 @@ func emitSlog(logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Dur
 	logger.LogAttrs(context.Background(), level, "http access", attrs...)
 }
 
-// accessLogResponseWriter wraps http.ResponseWriter to record the
-// status code and response body byte count without otherwise altering
-// the response. Implements only the surface required by access log
-// observation; other interfaces (http.Flusher, http.Hijacker,
-// http.Pusher) intentionally remain unimplemented because exposing
-// them via embedding without explicit forwarding would falsely
-// advertise capabilities the wrapper does not honor for status capture.
+// accessLogResponseWriter is the base wrapper that records the status
+// code and response body byte count. It always exposes Unwrap so
+// http.ResponseController can reach optional methods on the underlying
+// writer; the optional interfaces (Flusher, Hijacker, Pusher) are
+// exposed via accessLogWrap, which picks a wrapper variant matching
+// only the capabilities the underlying writer actually advertises. This
+// preserves the standard feature-detection pattern where handlers
+// type-assert w.(http.Hijacker) and expect ok=false when the server
+// cannot hijack.
 type accessLogResponseWriter struct {
 	http.ResponseWriter
 	status      int
 	bytes       int64
 	wroteHeader bool
+	hijacked    bool
 }
 
 func (w *accessLogResponseWriter) WriteHeader(code int) {
@@ -357,6 +383,26 @@ func (w *accessLogResponseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Unwrap returns the underlying http.ResponseWriter so
+// http.ResponseController can reach optional methods the embedded
+// writer implements (Flush, Hijack, SetReadDeadline, etc.).
+func (w *accessLogResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// flush is the shared Flush implementation; the wrapper variants that
+// expose http.Flusher call this so an implicit 200 is recorded before
+// the flush, matching net/http's behavior on the bare writer.
+func (w *accessLogResponseWriter) flush() {
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.wroteHeader = true
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // statusOrDefault returns the recorded status code, falling back to
 // 200 for handlers that completed without calling WriteHeader or Write
 // (e.g. a handler that only sets headers and exits cleanly).
@@ -365,6 +411,92 @@ func (w *accessLogResponseWriter) statusOrDefault() int {
 		return http.StatusOK
 	}
 	return w.status
+}
+
+// The seven access-log wrapper variants cover every non-empty subset
+// of {Flusher, Hijacker, Pusher}. accessLogWrap picks the variant
+// whose method set matches the capabilities of the wrapped writer, so
+// handler-side type assertions like w.(http.Hijacker) observe the
+// same ok value they would on the bare net/http writer.
+
+type accessLogFW struct{ *accessLogResponseWriter }
+
+func (w accessLogFW) Flush() { w.flush() }
+
+type accessLogHW struct{ *accessLogResponseWriter }
+
+func (w accessLogHW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, brw, err := w.ResponseWriter.(http.Hijacker).Hijack()
+	if err == nil {
+		// After a successful hijack, the upgrader writes the wire
+		// response (e.g. "HTTP/1.1 101 Switching Protocols\r\n...")
+		// directly to the raw net.Conn. statusOrDefault would falsely
+		// report 200; flag the request so buildAccessLogEntry can
+		// emit Status=0 and Hijacked=true instead.
+		w.hijacked = true
+	}
+	return conn, brw, err
+}
+
+type accessLogPW struct{ *accessLogResponseWriter }
+
+func (w accessLogPW) Push(target string, opts *http.PushOptions) error {
+	return w.ResponseWriter.(http.Pusher).Push(target, opts)
+}
+
+type accessLogFHW struct {
+	*accessLogResponseWriter
+	accessLogFW
+	accessLogHW
+}
+
+type accessLogFPW struct {
+	*accessLogResponseWriter
+	accessLogFW
+	accessLogPW
+}
+
+type accessLogHPW struct {
+	*accessLogResponseWriter
+	accessLogHW
+	accessLogPW
+}
+
+type accessLogFHPW struct {
+	*accessLogResponseWriter
+	accessLogFW
+	accessLogHW
+	accessLogPW
+}
+
+// accessLogWrap returns an http.ResponseWriter that wraps inner with
+// status/byte capture and exposes exactly the optional interfaces
+// (Flusher, Hijacker, Pusher) the inner writer supports. The base
+// recorder is returned alongside so callers can read the captured
+// fields after the handler has run.
+func accessLogWrap(inner http.ResponseWriter) (*accessLogResponseWriter, http.ResponseWriter) {
+	base := &accessLogResponseWriter{ResponseWriter: inner}
+	_, flush := inner.(http.Flusher)
+	_, hijack := inner.(http.Hijacker)
+	_, push := inner.(http.Pusher)
+	switch {
+	case flush && hijack && push:
+		return base, accessLogFHPW{accessLogResponseWriter: base, accessLogFW: accessLogFW{base}, accessLogHW: accessLogHW{base}, accessLogPW: accessLogPW{base}}
+	case flush && hijack:
+		return base, accessLogFHW{accessLogResponseWriter: base, accessLogFW: accessLogFW{base}, accessLogHW: accessLogHW{base}}
+	case flush && push:
+		return base, accessLogFPW{accessLogResponseWriter: base, accessLogFW: accessLogFW{base}, accessLogPW: accessLogPW{base}}
+	case hijack && push:
+		return base, accessLogHPW{accessLogResponseWriter: base, accessLogHW: accessLogHW{base}, accessLogPW: accessLogPW{base}}
+	case flush:
+		return base, accessLogFW{base}
+	case hijack:
+		return base, accessLogHW{base}
+	case push:
+		return base, accessLogPW{base}
+	default:
+		return base, base
+	}
 }
 
 // canonicalHeaderList returns the input list with each entry trimmed
