@@ -414,6 +414,33 @@
 //	}
 //	r.Use(mw)
 //
+// # Access Log Middleware
+//
+// AccessLogMiddleware records a structured entry for every request,
+// capturing the response status code and byte count via a wrapped
+// http.ResponseWriter. By default entries are emitted through log/slog
+// (slog.Default when no Logger is provided). The Logger field accepts
+// a fully pre-configured parent *slog.Logger: the middleware inherits
+// its handler, output, format, level, and pre-bound attributes (from
+// Logger.With or Logger.WithGroup), and appends per-request fields to
+// every emitted record. Set LogFunc to bypass slog entirely and route
+// entries to a custom sink.
+//
+// 5xx responses are logged at Error level; otherwise-Info requests are
+// escalated to Warn when their duration exceeds SlowThreshold. Use
+// Skip to suppress logging for health checks or metrics endpoints.
+// Header capture is opt-in via IncludeHeaders, and Authorization,
+// Cookie, Proxy-Authorization, and Set-Cookie are always redacted when
+// captured.
+//
+//	r := mux.NewRouter()
+//	r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
+//	    SlowThreshold: 500 * time.Millisecond,
+//	    Skip: func(router *mux.Router, req *http.Request) bool {
+//	        return req.URL.Path == "/healthz"
+//	    },
+//	}))
+//
 // # HTCPCP Middleware
 //
 // HTCPCPMiddleware implements the Hyper Text Coffee Pot Control Protocol

@@ -1237,6 +1237,129 @@ if err != nil {
 r.Use(mw)
 ```
 
+## Access Log Middleware
+
+`AccessLogMiddleware` records a structured entry for every request,
+capturing the response status code and byte count via a wrapped
+`http.ResponseWriter`. By default entries are emitted through `log/slog`
+(`slog.Default` when no `Logger` is provided). The `Logger` field accepts
+a fully pre-configured parent `*slog.Logger` — the middleware inherits
+its handler, output, format, level, and pre-bound attributes (from
+`Logger.With` or `Logger.WithGroup`), and appends per-request fields to
+every emitted record. Set `LogFunc` to bypass slog entirely and route
+entries to a custom sink.
+
+5xx responses are logged at `slog.LevelError`; otherwise-Info requests
+are escalated to `slog.LevelWarn` when their duration exceeds
+`SlowThreshold`. Use `Skip` to suppress logging for health checks or
+metrics endpoints. Header capture is opt-in via `IncludeHeaders`, and
+`Authorization`, `Cookie`, `Proxy-Authorization`, and `Set-Cookie` are
+always redacted when captured.
+
+### AccessLogConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Logger` | `*slog.Logger` | Pre-configured slog logger; middleware inherits handler/output/format/level and pre-bound attrs from `.With`/`.WithGroup`; defaults to `slog.Default()` |
+| `LogFunc` | `func(*AccessLogEntry)` | Custom sink; bypasses slog entirely when set |
+| `Skip` | `func(*mux.Router, *http.Request) bool` | Return true to suppress logging; receives the router so it can inspect matched route metadata |
+| `IncludeHeaders` | `[]string` | Request headers to capture; case-insensitive; `nil` = none |
+| `RedactHeaders` | `[]string` | Additional headers to redact; baseline is `Authorization`, `Cookie`, `Proxy-Authorization`, `Set-Cookie` |
+| `SlowThreshold` | `time.Duration` | Escalate Info → Warn when handler runs longer than this; `0` = disabled |
+| `Now` | `func() time.Time` | Clock source; `nil` = `time.Now`; intended for tests |
+
+### AccessLogEntry
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Time` | `time.Time` | When the request started |
+| `Method` | `string` | HTTP method |
+| `Proto` | `string` | `r.Proto` (`HTTP/1.1`, `HTTP/2.0`) |
+| `Scheme` | `string` | Resolved via `mux.Scheme(r)` (`http`/`https`) |
+| `Host` | `string` | `r.Host` (post-proxy resolution when `ProxyHeadersMiddleware` is upstream) |
+| `Path` | `string` | `r.URL.Path` at handler entry |
+| `Query` | `string` | `r.URL.RawQuery` |
+| `Status` | `int` | Status code; defaults to 200 when handler exits without writing |
+| `Bytes` | `int64` | Response body bytes written |
+| `Duration` | `time.Duration` | Handler execution time |
+| `RemoteAddr` | `string` | `r.RemoteAddr` (use `ProxyHeadersMiddleware` to resolve) |
+| `UserAgent` | `string` | `User-Agent` header |
+| `Referer` | `string` | `Referer` header |
+| `RouteName` | `string` | Name from `mux.Route.Name`, if any |
+| `RequestID` | `string` | Result of `RequestIDFromContext`, if any |
+| `Headers` | `map[string]string` | Captured headers with redaction applied |
+
+### AccessLog Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
+    SlowThreshold: 500 * time.Millisecond,
+    Skip: func(_ *mux.Router, req *http.Request) bool {
+        return req.URL.Path == "/healthz"
+    },
+}))
+```
+
+### AccessLog Usage with route metadata
+
+```go
+const skipLogKey = "access_log_skip"
+
+r := mux.NewRouter()
+
+r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
+    Skip: func(_ *mux.Router, req *http.Request) bool {
+        route := mux.CurrentRoute(req)
+        if route == nil {
+            return false
+        }
+        skip, _ := route.GetMetadataValueOr(skipLogKey, false).(bool)
+        return skip
+    },
+}))
+
+// Tag noisy routes inline; the predicate above suppresses their logs.
+r.HandleFunc("/metrics", metricsHandler).Metadata(skipLogKey, true)
+r.HandleFunc("/healthz", healthHandler).Metadata(skipLogKey, true)
+r.HandleFunc("/api/v1/users", listUsers)
+```
+
+### AccessLog Usage with a pre-configured parent logger
+
+```go
+// Build the application's parent logger once: handler, output, format,
+// level, and any baseline attrs that should appear on every record.
+parent := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+    Level: slog.LevelInfo,
+})).With(
+    slog.String("service", "auth-api"),
+    slog.String("env", "prod"),
+)
+
+// AccessLogMiddleware inherits the parent's handler and pre-bound attrs;
+// every emitted record carries `service` and `env` alongside the
+// per-request access-log fields.
+r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
+    Logger:         parent,
+    IncludeHeaders: []string{"X-Tenant-ID", "X-Forwarded-For"},
+}))
+```
+
+### AccessLog Usage with custom sink
+
+```go
+r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
+    LogFunc: func(e *muxhandlers.AccessLogEntry) {
+        // ship to logging backend
+        metrics.RecordRequest(e.RouteName, e.Status, e.Duration)
+    },
+}))
+```
+
 ## HTCPCP Middleware
 
 `HTCPCPMiddleware` implements the Hyper Text Coffee Pot Control Protocol
