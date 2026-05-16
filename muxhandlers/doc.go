@@ -441,6 +441,31 @@
 //	    },
 //	}))
 //
+// # Maintenance Mode Middleware
+//
+// MaintenanceModeMiddleware short-circuits matching requests with a
+// 503 Service Unavailable response (RFC 9110 Section 15.6.4) while a
+// maintenance window is active. The Enabled predicate is the single
+// source of truth; callers back it with whatever they like
+// (atomic.Bool, file presence, env var, cron window) and the
+// middleware reads it per request. Bypass lets specific requests
+// through during maintenance (admin IPs, deploy tooling, health
+// checks). Response, when set, fully owns the response body so the
+// caller can render an HTML maintenance page, return RFC 9457
+// ProblemDetails JSON, or redirect to a static page. RetryAfter /
+// RetryAt populate the Retry-After header in either delta-seconds or
+// HTTP-date form.
+//
+//	var inMaintenance atomic.Bool
+//
+//	r.Use(muxhandlers.MaintenanceModeMiddleware(r, muxhandlers.MaintenanceConfig{
+//	    Enabled:    func(_ *http.Request) bool { return inMaintenance.Load() },
+//	    RetryAfter: 5 * time.Minute,
+//	    Bypass: func(_ *mux.Router, req *http.Request) bool {
+//	        return req.Header.Get("X-Admin-Token") == adminToken
+//	    },
+//	}))
+//
 // # No-Cache Middleware
 //
 // NoCacheMiddleware forces responses to be uncacheable. It rewrites

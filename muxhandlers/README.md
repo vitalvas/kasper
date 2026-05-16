@@ -1360,6 +1360,95 @@ r.Use(muxhandlers.AccessLogMiddleware(r, muxhandlers.AccessLogConfig{
 }))
 ```
 
+## Maintenance Mode Middleware
+
+`MaintenanceModeMiddleware` short-circuits matching requests with a
+`503 Service Unavailable` response
+([RFC 9110 Section 15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4))
+while a maintenance window is active. The `Enabled` predicate is the
+single source of truth; back it with whatever you like (`atomic.Bool`,
+file presence, env var, cron window). `Bypass` lets specific requests
+through during maintenance (admin IPs, deploy tooling, health checks).
+`Response`, when set, fully owns the response body so callers can render
+an HTML maintenance page, return RFC 9457 problem JSON, or redirect to
+a static page. `RetryAfter` / `RetryAt` populate the `Retry-After`
+header in either delta-seconds or HTTP-date form
+([RFC 9110 Section 10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)).
+
+### MaintenanceConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Enabled` | `func(*http.Request) bool` | Required; returning true triggers maintenance for the request. `nil` = middleware is a no-op |
+| `Bypass` | `func(*mux.Router, *http.Request) bool` | Return true to forward the request to the next handler even while Enabled is true |
+| `Response` | `http.Handler` | Custom maintenance response; when set, `StatusCode` is ignored |
+| `StatusCode` | `int` | Status for the default response; defaults to 503 |
+| `RetryAfter` | `time.Duration` | `Retry-After` as delta-seconds; sub-second values round up to 1 |
+| `RetryAt` | `time.Time` | `Retry-After` as HTTP-date in UTC; takes precedence over `RetryAfter` |
+
+### Maintenance Usage with atomic.Bool
+
+```go
+var inMaintenance atomic.Bool
+
+r := mux.NewRouter()
+
+r.Use(muxhandlers.MaintenanceModeMiddleware(r, muxhandlers.MaintenanceConfig{
+    Enabled:    func(_ *http.Request) bool { return inMaintenance.Load() },
+    RetryAfter: 5 * time.Minute,
+}))
+
+// Flip from anywhere: signal handler, admin endpoint, deploy script, etc.
+inMaintenance.Store(true)
+```
+
+### Maintenance Usage with custom HTML page
+
+```go
+tmpl := template.Must(template.New("maint").Parse(`<!doctype html>
+<title>Maintenance</title>
+<h1>We'll be right back</h1>
+<p>Estimated end: {{.End}}</p>`))
+
+end := time.Now().Add(15 * time.Minute)
+
+r.Use(muxhandlers.MaintenanceModeMiddleware(r, muxhandlers.MaintenanceConfig{
+    Enabled: func(_ *http.Request) bool { return inMaintenance.Load() },
+    RetryAt: end,
+    Response: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+        w.Header().Set("Content-Type", "text/html; charset=utf-8")
+        w.WriteHeader(http.StatusServiceUnavailable)
+        _ = tmpl.Execute(w, struct{ End string }{end.UTC().Format(time.RFC1123)})
+    }),
+}))
+```
+
+### Maintenance Usage with admin bypass and route metadata
+
+```go
+const exemptKey = "exempt_from_maintenance"
+
+r.Use(muxhandlers.MaintenanceModeMiddleware(r, muxhandlers.MaintenanceConfig{
+    Enabled: func(_ *http.Request) bool { return inMaintenance.Load() },
+    Bypass: func(_ *mux.Router, req *http.Request) bool {
+        if req.Header.Get("X-Admin-Token") == adminToken {
+            return true
+        }
+        route := mux.CurrentRoute(req)
+        if route == nil {
+            return false
+        }
+        exempt, _ := route.GetMetadataValueOr(exemptKey, false).(bool)
+        return exempt
+    },
+}))
+
+// Health checks and metrics scrapes stay reachable during maintenance.
+r.HandleFunc("/healthz", healthHandler).Metadata(exemptKey, true)
+r.HandleFunc("/metrics", metricsHandler).Metadata(exemptKey, true)
+r.HandleFunc("/api/v1/users", listUsers)
+```
+
 ## No-Cache Middleware
 
 `NoCacheMiddleware` forces responses to be uncacheable. It rewrites
