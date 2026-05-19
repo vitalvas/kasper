@@ -1598,6 +1598,136 @@ r.HandleFunc("/api/v1/users", dynamicHandler)
 r.HandleFunc("/assets/logo.png", staticHandler).Metadata(allowCacheKey, true)
 ```
 
+## NEL Middleware
+
+`NELMiddleware` sets the
+[Network Error Logging](https://www.w3.org/TR/network-error-logging/) (`NEL`)
+header along with the companion
+[`Report-To`](https://www.w3.org/TR/reporting-1/) header that declares where
+NEL reports are delivered. NEL instructs the user agent to collect and POST
+reports about network errors observed when loading resources from the
+origin. The `NEL` header references one of the named groups in the
+`Report-To` header. All endpoint URLs must use the `https` scheme per the
+Reporting API.
+
+### ReportToEndpoint
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `URL` | `string` | Absolute `https` URL that receives report payloads; required unless `URLFunc` is set |
+| `URLFunc` | `func(*mux.Router, *http.Request) string` | Per-request URL computation; receives the router so callbacks can inspect matched route metadata; takes priority over `URL`; empty result falls back to `URL`; returned URL is not re-validated |
+| `Priority` | `int` | Failover order; lower is tried first; same priority forms a load-balanced pool; must not be negative |
+| `Weight` | `int` | Relative load weight among endpoints with equal priority; must not be negative |
+
+### ReportToGroup
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Group` | `string` | Group name referenced by NEL; required and unique within the config |
+| `MaxAge` | `int` | Lifetime in seconds; must be greater than zero |
+| `IncludeSubdomains` | `bool` | Apply the reporting configuration to all subdomains of the serving origin |
+| `Endpoints` | `[]ReportToEndpoint` | One or more endpoints; required |
+
+### NELConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `MaxAge` | `int` | NEL policy lifetime in seconds; must be greater than zero |
+| `ReportTo` | `string` | Report-To group name that receives NEL reports; empty = `"nel"` |
+| `IncludeSubdomains` | `bool` | Apply the NEL policy to all subdomains of the serving origin |
+| `SuccessFraction` | `float64` | Sampling rate for successful requests in `[0.0, 1.0]`; `0` omits the field |
+| `FailureFraction` | `float64` | Sampling rate for failed requests in `[0.0, 1.0]`; `0` omits the field |
+| `ReportToGroups` | `[]ReportToGroup` | Report-To groups; at least one required; must contain the group named by `ReportTo` |
+
+### NEL Usage
+
+```go
+r := mux.NewRouter()
+
+r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
+
+mw, err := muxhandlers.NELMiddleware(r, muxhandlers.NELConfig{
+    MaxAge:            86400,
+    IncludeSubdomains: true,
+    FailureFraction:   1.0,
+    ReportToGroups: []muxhandlers.ReportToGroup{{
+        Group:  "nel",
+        MaxAge: 86400,
+        Endpoints: []muxhandlers.ReportToEndpoint{
+            {URL: "https://reports.example.com/nel"},
+        },
+    }},
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+### NEL Usage with dynamic endpoint URL
+
+`URLFunc` computes the endpoint URL per request. Use it to embed a signed
+token, request identifier, or routing hint so the reporting backend can
+correlate reports with a specific edge or tenant.
+
+```go
+mw, err := muxhandlers.NELMiddleware(r, muxhandlers.NELConfig{
+    MaxAge: 604800,
+    ReportToGroups: []muxhandlers.ReportToGroup{{
+        Group:  "nel",
+        MaxAge: 604800,
+        Endpoints: []muxhandlers.ReportToEndpoint{{
+            URL: "https://reports.example.com/nel", // fallback
+            URLFunc: func(_ *mux.Router, req *http.Request) string {
+                u := url.URL{Scheme: "https", Host: "reports.example.com", Path: "/nel"}
+                q := u.Query()
+                q.Set("s", signReportToken(req)) // caller-defined
+                u.RawQuery = q.Encode()
+                return u.String()
+            },
+        }},
+    }},
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
+### NEL Usage with multiple report groups
+
+```go
+mw, err := muxhandlers.NELMiddleware(r, muxhandlers.NELConfig{
+    MaxAge:   86400,
+    ReportTo: "nel",
+    ReportToGroups: []muxhandlers.ReportToGroup{
+        {
+            Group:  "nel",
+            MaxAge: 86400,
+            Endpoints: []muxhandlers.ReportToEndpoint{
+                {URL: "https://reports.example.com/nel"},
+            },
+        },
+        {
+            Group:             "csp",
+            MaxAge:            86400,
+            IncludeSubdomains: true,
+            Endpoints: []muxhandlers.ReportToEndpoint{
+                {URL: "https://reports.example.com/csp", Priority: 1, Weight: 1},
+                {URL: "https://reports-backup.example.com/csp", Priority: 2, Weight: 1},
+            },
+        },
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r.Use(mw)
+```
+
 ## HTCPCP Middleware
 
 `HTCPCPMiddleware` implements the Hyper Text Coffee Pot Control Protocol

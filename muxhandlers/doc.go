@@ -516,6 +516,33 @@
 //	    },
 //	}))
 //
+// # NEL Middleware
+//
+// NELMiddleware sets the Network Error Logging (NEL) header along with the
+// companion Report-To header that declares where NEL reports are delivered.
+// NEL instructs the user agent to collect and POST reports about network
+// errors observed when loading resources from the origin. The Report-To
+// header advertises one or more named reporting groups; the NEL header
+// references one of those groups by name. All endpoint URLs must use the
+// https scheme per the Reporting API.
+//
+//	mw, err := muxhandlers.NELMiddleware(r, muxhandlers.NELConfig{
+//	    MaxAge:            86400,
+//	    IncludeSubdomains: true,
+//	    FailureFraction:   1.0,
+//	    ReportToGroups: []muxhandlers.ReportToGroup{{
+//	        Group:  "nel",
+//	        MaxAge: 86400,
+//	        Endpoints: []muxhandlers.ReportToEndpoint{
+//	            {URL: "https://reports.example.com/nel"},
+//	        },
+//	    }},
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	r.Use(mw)
+//
 // # HTCPCP Middleware
 //
 // HTCPCPMiddleware implements the Hyper Text Coffee Pot Control Protocol

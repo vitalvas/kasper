@@ -126,6 +126,7 @@ HTTP middleware for the mux router.
 | `NoCacheMiddleware` | RFC 9111 | Forces `Cache-Control: no-store`, strips ETag/Last-Modified, optional legacy Pragma/Expires preset, skip predicate |
 | `MaintenanceModeMiddleware` | RFC 9110 | Toggleable 503 via Enabled predicate, Retry-After (duration or date), custom HTML/JSON Response, Bypass predicate |
 | `GracefulShutdownMiddleware` | RFC 9110 | Drainer with `Drain()`/`Wait(ctx)`/`InFlight()`, 503 + `Connection: close`, bypass for health probes |
+| `NELMiddleware` | W3C NEL, Reporting API | Sets `NEL` and `Report-To` headers, multiple reporting groups, per-request endpoint URL via `URLFunc`, https-only validation |
 | `HTCPCPMiddleware` | RFC 2324, RFC 7168 | BREW/WHEN handling, 418 on coffee-to-teapot, configurable tea registry, April-1-only by default |
 
 ---
