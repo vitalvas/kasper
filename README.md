@@ -47,7 +47,7 @@ Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and stru
 | Feature | Details |
 |---------|---------|
 | Schema | JSON Schema Draft 2020-12, struct tags (`openapi:"format=email,minLength=1"`), `Namer`/`Exampler` interfaces |
-| Routes | Named routes (`Op`), direct attachment (`Route`), groups for shared metadata |
+| Routes | Named routes (`Op`), direct attachment (`Route`), nestable groups for shared metadata |
 | Security | Basic, bearer, OAuth2, API key schemes |
 | Content | Webhooks, callbacks, multiple content types, generic type support |
 | Docs UI | Swagger UI, RapiDoc, Redoc |

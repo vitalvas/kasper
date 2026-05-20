@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"maps"
 	"strconv"
 
 	"github.com/vitalvas/kasper/mux"
@@ -35,6 +36,74 @@ type groupDefaults struct {
 type RouteGroup struct {
 	spec     *Spec
 	defaults groupDefaults
+}
+
+// Group creates a child RouteGroup seeded with this group's current
+// defaults. Subsequent setters on the child extend or override the
+// inherited values without affecting the parent; slice setters append
+// to inherited slices, and response setters replace the inherited
+// entry for that status code.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#operation-object
+func (g *RouteGroup) Group() *RouteGroup {
+	return &RouteGroup{
+		spec:     g.spec,
+		defaults: g.defaults.clone(),
+	}
+}
+
+// clone returns a deep copy of groupDefaults so a child RouteGroup can
+// extend the parent's values without aliasing its slices or maps.
+func (d groupDefaults) clone() groupDefaults {
+	out := groupDefaults{
+		securitySet:  d.securitySet,
+		deprecated:   d.deprecated,
+		externalDocs: d.externalDocs,
+	}
+	if d.tags != nil {
+		out.tags = append([]string(nil), d.tags...)
+	}
+	if d.security != nil {
+		out.security = append([]SecurityRequirement(nil), d.security...)
+	}
+	if d.servers != nil {
+		out.servers = append([]Server(nil), d.servers...)
+	}
+	if d.parameters != nil {
+		out.parameters = append([]*Parameter(nil), d.parameters...)
+	}
+	if d.responseContents != nil {
+		out.responseContents = make(map[string]map[string]any, len(d.responseContents))
+		for k, inner := range d.responseContents {
+			if inner == nil {
+				out.responseContents[k] = nil
+				continue
+			}
+			copied := make(map[string]any, len(inner))
+			maps.Copy(copied, inner)
+			out.responseContents[k] = copied
+		}
+	}
+	if d.responseDescriptions != nil {
+		out.responseDescriptions = maps.Clone(d.responseDescriptions)
+	}
+	if d.responseHeaders != nil {
+		out.responseHeaders = make(map[string]map[string]*Header, len(d.responseHeaders))
+		for k, inner := range d.responseHeaders {
+			copied := make(map[string]*Header, len(inner))
+			maps.Copy(copied, inner)
+			out.responseHeaders[k] = copied
+		}
+	}
+	if d.responseLinks != nil {
+		out.responseLinks = make(map[string]map[string]*Link, len(d.responseLinks))
+		for k, inner := range d.responseLinks {
+			copied := make(map[string]*Link, len(inner))
+			maps.Copy(copied, inner)
+			out.responseLinks[k] = copied
+		}
+	}
+	return out
 }
 
 // Tags appends tags to the group defaults. Operations created through

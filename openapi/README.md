@@ -91,6 +91,33 @@ Override/merge semantics per field:
 | Responses | Merge | Group responses + operation responses; operation overrides per status code |
 | ExternalDocs | Replace | Operation-level `ExternalDocs` call overrides group value |
 
+### Nested groups
+
+Call `Group()` on a `*RouteGroup` to create a child group seeded with the parent's defaults. The child can extend or override without affecting the parent or any sibling groups. The same `*Spec` is shared, so operations registered through any group land in one document.
+
+```go
+api := spec.Group().Tags("api")
+
+oauth2 := api.Group().
+    Tags("oauth2").
+    Security(openapi.SecurityRequirement{"oauthFlow": {"read"}})
+
+bearer := api.Group().
+    Tags("bearer").
+    Security(openapi.SecurityRequirement{"bearerAuth": {}}).
+    Response(http.StatusUnauthorized, ErrorResponse{})
+
+oauth2.Route(r.HandleFunc("/oauth/token", tokenHandler).Methods(http.MethodPost)).
+    Summary("Issue token")
+    // tags: ["api", "oauth2"], security: oauthFlow
+
+bearer.Route(r.HandleFunc("/me", meHandler).Methods(http.MethodGet)).
+    Summary("Current user")
+    // tags: ["api", "bearer"], security: bearerAuth, 401 from group
+```
+
+Child inheritance follows the same per-field semantics as the parent-to-operation table above: slice fields (`Tags`, `Server`, `Parameter`) append; `Security`/`ExternalDocs` replace; `Deprecated` is a one-way latch; response entries are merged per status code with the child overriding for any status code it sets. Groups are deep-copied at `Group()` time, so mutating a child never mutates the parent or its already-registered operations.
+
 ## Request and response bodies
 
 ### JSON (default)

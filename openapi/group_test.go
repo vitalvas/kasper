@@ -671,3 +671,212 @@ func TestRouteGroup(t *testing.T) {
 		assert.NotContains(t, doc.Paths["/b"].Get.Responses, "403")
 	})
 }
+
+func TestRouteGroupNested(t *testing.T) {
+	t.Run("child inherits tags", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		parent := spec.Group().Tags("auth")
+		child := parent.Group()
+
+		child.Route(r.HandleFunc("/login", dummyHandler).Methods(http.MethodPost)).
+			Summary("Login")
+
+		doc := spec.Build(r)
+
+		require.NotNil(t, doc.Paths["/login"].Post)
+		assert.Equal(t, []string{"auth"}, doc.Paths["/login"].Post.Tags)
+	})
+
+	t.Run("child Tags appends without touching parent", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		parent := spec.Group().Tags("auth")
+		child := parent.Group().Tags("oauth2")
+
+		parent.Route(r.HandleFunc("/parent", dummyHandler).Methods(http.MethodGet)).
+			Summary("Parent op")
+		child.Route(r.HandleFunc("/child", dummyHandler).Methods(http.MethodGet)).
+			Summary("Child op")
+
+		doc := spec.Build(r)
+
+		require.NotNil(t, doc.Paths["/parent"].Get)
+		require.NotNil(t, doc.Paths["/child"].Get)
+		assert.Equal(t, []string{"auth"}, doc.Paths["/parent"].Get.Tags)
+		assert.Equal(t, []string{"auth", "oauth2"}, doc.Paths["/child"].Get.Tags)
+	})
+
+	t.Run("child overrides one status code, parent unchanged", func(t *testing.T) {
+		type parentErr struct {
+			Code string `json:"code"`
+		}
+		type childErr struct {
+			Reason string `json:"reason"`
+		}
+
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		parent := spec.Group().
+			Response(http.StatusUnauthorized, parentErr{}).
+			Response(http.StatusInternalServerError, parentErr{})
+
+		child := parent.Group().
+			Response(http.StatusUnauthorized, childErr{})
+
+		parent.Route(r.HandleFunc("/parent", dummyHandler).Methods(http.MethodGet)).
+			Summary("Parent op").
+			Response(http.StatusOK, nil)
+		child.Route(r.HandleFunc("/child", dummyHandler).Methods(http.MethodGet)).
+			Summary("Child op").
+			Response(http.StatusOK, nil)
+
+		doc := spec.Build(r)
+
+		require.NotNil(t, doc.Paths["/parent"].Get)
+		require.NotNil(t, doc.Paths["/child"].Get)
+
+		parentResp401 := doc.Paths["/parent"].Get.Responses["401"]
+		childResp401 := doc.Paths["/child"].Get.Responses["401"]
+		require.NotNil(t, parentResp401)
+		require.NotNil(t, childResp401)
+
+		require.Contains(t, parentResp401.Content, "application/json")
+		require.Contains(t, childResp401.Content, "application/json")
+		assert.NotEqual(t,
+			parentResp401.Content["application/json"].Schema,
+			childResp401.Content["application/json"].Schema,
+			"child 401 schema must differ from parent 401",
+		)
+
+		assert.Contains(t, doc.Paths["/parent"].Get.Responses, "500")
+		assert.Contains(t, doc.Paths["/child"].Get.Responses, "500",
+			"child should still inherit non-overridden status codes")
+	})
+
+	t.Run("grandchild inherits transitively", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		grandparent := spec.Group().Tags("api")
+		parent := grandparent.Group().Tags("v1")
+		child := parent.Group().Tags("users")
+
+		child.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
+			Summary("List users")
+
+		doc := spec.Build(r)
+
+		require.NotNil(t, doc.Paths["/users"].Get)
+		assert.Equal(t, []string{"api", "v1", "users"}, doc.Paths["/users"].Get.Tags)
+	})
+
+	t.Run("child mutations do not alias parent slices", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		parent := spec.Group().
+			Tags("parent").
+			Server(Server{URL: "https://parent.example.com"}).
+			Parameter(&Parameter{Name: "X-Parent", In: "header"})
+
+		child := parent.Group().
+			Tags("child").
+			Server(Server{URL: "https://child.example.com"}).
+			Parameter(&Parameter{Name: "X-Child", In: "header"})
+
+		parent.Route(r.HandleFunc("/parent", dummyHandler).Methods(http.MethodGet)).
+			Summary("Parent op")
+		child.Route(r.HandleFunc("/child", dummyHandler).Methods(http.MethodGet)).
+			Summary("Child op")
+
+		doc := spec.Build(r)
+
+		parentOp := doc.Paths["/parent"].Get
+		childOp := doc.Paths["/child"].Get
+		require.NotNil(t, parentOp)
+		require.NotNil(t, childOp)
+
+		assert.Equal(t, []string{"parent"}, parentOp.Tags)
+		assert.Equal(t, []string{"parent", "child"}, childOp.Tags)
+
+		require.Len(t, parentOp.Servers, 1)
+		assert.Equal(t, "https://parent.example.com", parentOp.Servers[0].URL)
+		require.Len(t, childOp.Servers, 2)
+		assert.Equal(t, "https://child.example.com", childOp.Servers[1].URL)
+
+		require.Len(t, parentOp.Parameters, 1)
+		assert.Equal(t, "X-Parent", parentOp.Parameters[0].Name)
+		require.Len(t, childOp.Parameters, 2)
+		assert.Equal(t, "X-Child", childOp.Parameters[1].Name)
+	})
+
+	t.Run("response descriptions, headers, and links are deep-copied", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		parentHeader := &Header{Description: "from parent"}
+		parentLink := &Link{Description: "from parent"}
+		parent := spec.Group().
+			ResponseDescription(http.StatusOK, "parent desc").
+			ResponseHeader(http.StatusOK, "X-Parent", parentHeader).
+			ResponseLink(http.StatusOK, "parentLink", parentLink)
+
+		childHeader := &Header{Description: "from child"}
+		childLink := &Link{Description: "from child"}
+		child := parent.Group().
+			ResponseDescription(http.StatusOK, "child desc").
+			ResponseHeader(http.StatusOK, "X-Child", childHeader).
+			ResponseLink(http.StatusOK, "childLink", childLink)
+
+		parent.Route(r.HandleFunc("/parent", dummyHandler).Methods(http.MethodGet)).
+			Summary("Parent op").
+			Response(http.StatusOK, nil)
+		child.Route(r.HandleFunc("/child", dummyHandler).Methods(http.MethodGet)).
+			Summary("Child op").
+			Response(http.StatusOK, nil)
+
+		doc := spec.Build(r)
+
+		parentResp := doc.Paths["/parent"].Get.Responses["200"]
+		childResp := doc.Paths["/child"].Get.Responses["200"]
+		require.NotNil(t, parentResp)
+		require.NotNil(t, childResp)
+
+		assert.Equal(t, "parent desc", parentResp.Description)
+		assert.Equal(t, "child desc", childResp.Description)
+
+		assert.Contains(t, parentResp.Headers, "X-Parent")
+		assert.NotContains(t, parentResp.Headers, "X-Child")
+		assert.Contains(t, childResp.Headers, "X-Parent")
+		assert.Contains(t, childResp.Headers, "X-Child")
+
+		assert.Contains(t, parentResp.Links, "parentLink")
+		assert.NotContains(t, parentResp.Links, "childLink")
+		assert.Contains(t, childResp.Links, "parentLink")
+		assert.Contains(t, childResp.Links, "childLink")
+	})
+
+	t.Run("child Security replaces parent Security", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		parent := spec.Group().Security(SecurityRequirement{"basic": {}})
+		child := parent.Group().Security(SecurityRequirement{"bearer": {}})
+
+		parent.Route(r.HandleFunc("/parent", dummyHandler).Methods(http.MethodGet)).
+			Summary("Parent op")
+		child.Route(r.HandleFunc("/child", dummyHandler).Methods(http.MethodGet)).
+			Summary("Child op")
+
+		doc := spec.Build(r)
+
+		require.Len(t, doc.Paths["/parent"].Get.Security, 1)
+		assert.Contains(t, doc.Paths["/parent"].Get.Security[0], "basic")
+		require.Len(t, doc.Paths["/child"].Get.Security, 1)
+		assert.Contains(t, doc.Paths["/child"].Get.Security[0], "bearer")
+	})
+}

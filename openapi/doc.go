@@ -104,6 +104,21 @@
 //
 //	users.Op("listUsers").Summary("List users")
 //
+// Call Group on a *RouteGroup to create a child group seeded with the
+// parent's defaults. The child can extend or override without affecting
+// the parent or sibling groups; defaults are deep-copied at clone time.
+//
+//	api := spec.Group().Tags("api")
+//
+//	bearer := api.Group().
+//	    Tags("bearer").
+//	    Security(openapi.SecurityRequirement{"bearerAuth": {}}).
+//	    Response(http.StatusUnauthorized, ErrorResponse{})
+//
+//	bearer.Route(r.HandleFunc("/me", meHandler).Methods(http.MethodGet)).
+//	    Summary("Current user")
+//	    // tags: ["api", "bearer"], security: bearerAuth, 401 from group
+//
 // # Security
 //
 // Register security schemes and apply them at document or operation level:
