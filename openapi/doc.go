@@ -485,6 +485,17 @@
 //	    },
 //	})
 //
+// Configure the OAuth2 authorize popup (PKCE, client_id, scope separator,
+// etc.) via InitOAuth. When non-empty, the bundle is bound to a `ui`
+// variable and ui.initOAuth({...}) is emitted after the constructor:
+//
+//	spec.Handle(r, "/swagger", &openapi.HandleConfig{
+//	    InitOAuth: map[string]any{
+//	        "usePkceWithAuthorizationCodeGrant": true,
+//	        "clientId":                          "my-client",
+//	    },
+//	})
+//
 // # Building the Document
 //
 // Build walks the mux router and assembles a complete *Document. This is

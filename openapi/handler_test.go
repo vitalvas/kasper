@@ -560,6 +560,101 @@ func TestHandleSwaggerUIConfig(t *testing.T) {
 	})
 }
 
+func TestHandleInitOAuth(t *testing.T) {
+	t.Run("nil InitOAuth produces no initOAuth call", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", nil)
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.NotContains(t, body, "initOAuth(")
+		assert.NotContains(t, body, "const ui = ")
+	})
+
+	t.Run("empty InitOAuth produces no initOAuth call", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			InitOAuth: map[string]any{},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.NotContains(t, body, "initOAuth(")
+		assert.NotContains(t, body, "const ui = ")
+	})
+
+	t.Run("InitOAuth enables PKCE", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			InitOAuth: map[string]any{
+				"usePkceWithAuthorizationCodeGrant": true,
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		assert.Contains(t, body, `const ui = SwaggerUIBundle({url: "/swagger/schema.json", dom_id: "#swagger-ui"});`)
+		assert.Contains(t, body, `ui.initOAuth({"usePkceWithAuthorizationCodeGrant":true});`)
+	})
+
+	t.Run("InitOAuth values are JSON-encoded", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			InitOAuth: map[string]any{
+				"clientId":                          "my-client",
+				"usePkceWithAuthorizationCodeGrant": true,
+				"scopeSeparator":                    " ",
+				"additionalQueryStringParams": map[string]any{
+					"audience": "https://api.example.com",
+				},
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		require.Contains(t, body, "ui.initOAuth(")
+		assert.Contains(t, body, `"clientId":"my-client"`)
+		assert.Contains(t, body, `"usePkceWithAuthorizationCodeGrant":true`)
+		assert.Contains(t, body, `"scopeSeparator":" "`)
+		assert.Contains(t, body, `"additionalQueryStringParams":{"audience":"https://api.example.com"}`)
+	})
+
+	t.Run("InitOAuth coexists with SwaggerUIConfig", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/swagger", &HandleConfig{
+			SwaggerUIConfig: map[string]any{
+				"docExpansion": "none",
+			},
+			InitOAuth: map[string]any{
+				"usePkceWithAuthorizationCodeGrant": true,
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/swagger/")
+		body := w.Body.String()
+		bundleIdx := strings.Index(body, "SwaggerUIBundle(")
+		initIdx := strings.Index(body, "ui.initOAuth(")
+		require.NotEqual(t, -1, bundleIdx)
+		require.NotEqual(t, -1, initIdx)
+		assert.Less(t, bundleIdx, initIdx, "initOAuth must follow SwaggerUIBundle")
+		assert.Contains(t, body, `docExpansion: "none"`)
+	})
+
+	t.Run("InitOAuth ignored for non-Swagger UIs", func(t *testing.T) {
+		r, spec := setupTestRouter()
+		spec.Handle(r, "/docs", &HandleConfig{
+			UI: DocsRapiDoc,
+			InitOAuth: map[string]any{
+				"usePkceWithAuthorizationCodeGrant": true,
+			},
+		})
+
+		w := serveRequest(r, http.MethodGet, "/docs/")
+		body := w.Body.String()
+		assert.NotContains(t, body, "initOAuth(")
+	})
+}
+
 func TestHandleXSSSafe(t *testing.T) {
 	t.Run("title is HTML escaped", func(t *testing.T) {
 		r := mux.NewRouter()

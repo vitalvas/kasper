@@ -79,6 +79,13 @@ type HandleConfig struct {
 	//
 	// See: https://swagger.io/docs/open-source-tools/swagger-ui/usage/configuration/
 	SwaggerUIConfig map[string]any
+
+	// InitOAuth is rendered as `ui.initOAuth({...})` after the SwaggerUIBundle
+	// constructor. Use it to enable PKCE, set a default client_id, change the
+	// scope separator, etc. Only used when UI is DocsSwaggerUI.
+	//
+	// See: https://swagger.io/docs/open-source-tools/swagger-ui/usage/oauth2/
+	InitOAuth map[string]any
 }
 
 // jsonFilename returns the configured JSON spec filename, defaulting to "schema.json".
@@ -271,7 +278,7 @@ func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg *HandleConfig, s
 			case DocsRedoc:
 				page = redocTemplate(title, specURL)
 			default:
-				page = swaggerUITemplate(title, specURL, cfg.SwaggerUIConfig)
+				page = swaggerUITemplate(title, specURL, cfg.SwaggerUIConfig, cfg.InitOAuth)
 			}
 			data = []byte(page)
 		})
@@ -288,7 +295,7 @@ func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg *HandleConfig, s
 	}
 }
 
-func swaggerUITemplate(title, specPath string, config map[string]any) string {
+func swaggerUITemplate(title, specPath string, config, initOAuth map[string]any) string {
 	var extra string
 	if len(config) > 0 {
 		keys := make([]string, 0, len(config))
@@ -308,6 +315,14 @@ func swaggerUITemplate(title, specPath string, config map[string]any) string {
 		extra = buf.String()
 	}
 
+	bundleCall := fmt.Sprintf("SwaggerUIBundle({url: %q, dom_id: \"#swagger-ui\"%s});", specPath, extra)
+	script := bundleCall
+	if len(initOAuth) > 0 {
+		if encoded, err := json.Marshal(initOAuth); err == nil {
+			script = fmt.Sprintf("const ui = %s\nui.initOAuth(%s);", bundleCall, encoded)
+		}
+	}
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -320,10 +335,10 @@ func swaggerUITemplate(title, specPath string, config map[string]any) string {
 <div id="swagger-ui"></div>
 <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
 <script>
-SwaggerUIBundle({url: %q, dom_id: "#swagger-ui"%s});
+%s
 </script>
 </body>
-</html>`, html.EscapeString(title), specPath, extra)
+</html>`, html.EscapeString(title), script)
 }
 
 func rapidocTemplate(title, specPath string) string {

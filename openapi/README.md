@@ -578,6 +578,7 @@ Schema name mapping:
 | `DisableDocs` | `bool` | Disable interactive HTML docs UI |
 | `DisableETag` | `bool` | Disable ETag and If-None-Match on schema endpoints; enabled by default |
 | `SwaggerUIConfig` | `map[string]any` | Additional SwaggerUIBundle options; only for `DocsSwaggerUI` |
+| `InitOAuth` | `map[string]any` | Rendered as `ui.initOAuth({...})` after the bundle constructor; only for `DocsSwaggerUI` |
 
 ```go
 // Swagger UI (default) at /swagger/, schema at /swagger/schema.json (YAML disabled by default)
@@ -626,6 +627,29 @@ SwaggerUIBundle({url: "...", dom_id: "#swagger-ui", deepLinking: true, defaultMo
 ```
 
 Keys are sorted alphabetically for deterministic output. `SwaggerUIConfig` is only used when UI is `DocsSwaggerUI` (the default). See [Swagger UI Configuration](https://swagger.io/docs/open-source-tools/swagger-ui/usage/configuration/) for available options.
+
+### Swagger UI OAuth2
+
+Configure the authorize popup (PKCE, default `client_id`, scope separator, etc.) via `InitOAuth`. When non-empty, the rendered HTML binds the bundle to `ui` and calls `ui.initOAuth({...})`:
+
+```go
+spec.Handle(r, "/swagger", &openapi.HandleConfig{
+    InitOAuth: map[string]any{
+        "usePkceWithAuthorizationCodeGrant": true,
+        "clientId":                          "my-client",
+        "scopeSeparator":                    " ",
+    },
+})
+```
+
+This produces:
+
+```js
+const ui = SwaggerUIBundle({url: "...", dom_id: "#swagger-ui"});
+ui.initOAuth({"clientId":"my-client","scopeSeparator":" ","usePkceWithAuthorizationCodeGrant":true});
+```
+
+`InitOAuth` is only used when UI is `DocsSwaggerUI`. See [Swagger UI OAuth 2.0](https://swagger.io/docs/open-source-tools/swagger-ui/usage/oauth2/) for available options.
 
 ### Filename path resolution
 
