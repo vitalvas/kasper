@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.0](https://github.com/vitalvas/kasper/compare/v0.15.0...v0.16.0) (2026-05-20)
+
+
+### Features
+
+* **muxhandlers:** add NELMiddleware ([3a7d7b4](https://github.com/vitalvas/kasper/commit/3a7d7b46c69f066b03afce052668d2edfdd740c4))
+* **openapi:** add RouteGroup.Group for nested groups ([2223277](https://github.com/vitalvas/kasper/commit/22232771590fd2176f3cb991ef7d99f66e87f7bd))
+
 ## [0.15.0](https://github.com/vitalvas/kasper/compare/v0.14.0...v0.15.0) (2026-05-16)
 
 
