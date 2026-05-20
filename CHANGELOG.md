@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/vitalvas/kasper/compare/v0.16.0...v0.17.0) (2026-05-20)
+
+
+### Features
+
+* **openapi:** add HandleConfig.InitOAuth for Swagger UI OAuth2 ([6b43589](https://github.com/vitalvas/kasper/commit/6b43589a8ec20fa24ff578d2a10f2c7904944299))
+
 ## [0.16.0](https://github.com/vitalvas/kasper/compare/v0.15.0...v0.16.0) (2026-05-20)
 
 
