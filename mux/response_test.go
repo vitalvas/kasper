@@ -18,14 +18,16 @@ func TestResponseJSON(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		status     int
-		data       any
-		wantStatus int
-		wantCT     string
-		wantNotCT  string
-		wantBody   string
-		jsonEq     bool
+		name        string
+		status      int
+		data        any
+		config      *ResponseConfig
+		wantStatus  int
+		wantCT      string
+		wantNotCT   string
+		wantBody    string
+		wantHeaders map[string]string
+		jsonEq      bool
 	}{
 		{
 			name:       "writes JSON with status code",
@@ -60,12 +62,60 @@ func TestResponseJSON(t *testing.T) {
 			wantStatus: http.StatusInternalServerError,
 			wantNotCT:  "application/json",
 		},
+		{
+			name:       "overrides content type",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{ContentType: ContentTypeApplicationJWT},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/jwt",
+			wantBody:   `{"name":"test","value":42}`,
+			jsonEq:     true,
+		},
+		{
+			name:       "empty content type override falls back to JSON",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/json",
+			wantBody:   `{"name":"test","value":42}`,
+			jsonEq:     true,
+		},
+		{
+			name:       "sets extra headers",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{Headers: map[string]string{"X-Custom": "abc", "Cache-Control": "no-store"}},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/json",
+			wantBody:   `{"name":"test","value":42}`,
+			jsonEq:     true,
+			wantHeaders: map[string]string{
+				"X-Custom":      "abc",
+				"Cache-Control": "no-store",
+			},
+		},
+		{
+			name:       "content type cannot be overridden via headers",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{ContentType: ContentTypeApplicationJWT, Headers: map[string]string{"Content-Type": "text/plain"}},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/jwt",
+			wantBody:   `{"name":"test","value":42}`,
+			jsonEq:     true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			ResponseJSON(w, tt.status, tt.data)
+			if tt.config != nil {
+				ResponseJSON(w, tt.status, tt.data, *tt.config)
+			} else {
+				ResponseJSON(w, tt.status, tt.data)
+			}
 
 			assert.Equal(t, tt.wantStatus, w.Code)
 			if tt.wantCT != "" {
@@ -73,6 +123,9 @@ func TestResponseJSON(t *testing.T) {
 			}
 			if tt.wantNotCT != "" {
 				assert.NotEqual(t, tt.wantNotCT, w.Header().Get("Content-Type"))
+			}
+			for k, v := range tt.wantHeaders {
+				assert.Equal(t, v, w.Header().Get(k))
 			}
 			if tt.jsonEq {
 				assert.JSONEq(t, tt.wantBody, w.Body.String())
@@ -141,6 +194,19 @@ func TestResponseHTML(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.NotContains(t, w.Body.String(), "<")
 	})
+
+	t.Run("applies config content-type and headers", func(t *testing.T) {
+		SetTemplates(tmpl)
+		w := httptest.NewRecorder()
+		ResponseHTML(w, http.StatusOK, "hello", map[string]string{"Name": "World"}, ResponseConfig{
+			ContentType: ContentTypeTextPlain,
+			Headers:     map[string]string{"X-Custom": "abc"},
+		})
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "text/plain", w.Header().Get("Content-Type"))
+		assert.Equal(t, "abc", w.Header().Get("X-Custom"))
+		assert.Equal(t, "<p>Hello, World!</p>", w.Body.String())
+	})
 }
 
 func TestResponseHTMLTemplate(t *testing.T) {
@@ -190,6 +256,18 @@ func TestResponseHTMLTemplate(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.NotEqual(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
 	})
+
+	t.Run("applies config content-type and headers", func(t *testing.T) {
+		tmpl := template.Must(template.New("page").Parse(`<p>{{.Name}}</p>`))
+		w := httptest.NewRecorder()
+		ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", map[string]string{"Name": "Alice"}, ResponseConfig{
+			ContentType: ContentTypeTextPlain,
+			Headers:     map[string]string{"X-Custom": "abc"},
+		})
+		assert.Equal(t, "text/plain", w.Header().Get("Content-Type"))
+		assert.Equal(t, "abc", w.Header().Get("X-Custom"))
+		assert.Equal(t, "<p>Alice</p>", w.Body.String())
+	})
 }
 
 func TestResponseHTMLString(t *testing.T) {
@@ -226,6 +304,17 @@ func TestResponseHTMLString(t *testing.T) {
 		w := httptest.NewRecorder()
 		ResponseHTMLString(w, http.StatusOK, `{{.Missing.Field}}`, struct{}{})
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("applies config content-type and headers", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		ResponseHTMLString(w, http.StatusOK, `<p>{{.Name}}</p>`, map[string]string{"Name": "World"}, ResponseConfig{
+			ContentType: ContentTypeTextPlain,
+			Headers:     map[string]string{"X-Custom": "abc"},
+		})
+		assert.Equal(t, "text/plain", w.Header().Get("Content-Type"))
+		assert.Equal(t, "abc", w.Header().Get("X-Custom"))
+		assert.Equal(t, "<p>World</p>", w.Body.String())
 	})
 }
 
@@ -269,10 +358,12 @@ func TestResponseXML(t *testing.T) {
 		name         string
 		status       int
 		data         any
+		config       *ResponseConfig
 		wantStatus   int
 		wantCT       string
 		wantNotCT    string
 		wantContains []string
+		wantHeaders  map[string]string
 	}{
 		{
 			name:       "writes XML with status code",
@@ -305,12 +396,51 @@ func TestResponseXML(t *testing.T) {
 			wantStatus: http.StatusInternalServerError,
 			wantNotCT:  "application/xml",
 		},
+		{
+			name:       "overrides content type",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{ContentType: ContentTypeTextXML},
+			wantStatus: http.StatusOK,
+			wantCT:     "text/xml",
+			wantContains: []string{
+				"<item>",
+				"<name>test</name>",
+			},
+		},
+		{
+			name:       "empty content type override falls back to XML",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/xml",
+			wantContains: []string{
+				"<item>",
+			},
+		},
+		{
+			name:       "sets extra headers",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{Headers: map[string]string{"X-Custom": "abc"}},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/xml",
+			wantContains: []string{
+				"<item>",
+			},
+			wantHeaders: map[string]string{"X-Custom": "abc"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			ResponseXML(w, tt.status, tt.data)
+			if tt.config != nil {
+				ResponseXML(w, tt.status, tt.data, *tt.config)
+			} else {
+				ResponseXML(w, tt.status, tt.data)
+			}
 
 			assert.Equal(t, tt.wantStatus, w.Code)
 			if tt.wantCT != "" {
@@ -321,6 +451,9 @@ func TestResponseXML(t *testing.T) {
 			}
 			for _, s := range tt.wantContains {
 				assert.Contains(t, w.Body.String(), s)
+			}
+			for k, v := range tt.wantHeaders {
+				assert.Equal(t, v, w.Header().Get(k))
 			}
 		})
 	}

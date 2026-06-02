@@ -3,3 +3,5 @@ policy:
     enable: false
   private_exported_methods:
     enable: false
+  func_signature:
+    max_params: 6

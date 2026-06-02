@@ -6,6 +6,7 @@ package mux
 const (
 	// Application types.
 	ContentTypeApplicationJSON           = "application/json"
+	ContentTypeApplicationJWT            = "application/jwt"
 	ContentTypeApplicationProblemJSON    = "application/problem+json"
 	ContentTypeApplicationXML            = "application/xml"
 	ContentTypeApplicationFormURLEncoded = "application/x-www-form-urlencoded"

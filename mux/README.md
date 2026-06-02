@@ -842,7 +842,7 @@ vals, err := mux.EncodeQuery(Filter{Page: 2, Status: "active"})
 
 ## Response Helpers
 
-`ResponseJSON` and `ResponseXML` encode a value and write it to the response with the appropriate `Content-Type` header. If encoding fails, an HTTP 500 Internal Server Error is written instead.
+`ResponseJSON` and `ResponseXML` encode a value and write it to the response with the appropriate `Content-Type` header. If encoding fails, an HTTP 500 Internal Server Error is written instead. The HTML helpers are documented under [HTML Template Responses](#html-template-responses).
 
 ```go
 r.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -863,6 +863,22 @@ r.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 | `ResponseJSON` | `application/json` |
 | `ResponseXML` | `application/xml` |
 | `ResponseHTML` | `text/html; charset=utf-8` |
+
+`ResponseJSON`, `ResponseXML`, and the HTML helpers (`ResponseHTML`, `ResponseHTMLTemplate`, `ResponseHTMLString`) accept an optional `ResponseConfig` to override the `Content-Type` or set extra response headers. The body is still encoded or rendered as usual; only the headers change. `Content-Type` is controlled by the `ContentType` field and cannot be overridden through `Headers`.
+
+```go
+r.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+    mux.ResponseJSON(w, http.StatusOK, token, mux.ResponseConfig{
+        ContentType: mux.ContentTypeApplicationJWT,
+        Headers:     map[string]string{"Cache-Control": "no-store"},
+    })
+})
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ContentType` | `string` | Overrides the default `Content-Type`. Empty uses the helper's default. |
+| `Headers` | `map[string]string` | Extra response headers set before the body is written. |
 
 ### HTML Template Responses
 
@@ -901,6 +917,14 @@ mux.ResponseHTMLTemplate(w, http.StatusOK, tmpl, "", "World")
 // Inline template string. Parsed on every call -- prefer SetTemplates for
 // templates rendered repeatedly.
 mux.ResponseHTMLString(w, http.StatusOK, `<p>{{.}}</p>`, "Hello")
+```
+
+All three HTML helpers accept an optional `ResponseConfig` (see [Response Helpers](#response-helpers)) to override the `Content-Type` or set extra response headers:
+
+```go
+mux.ResponseHTML(w, http.StatusOK, "login", data, mux.ResponseConfig{
+    Headers: map[string]string{"Cache-Control": "no-store"},
+})
 ```
 
 ## Typed JSON Handlers

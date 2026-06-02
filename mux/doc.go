@@ -406,6 +406,14 @@
 //	    mux.ResponseXML(w, http.StatusOK, data)
 //	}
 //
+// Both accept an optional ResponseConfig to override the Content-Type or set
+// extra response headers while still encoding the value as JSON or XML:
+//
+//	mux.ResponseJSON(w, http.StatusOK, token, mux.ResponseConfig{
+//	    ContentType: mux.ContentTypeApplicationJWT,
+//	    Headers:     map[string]string{"Cache-Control": "no-store"},
+//	})
+//
 // # HTML Template Responses
 //
 // SetTemplates registers parsed templates for use by ResponseHTML.
@@ -434,6 +442,13 @@
 //
 // ResponseHTMLString parses on every call -- prefer SetTemplates +
 // ResponseHTML or ResponseHTMLTemplate for templates rendered repeatedly.
+//
+// All three HTML helpers also accept an optional ResponseConfig to override
+// the Content-Type or set extra response headers:
+//
+//	mux.ResponseHTML(w, http.StatusOK, "login", data, mux.ResponseConfig{
+//	    Headers: map[string]string{"Cache-Control": "no-store"},
+//	})
 //
 // # Typed JSON Handlers
 //
