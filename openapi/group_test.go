@@ -880,3 +880,51 @@ func TestRouteGroupNested(t *testing.T) {
 		assert.Contains(t, doc.Paths["/child"].Get.Security[0], "bearer")
 	})
 }
+
+func TestRouteGroupResponseHeaderOnStatuses(t *testing.T) {
+	spec := NewSpec(Info{Title: "T", Version: "1"})
+	group := spec.Group().
+		ResponseHeaderOnStatuses("RateLimit",
+			StringHeader("RFC 9331 RateLimit"),
+			http.StatusOK, http.StatusBadRequest, http.StatusTooManyRequests).
+		Response(http.StatusOK, struct{}{}).
+		Response(http.StatusBadRequest, struct{}{}).
+		Response(http.StatusTooManyRequests, struct{}{})
+
+	router := mux.NewRouter()
+	r := router.NewRoute().Path("/x").Methods(http.MethodGet).Name("x")
+	group.Route(r).Summary("test")
+
+	doc := spec.Build(router)
+
+	pi := doc.Paths["/x"]
+	require.NotNil(t, pi)
+	op := pi.Get
+	require.NotNil(t, op)
+
+	for _, status := range []string{"200", "400", "429"} {
+		resp := op.Responses[status]
+		require.NotNil(t, resp, "status %s missing", status)
+		require.NotNil(t, resp.Headers["RateLimit"], "RateLimit header missing on %s", status)
+	}
+}
+
+func TestRouteGroupResponseHeaderOnStatusesSkipsUndeclared(t *testing.T) {
+	spec := NewSpec(Info{Title: "T", Version: "1"})
+	group := spec.Group().
+		ResponseHeaderOnStatuses("RateLimit",
+			StringHeader("RFC 9331 RateLimit"),
+			http.StatusOK, http.StatusInternalServerError).
+		Response(http.StatusOK, struct{}{})
+
+	router := mux.NewRouter()
+	r := router.NewRoute().Path("/x").Methods(http.MethodGet).Name("x")
+	group.Route(r).Summary("test")
+
+	doc := spec.Build(router)
+
+	op := doc.Paths["/x"].Get
+	require.Contains(t, op.Responses, "200")
+	assert.NotContains(t, op.Responses, "500",
+		"500 was not declared on the route, must not appear")
+}

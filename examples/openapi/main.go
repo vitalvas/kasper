@@ -215,13 +215,11 @@ func main() {
 	spec.SetExternalDocs("https://example.com/docs", "Full API documentation")
 
 	// Security schemes and document-level security.
-	spec.AddSecurityScheme("bearerAuth", &openapi.SecurityScheme{
-		Type:         "http",
-		Scheme:       "bearer",
-		BearerFormat: "JWT",
-	})
-	spec.AddSecurityScheme("oauth2", &openapi.SecurityScheme{
-		Type:        "oauth2",
+	// BearerAuth/APIKeyAuth constructors collapse the spec-determined field
+	// combinations; oauth2 keeps a literal because its Flows block dominates.
+	spec.AddSecurityScheme("bearerAuth", openapi.BearerAuth("JWT"))
+	oauth2Scheme := &openapi.SecurityScheme{
+		Type:        openapi.SecurityTypeOAuth2,
 		Description: "OAuth 2.0 authorization code flow",
 		Flows: &openapi.OAuthFlows{
 			AuthorizationCode: &openapi.OAuthFlow{
@@ -237,13 +235,15 @@ func main() {
 				},
 			},
 		},
-	})
-	spec.AddSecurityScheme("apiKey", &openapi.SecurityScheme{
-		Type: "apiKey",
-		Name: "X-API-Key",
-		In:   "header",
-	})
-	spec.SetSecurity(openapi.SecurityRequirement{"bearerAuth": {}})
+	}
+	// Validate the hand-built scheme before registering it (constructor-built
+	// schemes are valid by construction and need no check).
+	if err := oauth2Scheme.Validate(); err != nil {
+		log.Fatalf("invalid oauth2 security scheme: %v", err)
+	}
+	spec.AddSecurityScheme("oauth2", oauth2Scheme)
+	spec.AddSecurityScheme("apiKey", openapi.APIKeyAuth(openapi.SecurityInHeader, "X-API-Key"))
+	spec.SetSecurity(openapi.RequireScheme("bearerAuth"))
 
 	// Tag descriptions (referenced by routes below).
 	spec.AddTag(openapi.Tag{
@@ -259,11 +259,8 @@ func main() {
 	// Path-level metadata: applies to all operations under /api/v1/users/{id}.
 	spec.SetPathSummary("/api/v1/users/{id}", "Single user resource")
 	spec.SetPathDescription("/api/v1/users/{id}", "Operations on an individual user identified by UUID.")
-	spec.AddPathParameter("/api/v1/users/{id}", &openapi.Parameter{
-		Name: "X-Tenant-ID", In: "header",
-		Description: "Tenant identifier for multi-tenancy",
-		Schema:      &openapi.Schema{Type: openapi.TypeString("string")},
-	})
+	spec.AddPathParameter("/api/v1/users/{id}",
+		openapi.HeaderParam("X-Tenant-ID", "Tenant identifier for multi-tenancy", openapi.StringSchema()))
 
 	// Subrouter: all routes share the /api/v1 prefix.
 	api := r.PathPrefix("/api/v1").Subrouter()
@@ -286,7 +283,7 @@ func main() {
 	// ---------------------------------------------------------------
 	users := spec.Group().
 		Tags("users").
-		Security(openapi.SecurityRequirement{"oauth2": {"read:users", "write:users"}}).
+		Security(openapi.RequireScheme("oauth2", "read:users", "write:users")).
 		Response(http.StatusForbidden, ErrorResponse{}).
 		ResponseContent(http.StatusForbidden, mux.ContentTypeApplicationXML, ErrorResponse{}).
 		ResponseDescription(http.StatusForbidden, "Insufficient permissions").
@@ -295,10 +292,8 @@ func main() {
 		ResponseDescription(http.StatusNotFound, "User not found").
 		DefaultResponse(ErrorResponse{}).
 		DefaultResponseDescription("Unexpected error").
-		DefaultResponseHeader("X-Request-ID", &openapi.Header{
-			Description: "Request trace identifier",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("string"), Format: "uuid"},
-		})
+		DefaultResponseHeader("X-Request-ID",
+			openapi.HeaderOf("Request trace identifier", openapi.StringSchema().WithFormat(openapi.FormatUUID)))
 
 	// List users: wrapped in ResponseData, query parameters, response headers, links.
 	// 403, 404, default error, and X-Request-ID header inherited from group.
@@ -307,21 +302,10 @@ func main() {
 		Summary("List users").
 		Description("Returns a paginated list of users.").
 		ExternalDocs("https://example.com/docs/users#list", "Pagination guide").
-		Parameter(&openapi.Parameter{
-			Name: "page", In: "query",
-			Description: "Page number",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("integer")},
-		}).
-		Parameter(&openapi.Parameter{
-			Name: "per_page", In: "query",
-			Description: "Items per page",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("integer")},
-		}).
+		Parameter(openapi.QueryParam("page", "Page number", openapi.IntegerSchema())).
+		Parameter(openapi.QueryParam("per_page", "Items per page", openapi.IntegerSchema())).
 		Response(http.StatusOK, ResponseData[[]User]{}).
-		ResponseHeader(http.StatusOK, "X-Total-Count", &openapi.Header{
-			Description: "Total number of users",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("integer")},
-		}).
+		ResponseHeader(http.StatusOK, "X-Total-Count", openapi.IntegerHeader("Total number of users")).
 		ResponseLink(http.StatusOK, "GetNextPage", &openapi.Link{
 			OperationID: "listUsers",
 			Parameters:  map[string]any{"page": "$response.body#/next_page"},
@@ -374,9 +358,7 @@ func main() {
 		Description("Returns users in JSON, XML, or CSV based on Accept header.").
 		Response(http.StatusOK, []User{}).
 		ResponseContent(http.StatusOK, mux.ContentTypeApplicationXML, []User{}).
-		ResponseContent(http.StatusOK, mux.ContentTypeTextCSV, &openapi.Schema{
-			Type: openapi.TypeString("string"),
-		})
+		ResponseContent(http.StatusOK, mux.ContentTypeTextCSV, openapi.StringSchema())
 
 	// ---------------------------------------------------------------
 	// File routes via Group: shared tags, server override, shared errors,
@@ -384,7 +366,7 @@ func main() {
 	// ---------------------------------------------------------------
 	files := spec.Group().
 		Tags("files").
-		Security(openapi.SecurityRequirement{"oauth2": {"read:files", "write:files"}}).
+		Security(openapi.RequireScheme("oauth2", "read:files", "write:files")).
 		Server(openapi.Server{URL: "https://files.example.com", Description: "File storage"}).
 		Response(http.StatusForbidden, ErrorResponse{}).
 		Response(http.StatusNotFound, ErrorResponse{}).
@@ -411,13 +393,9 @@ func main() {
 	files.Route(api.HandleFunc("/files/{id:uuid}", downloadFile).Methods(http.MethodGet)).
 		OperationID("downloadFile").
 		Summary("Download file").
-		ResponseContent(http.StatusOK, mux.ContentTypeApplicationOctetStream, &openapi.Schema{
-			Type: openapi.TypeString("string"), Format: "binary",
-		}).
-		ResponseHeader(http.StatusOK, "Content-Disposition", &openapi.Header{
-			Description: "Suggested filename",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("string")},
-		})
+		ResponseContent(http.StatusOK, mux.ContentTypeApplicationOctetStream,
+			openapi.StringSchema().WithFormat(openapi.FormatBinary)).
+		ResponseHeader(http.StatusOK, "Content-Disposition", openapi.StringHeader("Suggested filename"))
 
 	// ---------------------------------------------------------------
 	// Event subscription: callback attached to the route.
@@ -471,7 +449,7 @@ func main() {
 	// Webhook via Group: inherits group tags and security.
 	adminEvents := spec.Group().
 		Tags("admin", "events").
-		Security(openapi.SecurityRequirement{"apiKey": {}})
+		Security(openapi.RequireScheme("apiKey"))
 
 	adminEvents.Webhook("auditEvent", http.MethodPost).
 		Summary("Audit event").
@@ -486,12 +464,8 @@ func main() {
 	admin := spec.Group().
 		Tags("admin").
 		Deprecated().
-		Security(openapi.SecurityRequirement{"apiKey": {}}).
-		Parameter(&openapi.Parameter{
-			Name: "X-Admin-Token", In: "header",
-			Description: "Admin authorization token",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("string")},
-		}).
+		Security(openapi.RequireScheme("apiKey")).
+		Parameter(openapi.HeaderParam("X-Admin-Token", "Admin authorization token", openapi.StringSchema())).
 		ExternalDocs("https://example.com/docs/admin", "Admin API guide")
 
 	// Audit log: deprecated route with default response link.
@@ -499,11 +473,8 @@ func main() {
 		OperationID("listAuditLog").
 		Summary("List audit log").
 		Description("Deprecated: use the events API instead.").
-		Parameter(&openapi.Parameter{
-			Name: "since", In: "query",
-			Description: "Filter entries after this date",
-			Schema:      &openapi.Schema{Type: openapi.TypeString("string"), Format: "date"},
-		}).
+		Parameter(openapi.QueryParam("since", "Filter entries after this date",
+			openapi.StringSchema().WithFormat(openapi.FormatDate))).
 		Response(http.StatusOK, []AuditEntry{}).
 		DefaultResponse(ErrorResponse{}).
 		DefaultResponseLink("SubscribeEvents", &openapi.Link{

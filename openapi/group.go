@@ -239,6 +239,24 @@ func (g *RouteGroup) ResponseHeader(statusCode int, name string, h *Header) *Rou
 	return g
 }
 
+// ResponseHeaderOnStatuses adds the same header to multiple declared
+// response status codes. Use this for headers emitted by middleware on
+// every response (e.g., RFC 9331 RateLimit, request-correlation IDs),
+// which OpenAPI 3.1 cannot express as a single declaration.
+//
+// The header is only attached to responses the route actually declares
+// (via Response or ResponseContent); statuses not declared by the route
+// are silently ignored. This matches the per-status semantics of
+// ResponseHeader.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (headers)
+func (g *RouteGroup) ResponseHeaderOnStatuses(name string, h *Header, statuses ...int) *RouteGroup {
+	for _, status := range statuses {
+		g = g.ResponseHeader(status, name, h)
+	}
+	return g
+}
+
 // ResponseLink adds a shared link to the response for the given HTTP status
 // code. All operations in this group inherit this link.
 //

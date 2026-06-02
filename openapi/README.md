@@ -120,6 +120,81 @@ Child inheritance follows the same per-field semantics as the parent-to-operatio
 
 ## Request and response bodies
 
+### Schema constructors
+
+Constructors return a fresh `*openapi.Schema` for the common primitive JSON types, avoiding repeated struct literals:
+
+```go
+openapi.StringSchema()                       // {type: string}
+openapi.IntegerSchema()                       // {type: integer}
+openapi.NumberSchema()                        // {type: number}
+openapi.BooleanSchema()                       // {type: boolean}
+openapi.EnumSchema("admin", "editor")         // {type: string, enum: [...]}
+openapi.ArraySchema(openapi.StringSchema())   // {type: array, items: {type: string}}
+openapi.ObjectSchema()                         // {type: object}
+```
+
+Modifier methods refine a schema fluently and return it for chaining:
+
+```go
+openapi.StringSchema().WithFormat(openapi.FormatUUID)
+openapi.IntegerSchema().WithDescription("Page number").WithDefault(1)
+openapi.StringSchema().WithExample("alice@example.com")
+openapi.StringSchema().Nullable()             // type becomes [string, null]
+```
+
+| Method | Sets |
+|--------|------|
+| `WithFormat(format)` | `Format` |
+| `WithDescription(desc)` | `Description` |
+| `WithExample(value)` | `Example` |
+| `WithDefault(value)` | `Default` |
+| `Nullable()` | appends `"null"` to the type set (idempotent; no-op on an unset type) |
+
+Constraint modifiers set JSON Schema validation keywords and also chain:
+
+```go
+openapi.IntegerSchema().WithMinimum(1).WithMaximum(100)
+openapi.NumberSchema().WithExclusiveMinimum(0).WithMultipleOf(0.5)
+openapi.StringSchema().WithMinLength(3).WithMaxLength(32).WithPattern("^[a-z0-9_]+$")
+openapi.ArraySchema(openapi.StringSchema()).WithMinItems(1).WithMaxItems(10).WithUniqueItems()
+openapi.IntegerSchema().WithEnum(1, 2, 3)     // enum on a non-string type
+```
+
+| Method | Sets |
+|--------|------|
+| `WithMinimum(v)` / `WithMaximum(v)` | inclusive numeric bounds |
+| `WithExclusiveMinimum(v)` / `WithExclusiveMaximum(v)` | exclusive numeric bounds |
+| `WithMultipleOf(v)` | `multipleOf` |
+| `WithMinLength(n)` / `WithMaxLength(n)` | string length bounds |
+| `WithPattern(re)` | `pattern` |
+| `WithMinItems(n)` / `WithMaxItems(n)` | array length bounds |
+| `WithUniqueItems()` | `uniqueItems: true` |
+| `WithItems(schema)` | array element schema |
+| `WithEnum(values...)` | `enum` on a schema of any type |
+
+### Schema composition
+
+Composition constructors build `oneOf` / `anyOf` / `allOf` / `not` schemas and references to named component schemas:
+
+```go
+openapi.OneOf(openapi.RefSchema("Cat"), openapi.RefSchema("Dog"))
+openapi.AnyOf(openapi.StringSchema(), openapi.IntegerSchema())
+openapi.AllOf(openapi.RefSchema("Base"), openapi.ObjectSchema())
+openapi.Not(openapi.StringSchema())
+openapi.RefSchema("User")                     // {$ref: #/components/schemas/User}
+```
+
+`WithDiscriminator` adds an OpenAPI discriminator to a `oneOf`/`anyOf` schema for tagged unions. Pass `nil` mapping to rely on implicit mapping by schema name:
+
+```go
+openapi.OneOf(openapi.RefSchema("Cat"), openapi.RefSchema("Dog")).
+    WithDiscriminator("petType", map[string]string{
+        "cat": "#/components/schemas/Cat",
+        "dog": "#/components/schemas/Dog",
+    })
+```
+
 ### JSON (default)
 
 `Request` and `Response` are JSON shortcuts. Pass a Go type for automatic schema generation via reflection.
@@ -199,6 +274,35 @@ spec.Op("getUser").
 
 `DefaultResponseContent` works like `ResponseContent` for custom content types.
 
+### Reusing error responses
+
+When several status codes share one error-body type, `ApplyJSONResponses` declares them in a single call. It is available on both `RouteGroup` and the operation builder:
+
+```go
+spec.Op("token").
+    Response(http.StatusOK, TokenResponse{}).
+    ApplyJSONResponses(
+        openapi.JSONResponse{Status: http.StatusBadRequest, Body: ErrorResponse{}},
+        openapi.JSONResponse{Status: http.StatusUnauthorized, Body: ErrorResponse{}},
+    )
+```
+
+`StandardErrorResponses` is a shortcut for the canonical 400/401/403 error set mapped to a single body type, available on both the operation builder and groups:
+
+```go
+// Per operation
+spec.Op("token").
+    Response(http.StatusOK, TokenResponse{}).
+    StandardErrorResponses(ErrorResponse{})
+
+// Shared across a whole group
+spec.Group().
+    Tags("oauth2").
+    StandardErrorResponses(ErrorResponse{})
+```
+
+Both declare JSON responses only; use `ResponseContent` or `ResponseDescription` for other content types or custom descriptions.
+
 ### Response headers and links
 
 Add headers and links to responses:
@@ -227,6 +331,38 @@ spec.Op("getUser").
     }).
     DefaultResponseLink("GetError", &openapi.Link{OperationID: "getErrorDetails"})
 ```
+
+#### Header constructors
+
+`StringHeader` and `IntegerHeader` build the common primitive-typed headers; `HeaderOf` takes any schema for non-primitive cases:
+
+```go
+spec.Op("listUsers").
+    Response(http.StatusOK, []User{}).
+    ResponseHeader(http.StatusOK, "X-Total-Count", openapi.IntegerHeader("Total number of users")).
+    DefaultResponseHeader("X-Request-ID",
+        openapi.HeaderOf("Request trace ID", openapi.StringSchema().WithFormat(openapi.FormatUUID)))
+```
+
+| Constructor | Schema |
+|-------------|--------|
+| `StringHeader(description)` | string |
+| `IntegerHeader(description)` | integer |
+| `HeaderOf(description, schema)` | caller-supplied |
+
+#### Headers on multiple statuses
+
+Middleware-emitted headers (rate-limit counters, correlation IDs) appear on every response, but OpenAPI 3.1 attaches headers per status code. `ResponseHeaderOnStatuses` declares one header across several declared statuses in a single call. It is available on both `RouteGroup` and the operation builder:
+
+```go
+rateLimited := []int{http.StatusOK, http.StatusBadRequest, http.StatusTooManyRequests}
+
+spec.Group().
+    ResponseHeaderOnStatuses("RateLimit", openapi.IntegerHeader("RFC 9331 rate limit"), rateLimited...).
+    ResponseHeaderOnStatuses("RateLimit-Policy", openapi.StringHeader("Rate limit policy"), rateLimited...)
+```
+
+The header is only attached to statuses the route actually declares (via `Response` or `ResponseContent`); other statuses are ignored. This differs from `DefaultResponseHeader`: OpenAPI's `default` response is a catch-all for undeclared statuses and does not propagate headers to declared ones.
 
 ### Response descriptions
 
@@ -278,6 +414,47 @@ spec.Op("listUsers").
     })
 ```
 
+#### Parameter constructors
+
+Parameter constructors collapse the common literal forms. The location follows from the constructor, path parameters are marked required automatically, and the schema is passed in (usually a [schema constructor](#schema-constructors)):
+
+```go
+spec.Op("listUsers").
+    Parameter(openapi.QueryParam("page", "Page number", openapi.IntegerSchema())).
+    Parameter(openapi.RequiredQueryParam("client_id", "RP identifier", openapi.StringSchema())).
+    Parameter(openapi.HeaderParam("X-Request-ID", "Request trace ID", openapi.StringSchema()))
+```
+
+| Constructor | Location (`In`) | Required |
+|-------------|-----------------|----------|
+| `QueryParam(name, description, schema)` | query | no |
+| `RequiredQueryParam(name, description, schema)` | query | yes |
+| `PathParam(name, description, schema)` | path | yes (always) |
+| `HeaderParam(name, description, schema)` | header | no |
+| `RequiredHeaderParam(name, description, schema)` | header | yes |
+| `CookieParam(name, description, schema)` | cookie | no |
+
+Each returns a `*openapi.Parameter`, so additional fields (`Deprecated`, `Example`, etc.) can still be set on the result before passing it to `Parameter`.
+
+#### Example sets
+
+A single inline example is set with `WithExample` on a schema. To document several named examples for one parameter, header, or media type, build them with `NewExample` (or `ExternalExample`) and attach the map with `WithExamples`:
+
+```go
+openapi.QueryParam("status", "Filter by status", openapi.StringSchema()).
+    WithExamples(map[string]*openapi.Example{
+        "active":   openapi.NewExample("Active items", "active"),
+        "archived": openapi.NewExample("Archived items", "archived").WithDescription("soft-deleted"),
+    })
+```
+
+| Builder | Use |
+|---------|-----|
+| `NewExample(summary, value)` | inline example value |
+| `ExternalExample(summary, url)` | reference an external value by URI |
+| `(*Example).WithDescription(desc)` | add a longer description |
+| `(*Parameter / *Header / *MediaType).WithExamples(map)` | attach the named example set |
+
 ### Path-level parameters
 
 Parameters shared across all operations under a path:
@@ -302,6 +479,34 @@ spec.AddSecurityScheme("bearerAuth", &openapi.SecurityScheme{
 spec.SetSecurity(openapi.SecurityRequirement{"bearerAuth": {}})
 ```
 
+### Security scheme constructors
+
+Constructors set the spec-determined field combinations for the common scheme types:
+
+```go
+spec.AddSecurityScheme("bearerAuth", openapi.BearerAuth("JWT"))
+spec.AddSecurityScheme("basicAuth", openapi.BasicAuth())
+spec.AddSecurityScheme("apiKey", openapi.APIKeyAuth(openapi.SecurityInHeader, "X-API-Key"))
+spec.AddSecurityScheme("oidc", openapi.OpenIDConnectAuth("https://idp.example.com/.well-known/openid-configuration"))
+```
+
+| Constructor | Type | Sets |
+|-------------|------|------|
+| `BearerAuth(bearerFormat)` | http | `Scheme: bearer`, `BearerFormat` (empty string omits it) |
+| `BasicAuth()` | http | `Scheme: basic` |
+| `APIKeyAuth(in, name)` | apiKey | `In`, `Name` |
+| `OpenIDConnectAuth(url)` | openIdConnect | `OpenIDConnectURL` |
+
+`RequireScheme(name, scopes...)` builds a `SecurityRequirement` for one scheme. Pass no scopes for schemes that do not use them (bearer, basic):
+
+```go
+spec.SetSecurity(openapi.RequireScheme("bearerAuth"))
+
+spec.Group().Security(openapi.RequireScheme("oauth2", "read:users", "write:users"))
+```
+
+OAuth2 schemes keep a struct literal because the `Flows` block dominates; validate a hand-built scheme before registering it (see [Validation](#validation)).
+
 Override security per operation. Call `Security()` with no arguments to mark an endpoint as public:
 
 ```go
@@ -309,6 +514,25 @@ spec.Route(r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)).
     Summary("Health check").
     Security()
 ```
+
+## Validation
+
+`Parameter` and `SecurityScheme` carry `Validate()` methods that report spec conformance for hand-built values. Validation is opt-in -- nothing calls it automatically -- and is most useful for guarding struct literals before registration. Values produced by the constructors above are valid by construction.
+
+```go
+oauth2Scheme := &openapi.SecurityScheme{
+    Type:  openapi.SecurityTypeOAuth2,
+    Flows: &openapi.OAuthFlows{ /* ... */ },
+}
+if err := oauth2Scheme.Validate(); err != nil {
+    log.Fatalf("invalid oauth2 security scheme: %v", err)
+}
+spec.AddSecurityScheme("oauth2", oauth2Scheme)
+```
+
+`(*Parameter).Validate` checks that `Name` is set, `In` is a valid location, and path parameters are required. `(*SecurityScheme).Validate` checks that `Type` is valid and the fields required for that type are present (apiKey needs `Name` + `In`, http needs `Scheme`, oauth2 needs `Flows`, openIdConnect needs `OpenIDConnectURL`).
+
+The permitted values are exported for reuse: `ValidParameterLocations`, `ValidSecuritySchemeTypes`, `ValidSecuritySchemeLocations`.
 
 ## Servers
 

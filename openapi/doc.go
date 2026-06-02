@@ -208,6 +208,75 @@
 //	    },
 //	})
 //
+// # Helper Constructors
+//
+// Constructors and chainable modifiers reduce the struct literals needed
+// for common schemas, parameters, headers, and security schemes. They are
+// additive: existing struct-literal usage continues to work.
+//
+// Schema constructors return a fresh *Schema; modifiers refine one and
+// return it for chaining:
+//
+//	openapi.StringSchema()
+//	openapi.IntegerSchema()
+//	openapi.EnumSchema("admin", "editor")
+//	openapi.ArraySchema(openapi.StringSchema())
+//	openapi.ObjectSchema()
+//	openapi.StringSchema().WithFormat(openapi.FormatUUID).WithDescription("ID")
+//	openapi.IntegerSchema().WithMinimum(1).WithMaximum(100)
+//	openapi.StringSchema().WithMinLength(3).WithPattern("^[a-z]+$")
+//	openapi.StringSchema().Nullable()
+//
+// Composition constructors build oneOf/anyOf/allOf/not schemas and
+// component references, with an optional discriminator for tagged unions:
+//
+//	openapi.OneOf(openapi.RefSchema("Cat"), openapi.RefSchema("Dog")).
+//	    WithDiscriminator("petType", nil)
+//	openapi.AllOf(openapi.RefSchema("Base"), openapi.ObjectSchema())
+//
+// Parameter and header constructors set the location and required flag
+// from the constructor (path parameters are always required):
+//
+//	openapi.QueryParam("page", "Page number", openapi.IntegerSchema())
+//	openapi.RequiredQueryParam("client_id", "RP identifier", openapi.StringSchema())
+//	openapi.PathParam("id", "User ID", openapi.StringSchema())
+//	openapi.IntegerHeader("Total number of users")
+//	openapi.HeaderOf("Content type", openapi.EnumSchema("application/json"))
+//
+// Named example sets attach to parameters, headers, and media types:
+//
+//	openapi.QueryParam("status", "", openapi.StringSchema()).
+//	    WithExamples(map[string]*openapi.Example{
+//	        "active": openapi.NewExample("Active", "active"),
+//	    })
+//
+// Security scheme constructors set the spec-determined field combinations;
+// RequireScheme builds a single-scheme SecurityRequirement:
+//
+//	spec.AddSecurityScheme("bearerAuth", openapi.BearerAuth("JWT"))
+//	spec.AddSecurityScheme("apiKey", openapi.APIKeyAuth(openapi.SecurityInHeader, "X-API-Key"))
+//	spec.SetSecurity(openapi.RequireScheme("bearerAuth"))
+//
+// Response presets declare several responses at once. ApplyJSONResponses
+// and StandardErrorResponses exist on both the operation builder and
+// RouteGroup; ResponseHeaderOnStatuses attaches one header across several
+// declared statuses:
+//
+//	spec.Op("token").
+//	    Response(http.StatusOK, TokenResponse{}).
+//	    StandardErrorResponses(ErrorResponse{})
+//
+//	spec.Group().
+//	    ResponseHeaderOnStatuses("RateLimit", openapi.IntegerHeader("limit"),
+//	        http.StatusOK, http.StatusTooManyRequests)
+//
+// Parameter and SecurityScheme carry opt-in Validate methods for guarding
+// hand-built values before registration:
+//
+//	if err := scheme.Validate(); err != nil {
+//	    log.Fatal(err)
+//	}
+//
 // # Media Types
 //
 // Request and Response are JSON shortcuts. Use RequestContent and

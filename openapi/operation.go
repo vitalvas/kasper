@@ -206,6 +206,24 @@ func (b *OperationBuilder) ResponseHeader(statusCode int, name string, h *Header
 	return b
 }
 
+// ResponseHeaderOnStatuses adds the same header to multiple declared
+// response status codes. Use this for headers emitted by middleware on
+// every response (e.g., RFC 9331 RateLimit, request-correlation IDs),
+// which OpenAPI 3.1 cannot express as a single declaration.
+//
+// The header is only attached to responses the operation actually
+// declares (via Response or ResponseContent); statuses not declared by
+// the operation are silently ignored. This matches the per-status
+// semantics of ResponseHeader.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#response-object (headers)
+func (b *OperationBuilder) ResponseHeaderOnStatuses(name string, h *Header, statuses ...int) *OperationBuilder {
+	for _, status := range statuses {
+		b = b.ResponseHeader(status, name, h)
+	}
+	return b
+}
+
 // ResponseLink adds a link to the response for the given HTTP status code.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#response-object (links)

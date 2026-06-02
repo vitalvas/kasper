@@ -1,10 +1,12 @@
 package openapi
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vitalvas/kasper/mux"
 )
 
 func TestOperationBuilder(t *testing.T) {
@@ -1079,4 +1081,26 @@ func TestResolveSchema(t *testing.T) {
 		assert.NotNil(t, resolveSchema(gen, Item{}))
 		assert.Contains(t, gen.Schemas(), "Item")
 	})
+}
+
+func TestOperationResponseHeaderOnStatuses(t *testing.T) {
+	spec := NewSpec(Info{Title: "T", Version: "1"})
+	router := mux.NewRouter()
+	r := router.NewRoute().Path("/x").Methods(http.MethodGet).Name("x")
+	spec.Group().Route(r).Summary("test").
+		ResponseHeaderOnStatuses("X-Request-Id",
+			StringHeader("Request correlation ID"),
+			http.StatusOK, http.StatusBadRequest).
+		Response(http.StatusOK, struct{}{}).
+		Response(http.StatusBadRequest, struct{}{})
+
+	doc := spec.Build(router)
+
+	op := doc.Paths["/x"].Get
+	require.NotNil(t, op)
+	for _, status := range []string{"200", "400"} {
+		resp := op.Responses[status]
+		require.NotNil(t, resp, "status %s missing", status)
+		require.NotNil(t, resp.Headers["X-Request-Id"], "X-Request-Id missing on %s", status)
+	}
 }
