@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/vitalvas/kasper/compare/v0.18.1...v0.18.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **mux:** reuse MIME content type constants across packages ([7ccb5ad](https://github.com/vitalvas/kasper/commit/7ccb5addd7ed09d794a01c006f89c8279ec8e2a6))
+
 ## [0.18.1](https://github.com/vitalvas/kasper/compare/v0.18.0...v0.18.1) (2026-06-02)
 
 
