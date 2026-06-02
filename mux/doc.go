@@ -414,6 +414,15 @@
 //	    Headers:     map[string]string{"Cache-Control": "no-store"},
 //	})
 //
+// Both write compact output by default. Set Indent to indent the encoded body
+// (ResponseJSON and ResponseXML); for XML, set XMLProlog to the declaration
+// string (for example xml.Header):
+//
+//	mux.ResponseXML(w, http.StatusOK, doc, mux.ResponseConfig{
+//	    XMLProlog: xml.Header,
+//	    Indent:    "  ",
+//	})
+//
 // # HTML Template Responses
 //
 // SetTemplates registers parsed templates for use by ResponseHTML.

@@ -128,6 +128,18 @@ type ResponseConfig struct {
 	// value. The Content-Type header is always controlled by ContentType
 	// and cannot be overridden here.
 	Headers map[string]string
+
+	// XMLProlog is the XML declaration ResponseXML prepends before the
+	// encoded body (for example xml.Header). Ignored by the JSON and HTML
+	// helpers. Defaults to empty, which preserves the encoder's prolog-less
+	// output.
+	XMLProlog string
+
+	// Indent sets the per-element indentation used by ResponseJSON and
+	// ResponseXML. When non-empty, the body is encoded with an empty prefix
+	// and this string (for example "  " for two spaces). Ignored by the HTML
+	// helpers. Defaults to empty, which produces compact output.
+	Indent string
 }
 
 // ResponseJSON encodes v as JSON and writes it to the response with the given
@@ -137,7 +149,12 @@ type ResponseConfig struct {
 // instead.
 func ResponseJSON(w http.ResponseWriter, code int, v any, config ...ResponseConfig) {
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+	enc := json.NewEncoder(&buf)
+	if len(config) > 0 && config[0].Indent != "" {
+		enc.SetIndent("", config[0].Indent)
+	}
+
+	if err := enc.Encode(v); err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -152,7 +169,16 @@ func ResponseJSON(w http.ResponseWriter, code int, v any, config ...ResponseConf
 // instead.
 func ResponseXML(w http.ResponseWriter, code int, v any, config ...ResponseConfig) {
 	var buf bytes.Buffer
-	if err := xml.NewEncoder(&buf).Encode(v); err != nil {
+	if len(config) > 0 && config[0].XMLProlog != "" {
+		buf.WriteString(config[0].XMLProlog)
+	}
+
+	enc := xml.NewEncoder(&buf)
+	if len(config) > 0 && config[0].Indent != "" {
+		enc.Indent("", config[0].Indent)
+	}
+
+	if err := enc.Encode(v); err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}

@@ -879,6 +879,17 @@ r.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 |-------|------|-------------|
 | `ContentType` | `string` | Overrides the default `Content-Type`. Empty uses the helper's default. |
 | `Headers` | `map[string]string` | Extra response headers set before the body is written. |
+| `Indent` | `string` | `ResponseJSON` and `ResponseXML`. Per-element indentation (for example `"  "`). Empty produces compact output. |
+| `XMLProlog` | `string` | `ResponseXML` only. XML declaration prepended before the body (for example `xml.Header`). Empty emits no prolog. |
+
+By default `ResponseXML` writes compact output with no prolog, matching `ResponseJSON`. Opt into the declaration and indentation per call:
+
+```go
+mux.ResponseXML(w, http.StatusOK, doc, mux.ResponseConfig{
+    XMLProlog: xml.Header,
+    Indent:    "  ",
+})
+```
 
 ### HTML Template Responses
 

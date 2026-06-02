@@ -2,6 +2,7 @@ package mux
 
 import (
 	"encoding/xml"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -105,6 +106,15 @@ func TestResponseJSON(t *testing.T) {
 			wantCT:     "application/jwt",
 			wantBody:   `{"name":"test","value":42}`,
 			jsonEq:     true,
+		},
+		{
+			name:       "indents output",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{Indent: "  "},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/json",
+			wantBody:   "{\n  \"name\": \"test\",\n  \"value\": 42\n}\n",
 		},
 	}
 
@@ -363,6 +373,7 @@ func TestResponseXML(t *testing.T) {
 		wantCT       string
 		wantNotCT    string
 		wantContains []string
+		wantBody     string
 		wantHeaders  map[string]string
 	}{
 		{
@@ -431,6 +442,33 @@ func TestResponseXML(t *testing.T) {
 			},
 			wantHeaders: map[string]string{"X-Custom": "abc"},
 		},
+		{
+			name:       "emits XML prolog",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{XMLProlog: xml.Header},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/xml",
+			wantBody:   fmt.Sprintf("%s<item><name>test</name><value>42</value></item>", xml.Header),
+		},
+		{
+			name:       "indents output",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{Indent: "  "},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/xml",
+			wantBody:   "<item>\n  <name>test</name>\n  <value>42</value>\n</item>",
+		},
+		{
+			name:       "emits prolog and indents together",
+			status:     http.StatusOK,
+			data:       item{Name: "test", Value: 42},
+			config:     &ResponseConfig{XMLProlog: xml.Header, Indent: "  "},
+			wantStatus: http.StatusOK,
+			wantCT:     "application/xml",
+			wantBody:   fmt.Sprintf("%s<item>\n  <name>test</name>\n  <value>42</value>\n</item>", xml.Header),
+		},
 	}
 
 	for _, tt := range tests {
@@ -451,6 +489,9 @@ func TestResponseXML(t *testing.T) {
 			}
 			for _, s := range tt.wantContains {
 				assert.Contains(t, w.Body.String(), s)
+			}
+			if tt.wantBody != "" {
+				assert.Equal(t, tt.wantBody, w.Body.String())
 			}
 			for k, v := range tt.wantHeaders {
 				assert.Equal(t, v, w.Header().Get(k))
