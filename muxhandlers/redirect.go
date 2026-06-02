@@ -161,7 +161,7 @@ func writeRedirect(w http.ResponseWriter, _ *http.Request, url string, statusCod
 	})
 
 	w.Header().Set("Location", url)
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", mux.ContentTypeTextHTML)
 	w.WriteHeader(statusCode)
 	w.Write(buf.Bytes()) //nolint:errcheck
 }

@@ -654,8 +654,8 @@ func submittedToken(r *http.Request, rc *resolvedConfig) (string, error) {
 	ctype := r.Header.Get("Content-Type")
 	// Only attempt form parsing for form-encoded bodies; do not consume
 	// JSON or other bodies, which would interfere with downstream handlers.
-	if strings.HasPrefix(ctype, "application/x-www-form-urlencoded") ||
-		strings.HasPrefix(ctype, "multipart/form-data") {
+	if strings.HasPrefix(ctype, mux.ContentTypeApplicationFormURLEncoded) ||
+		strings.HasPrefix(ctype, mux.ContentTypeMultipartFormData) {
 		if err := r.ParseForm(); err == nil {
 			if v := r.PostForm.Get(rc.formFieldName); v != "" {
 				return unmaskOrEmpty(v)

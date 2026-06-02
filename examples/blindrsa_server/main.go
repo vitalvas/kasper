@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -57,7 +56,7 @@ func main() {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/x-pem-file")
+		w.Header().Set("Content-Type", mux.ContentTypeApplicationXPEMFile)
 		pem.Encode(w, &pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
 	}).Methods(http.MethodGet)
 
@@ -78,8 +77,7 @@ func main() {
 
 		redeemed.add(sig)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		mux.ResponseJSON(w, http.StatusOK, map[string]string{
 			"status": "ok",
 			"data":   "this is protected content served anonymously",
 		})

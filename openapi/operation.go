@@ -376,8 +376,8 @@ func mergeParameters(auto, custom []*Parameter) []*Parameter {
 // isFormContentType reports whether the content type is a form encoding
 // that uses "form" struct tags for field names.
 func isFormContentType(ct string) bool {
-	return strings.HasPrefix(ct, "multipart/form-data") ||
-		strings.HasPrefix(ct, "application/x-www-form-urlencoded")
+	return strings.HasPrefix(ct, mux.ContentTypeMultipartFormData) ||
+		strings.HasPrefix(ct, mux.ContentTypeApplicationFormURLEncoded)
 }
 
 // resolveSchema returns a Schema for the given body value. If body is a

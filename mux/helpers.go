@@ -250,7 +250,7 @@ var defaultNotFoundHandler http.Handler = http.HandlerFunc(defaultNotFound)
 func defaultNotFound(w http.ResponseWriter, _ *http.Request) {
 	h := w.Header()
 	delete(h, "Content-Length")
-	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("Content-Type", ContentTypeTextPlainUTF8)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNotFound)

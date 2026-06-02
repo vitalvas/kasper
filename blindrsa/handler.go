@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/vitalvas/kasper/mux"
 )
 
 const defaultMaxBodySize = 4096
@@ -73,7 +75,7 @@ func IssueHandler(cfg IssuerConfig) (http.Handler, error) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", mux.ContentTypeApplicationOctetStream)
 		w.WriteHeader(http.StatusOK)
 		w.Write(blindSig)
 	}), nil

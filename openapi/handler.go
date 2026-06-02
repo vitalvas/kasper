@@ -282,7 +282,7 @@ func (s *Spec) registerDocs(r *mux.Router, basePath string, cfg *HandleConfig, s
 			}
 			data = []byte(page)
 		})
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", mux.ContentTypeTextHTMLUTF8)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 	}

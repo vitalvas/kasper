@@ -112,7 +112,7 @@ func writeDefaultMaintenanceResponse(w http.ResponseWriter, statusCode int) {
 		body = http.StatusText(http.StatusServiceUnavailable)
 	}
 	h := w.Header()
-	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("Content-Type", mux.ContentTypeTextPlainUTF8)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(statusCode)

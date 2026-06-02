@@ -180,7 +180,7 @@ func writeDrainResponse(w http.ResponseWriter, r *http.Request, response http.Ha
 	if body == "" {
 		body = http.StatusText(http.StatusServiceUnavailable)
 	}
-	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("Content-Type", mux.ContentTypeTextPlainUTF8)
 	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(statusCode)
 	_, _ = w.Write([]byte(body))

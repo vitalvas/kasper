@@ -288,10 +288,10 @@ func main() {
 		Tags("users").
 		Security(openapi.SecurityRequirement{"oauth2": {"read:users", "write:users"}}).
 		Response(http.StatusForbidden, ErrorResponse{}).
-		ResponseContent(http.StatusForbidden, "application/xml", ErrorResponse{}).
+		ResponseContent(http.StatusForbidden, mux.ContentTypeApplicationXML, ErrorResponse{}).
 		ResponseDescription(http.StatusForbidden, "Insufficient permissions").
 		Response(http.StatusNotFound, ErrorResponse{}).
-		ResponseContent(http.StatusNotFound, "application/xml", ErrorResponse{}).
+		ResponseContent(http.StatusNotFound, mux.ContentTypeApplicationXML, ErrorResponse{}).
 		ResponseDescription(http.StatusNotFound, "User not found").
 		DefaultResponse(ErrorResponse{}).
 		DefaultResponseDescription("Unexpected error").
@@ -332,7 +332,7 @@ func main() {
 		OperationID("createUser").
 		Summary("Create user").
 		Request(CreateUserRequest{}).
-		RequestContent("application/xml", CreateUserRequest{}).
+		RequestContent(mux.ContentTypeApplicationXML, CreateUserRequest{}).
 		RequestDescription("User account to create").
 		Response(http.StatusCreated, ResponseData[User]{}).
 		ResponseDescription(http.StatusCreated, "The newly created user").
@@ -350,7 +350,7 @@ func main() {
 		OperationID("getUser").
 		Summary("Get user by ID").
 		Response(http.StatusOK, ResponseData[User]{}).
-		ResponseContent(http.StatusOK, "application/xml", ResponseData[User]{})
+		ResponseContent(http.StatusOK, mux.ContentTypeApplicationXML, ResponseData[User]{})
 
 	// Update user: optional request body (RequestRequired=false),
 	// response wrapped in ResponseData. 403 and 404 inherited from group.
@@ -373,8 +373,8 @@ func main() {
 		Summary("Export users").
 		Description("Returns users in JSON, XML, or CSV based on Accept header.").
 		Response(http.StatusOK, []User{}).
-		ResponseContent(http.StatusOK, "application/xml", []User{}).
-		ResponseContent(http.StatusOK, "text/csv", &openapi.Schema{
+		ResponseContent(http.StatusOK, mux.ContentTypeApplicationXML, []User{}).
+		ResponseContent(http.StatusOK, mux.ContentTypeTextCSV, &openapi.Schema{
 			Type: openapi.TypeString("string"),
 		})
 
@@ -397,7 +397,7 @@ func main() {
 	files.Route(api.HandleFunc("/files", uploadFile).Methods(http.MethodPost)).
 		OperationID("uploadFile").
 		Summary("Upload file").
-		RequestContent("multipart/form-data", FileUploadForm{}).
+		RequestContent(mux.ContentTypeMultipartFormData, FileUploadForm{}).
 		RequestDescription("File with optional metadata").
 		Response(http.StatusCreated, FileMetadata{})
 
@@ -411,7 +411,7 @@ func main() {
 	files.Route(api.HandleFunc("/files/{id:uuid}", downloadFile).Methods(http.MethodGet)).
 		OperationID("downloadFile").
 		Summary("Download file").
-		ResponseContent(http.StatusOK, "application/octet-stream", &openapi.Schema{
+		ResponseContent(http.StatusOK, mux.ContentTypeApplicationOctetStream, &openapi.Schema{
 			Type: openapi.TypeString("string"), Format: "binary",
 		}).
 		ResponseHeader(http.StatusOK, "Content-Disposition", &openapi.Header{
@@ -429,7 +429,7 @@ func main() {
 				RequestBody: &openapi.RequestBody{
 					Required: true,
 					Content: map[string]*openapi.MediaType{
-						"application/json": {
+						mux.ContentTypeApplicationJSON: {
 							Schema: &openapi.Schema{Ref: "#/components/schemas/UserEvent"},
 						},
 					},

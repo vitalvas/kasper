@@ -12,13 +12,13 @@ import (
 // Patch content type constants for the supported PATCH formats.
 const (
 	// PatchTypeJSON is the implicit merge patch using standard JSON.
-	PatchTypeJSON = "application/json"
+	PatchTypeJSON = mux.ContentTypeApplicationJSON
 
 	// PatchTypeMergePatch is the JSON Merge Patch format per RFC 7396.
-	PatchTypeMergePatch = "application/merge-patch+json"
+	PatchTypeMergePatch = mux.ContentTypeApplicationMergePatchJSON
 
 	// PatchTypeJSONPatch is the JSON Patch format per RFC 6902.
-	PatchTypeJSONPatch = "application/json-patch+json"
+	PatchTypeJSONPatch = mux.ContentTypeApplicationJSONPatchJSON
 )
 
 // patchTypeCtxKey is the context key for the resolved patch content type.

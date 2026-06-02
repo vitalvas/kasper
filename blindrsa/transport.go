@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/vitalvas/kasper/mux"
 )
 
 // ClientConfig configures the blind signature client.
@@ -93,7 +95,7 @@ func (c *Client) ObtainSignature(ctx context.Context, msg []byte) (sig []byte, s
 		return nil, nil, fmt.Errorf("%w: %s", ErrBlindingFailed, err)
 	}
 
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", mux.ContentTypeApplicationOctetStream)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
