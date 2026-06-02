@@ -851,13 +851,14 @@ mw, err := muxhandlers.IdempotencyMiddleware(muxhandlers.IdempotencyConfig{
 [RFC 9110 Section 12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1).
 It parses the `Accept` header with quality values, selects the best matching
 type from the offered list, and stores the result in the request context.
-Returns 406 Not Acceptable when no match is found.
+When the offered list is empty, every media type is accepted and the
+negotiated type is `*/*`. Returns 406 Not Acceptable when no match is found.
 
 ### ContentNegotiationConfig
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Offered` | `[]string` | Media types the server can produce, in preference order; empty = accept all |
+| `Offered` | `[]string` | Media types the server can produce, in preference order; empty = accept all and report `*/*` |
 
 ### ContentNegotiation Usage
 
@@ -1794,4 +1795,102 @@ mw := muxhandlers.HTCPCPMiddleware(muxhandlers.HTCPCPConfig{
 })
 
 r.Use(mw)
+```
+
+## Health Handler
+
+`HealthHandler` serves kubelet-style liveness and readiness probes. An
+empty config yields a liveness-only handler that always returns
+`200 OK` once the process is up. Populating `Checks` turns it into a
+readiness probe that pings each named dependency and returns
+`503 Service Unavailable`
+([RFC 9110 Section 15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4))
+with the failing check name(s) and reason when any check fails. Checks
+run in parallel, so the slowest dependency dominates the wall-clock
+cost rather than the sum. A per-check `Timeout` caps how long the
+handler waits for each probe so a hung dependency does not stall
+scraping.
+
+The handler answers `GET` and `HEAD`; other methods return
+`405 Method Not Allowed` with the `Allow` header set per
+[RFC 9110 Section 15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6).
+A client sending `Accept: application/json` receives a structured
+`HealthReport` body instead of plain text; selection uses the same
+RFC 9110 proactive negotiation as `ContentNegotiationMiddleware`, so
+quality values are honored, unsupported media types return
+`406 Not Acceptable`, and the response carries `Vary: Accept`. The
+handler sets `Cache-Control: no-store` and
+`X-Content-Type-Options: nosniff`.
+
+A check that panics is treated as a failed check (`503` with the panic
+value as its reason) rather than crashing the process; `RecoveryMiddleware`
+wraps the request handler, not the per-check goroutines, so the guard is
+built into the handler.
+
+Check names are normalized once at construction: an empty `Name` becomes
+`check-<index>` and duplicate names are suffixed `#2`, `#3`, ... in
+declaration order, so no check is dropped from the JSON map or rendered
+as a nameless text line. A `nil` `Check` is reported as a failed check
+(`check not configured`) instead of panicking. Multi-line error strings
+are collapsed onto a single line in the plain-text body so a
+line-oriented scraper cannot mistake a continuation for a separate
+check; the JSON body escapes them natively.
+
+Each check runs in its own goroutine and is monitored for the duration of
+the request, bounded by `Timeout`. Checks should honor the context they
+are given so underlying dependency calls stop promptly too: a check that
+overruns its timeout but ignores `ctx` can keep its goroutine running
+until the underlying call returns, even though the handler has already
+reported the timeout. There is no separate global deadline - because
+checks run in parallel, the handler's wall-clock cost is the single
+slowest check, bounded by `Timeout` when configured.
+
+### HealthCheck
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Name` | `string` | Short lowercase token identifying the check in the response (e.g. `db`, `redis`, `upstream-idp`) |
+| `Check` | `func(ctx context.Context) error` | Probe invoked per request; return `nil` for healthy, error for degraded. Respect `ctx` for the dependency call's timeout |
+
+### HealthConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Checks` | `[]HealthCheck` | Per-request probes; empty = liveness-only handler that always returns 200 |
+| `Timeout` | `time.Duration` | Caps the time the handler waits for a single check; zero = no per-check cap |
+| `OKBody` | `string` | Success body; defaults to `"ok\n"`. Ignored for the JSON variant |
+| `IncludeNames` | `bool` | When true, lists the passed check names in the plain-text 200 body |
+
+### HealthReport
+
+The JSON body emitted when the client sends `Accept: application/json`.
+Exported so consumers can register it as a response schema with the
+`openapi` package.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Status` | `string` | `ok` when all checks pass, `degraded` otherwise |
+| `Checks` | `map[string]HealthCheckReport` | Per-check status keyed by name; omitted for liveness-only |
+
+`HealthCheckReport` has a `Status` (`ok` or `fail`) and an `Error`
+string populated on failure.
+
+### Liveness Usage
+
+```go
+r := mux.NewRouter()
+
+r.Handle("/healthz", muxhandlers.HealthHandler(muxhandlers.HealthConfig{}))
+```
+
+### Readiness Usage
+
+```go
+r.Handle("/readyz", muxhandlers.HealthHandler(muxhandlers.HealthConfig{
+    Checks: []muxhandlers.HealthCheck{
+        {Name: "db", Check: store.Ping},
+        {Name: "redis", Check: cache.Ping},
+    },
+    Timeout: 2 * time.Second,
+}))
 ```

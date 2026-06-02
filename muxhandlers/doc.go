@@ -310,8 +310,9 @@
 // RFC 9110 Section 12.5.1. It parses the Accept header with quality values,
 // selects the best matching type from the offered list, and stores the result
 // in the request context. Use NegotiatedType to retrieve the selected type
-// inside a handler. When Offered is empty, any media type is accepted.
-// When no offered type matches, the middleware responds with 406 Not Acceptable.
+// inside a handler. When Offered is empty, any media type is accepted and
+// NegotiatedType reports "*/*". When no offered type matches, the middleware
+// responds with 406 Not Acceptable.
 //
 //	r.Use(muxhandlers.ContentNegotiationMiddleware(muxhandlers.ContentNegotiationConfig{
 //	    Offered: []string{"application/json", "application/xml", "text/html"},
@@ -564,4 +565,26 @@
 //	    }))
 //	    pot.HandleFunc("/", potStatusHandler)
 //	})
+//
+// # Health Handler
+//
+// HealthHandler serves kubelet-style liveness and readiness probes. An
+// empty config yields a liveness-only handler that always returns 200;
+// populating Checks turns it into a readiness probe that returns 503
+// with the failing check name(s) and reason when any check fails. Checks
+// run in parallel and may be capped by a per-check Timeout; a check that
+// panics is reported as a failed check rather than crashing the process.
+// The handler answers GET and HEAD; other methods return 405. A client
+// sending Accept: application/json receives a structured HealthReport
+// instead of the plain-text body, unsupported media types return 406, and
+// negotiated responses carry Vary: Accept.
+//
+//	r.Handle("/healthz", muxhandlers.HealthHandler(muxhandlers.HealthConfig{}))
+//
+//	r.Handle("/readyz", muxhandlers.HealthHandler(muxhandlers.HealthConfig{
+//	    Checks: []muxhandlers.HealthCheck{
+//	        {Name: "db", Check: store.Ping},
+//	    },
+//	    Timeout: 2 * time.Second,
+//	}))
 package muxhandlers

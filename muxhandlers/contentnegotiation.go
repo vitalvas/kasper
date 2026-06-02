@@ -17,8 +17,8 @@ type negotiatedTypeCtxKey struct{}
 // Spec reference: https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1
 type ContentNegotiationConfig struct {
 	// Offered is the list of media types the server can produce, in
-	// preference order. When empty, any media type from the Accept header
-	// is accepted and the best match is stored in context.
+	// preference order. When empty, any media type is accepted and
+	// NegotiatedType reports "*/*".
 	// Examples: "application/json", "application/xml", "text/html".
 	Offered []string
 }
@@ -28,9 +28,8 @@ type ContentNegotiationConfig struct {
 // header, selects the best matching type from the offered list, and stores
 // the result in the request context (retrievable via NegotiatedType).
 //
-// When Offered is empty, any media type is accepted: the highest quality
-// type from the Accept header is stored in context, and requests always
-// pass through.
+// When Offered is empty, the middleware accepts any media type and stores
+// "*/*" in context; requests always pass through.
 //
 // When the Accept header is absent or empty, the first offered type is
 // selected per RFC 9110 Section 12.5.1 ("A request without any Accept
@@ -39,7 +38,8 @@ type ContentNegotiationConfig struct {
 // When no offered type matches the Accept header, the middleware responds
 // with 406 Not Acceptable per RFC 9110 Section 15.5.7.
 func ContentNegotiationMiddleware(cfg ContentNegotiationConfig) mux.MiddlewareFunc {
-	if len(cfg.Offered) == 0 {
+	acceptAny := len(cfg.Offered) == 0
+	if acceptAny {
 		cfg.Offered = []string{"*/*"}
 	}
 
@@ -59,8 +59,12 @@ func ContentNegotiationMiddleware(cfg ContentNegotiationConfig) mux.MiddlewareFu
 			accept := r.Header.Get("Accept")
 			selected := negotiate(accept, offered)
 			if selected == "" {
-				http.Error(w, http.StatusText(http.StatusNotAcceptable), http.StatusNotAcceptable)
-				return
+				if acceptAny {
+					selected = "*/*"
+				} else {
+					http.Error(w, http.StatusText(http.StatusNotAcceptable), http.StatusNotAcceptable)
+					return
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), negotiatedTypeCtxKey{}, selected)
@@ -200,10 +204,6 @@ func matchAccept(offered string, ranges []acceptRange) (float64, int) {
 	bestSpecificity := -1
 
 	for _, r := range ranges {
-		if r.quality == 0 {
-			continue
-		}
-
 		matched := false
 		switch {
 		case r.mainType == "*" && r.subType == "*":

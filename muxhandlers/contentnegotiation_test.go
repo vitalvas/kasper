@@ -85,6 +85,19 @@ func TestContentNegotiationMiddleware(t *testing.T) {
 			wantCode: http.StatusNotAcceptable,
 		},
 		{
+			name:     "q=0 exact match excludes type despite wildcard",
+			offered:  []string{"application/json"},
+			accept:   "application/json;q=0, */*;q=1",
+			wantCode: http.StatusNotAcceptable,
+		},
+		{
+			name:         "q=0 exact match allows another wildcard match",
+			offered:      []string{"application/json", "text/html"},
+			accept:       "application/json;q=0, */*;q=1",
+			wantCode:     http.StatusOK,
+			wantSelected: "text/html",
+		},
+		{
 			name:         "case insensitive matching",
 			offered:      []string{"application/json"},
 			accept:       "Application/JSON",
@@ -188,6 +201,24 @@ func TestContentNegotiationAcceptAll(t *testing.T) {
 		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("empty offered preserves accept-any contract with q=0 exclusions", func(t *testing.T) {
+		mw := ContentNegotiationMiddleware(ContentNegotiationConfig{})
+
+		var selected string
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			selected = NegotiatedType(r)
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Accept", "application/json;q=0, */*;q=1")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "*/*", selected)
 	})
 }
 
