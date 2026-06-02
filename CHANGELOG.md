@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/vitalvas/kasper/compare/v0.17.0...v0.18.0) (2026-06-02)
+
+
+### Features
+
+* **mux:** add ResponseConfig for custom content type and headers ([9672b9c](https://github.com/vitalvas/kasper/commit/9672b9cfe198c8365ba0e8f25461543493f5dcdc))
+
 ## [0.17.0](https://github.com/vitalvas/kasper/compare/v0.16.0...v0.17.0) (2026-05-20)
 
 
