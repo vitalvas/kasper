@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/vitalvas/kasper/compare/v0.18.0...v0.18.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* **mux:** support XML prolog and shared JSON/XML indent in ResponseConfig ([65a637a](https://github.com/vitalvas/kasper/commit/65a637ae2eee0c8eb98b23de472a73ac8b113cf9))
+
 ## [0.18.0](https://github.com/vitalvas/kasper/compare/v0.17.0...v0.18.0) (2026-06-02)
 
 
