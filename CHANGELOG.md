@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/vitalvas/kasper/compare/v0.19.0...v0.20.0) (2026-06-02)
+
+
+### Features
+
+* **muxhandlers:** add Health handler and fix content negotiation q=0 exclusion ([123a900](https://github.com/vitalvas/kasper/commit/123a900c020d170e363715387834ad5b9970d111))
+
 ## [0.19.0](https://github.com/vitalvas/kasper/compare/v0.18.2...v0.19.0) (2026-06-02)
 
 
