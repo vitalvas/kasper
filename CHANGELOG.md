@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0](https://github.com/vitalvas/kasper/compare/v0.18.2...v0.19.0) (2026-06-02)
+
+
+### Features
+
+* **openapi:** add constructor, modifier, composition, and validation helpers ([f75ef3a](https://github.com/vitalvas/kasper/commit/f75ef3a7756535b1f1d99e86d4e870caa8a6559b))
+
+
+### Bug Fixes
+
+* **openapi:** accept mutualTLS security schemes ([7ecf15c](https://github.com/vitalvas/kasper/commit/7ecf15caaf260b3de585cc8c1b9933816240a51b))
+
 ## [0.18.2](https://github.com/vitalvas/kasper/compare/v0.18.1...v0.18.2) (2026-06-02)
 
 
