@@ -13,8 +13,8 @@ func NewExample(summary string, value any) *Example {
 }
 
 // ExternalExample returns an Example that references an external value by
-// URI instead of embedding it. summary and externalValue are mutually
-// exclusive with an inline Value per the specification.
+// URI instead of embedding it. ExternalValue and an inline Value are
+// mutually exclusive per the specification.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#example-object
 func ExternalExample(summary, externalValue string) *Example {

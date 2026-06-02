@@ -530,7 +530,7 @@ if err := oauth2Scheme.Validate(); err != nil {
 spec.AddSecurityScheme("oauth2", oauth2Scheme)
 ```
 
-`(*Parameter).Validate` checks that `Name` is set, `In` is a valid location, and path parameters are required. `(*SecurityScheme).Validate` checks that `Type` is valid and the fields required for that type are present (apiKey needs `Name` + `In`, http needs `Scheme`, oauth2 needs `Flows`, openIdConnect needs `OpenIDConnectURL`).
+`(*Parameter).Validate` checks that `Name` is set, `In` is a valid location, and path parameters are required. `(*SecurityScheme).Validate` checks that `Type` is valid and the fields required for that type are present (apiKey needs `Name` + `In`, http needs `Scheme`, mutualTLS has no additional required fields, oauth2 needs `Flows`, openIdConnect needs `OpenIDConnectURL`).
 
 The permitted values are exported for reuse: `ValidParameterLocations`, `ValidSecuritySchemeTypes`, `ValidSecuritySchemeLocations`.
 

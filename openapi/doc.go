@@ -241,7 +241,7 @@
 //	openapi.RequiredQueryParam("client_id", "RP identifier", openapi.StringSchema())
 //	openapi.PathParam("id", "User ID", openapi.StringSchema())
 //	openapi.IntegerHeader("Total number of users")
-//	openapi.HeaderOf("Content type", openapi.EnumSchema("application/json"))
+//	openapi.HeaderOf("Fetch destination", openapi.EnumSchema("document", "script"))
 //
 // Named example sets attach to parameters, headers, and media types:
 //

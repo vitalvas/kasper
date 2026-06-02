@@ -48,6 +48,11 @@ func TestSecuritySchemeValidate(t *testing.T) {
 		require.NoError(t, APIKeyAuth(SecurityInHeader, "X-API-Key").Validate())
 	})
 
+	t.Run("valid mutualTLS", func(t *testing.T) {
+		s := &SecurityScheme{Type: SecurityTypeMutualTLS}
+		require.NoError(t, s.Validate())
+	})
+
 	t.Run("valid openIdConnect", func(t *testing.T) {
 		require.NoError(t, OpenIDConnectAuth("https://idp.example.com").Validate())
 	})
@@ -58,7 +63,7 @@ func TestSecuritySchemeValidate(t *testing.T) {
 	})
 
 	t.Run("invalid type", func(t *testing.T) {
-		err := (&SecurityScheme{Type: "mutualTLS"}).Validate()
+		err := (&SecurityScheme{Type: "negotiate"}).Validate()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid security scheme type")
 	})

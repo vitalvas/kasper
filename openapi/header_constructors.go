@@ -24,7 +24,7 @@ func IntegerHeader(description string) *Header {
 
 // HeaderOf returns a Header with the given schema and description.
 // Use this for non-primitive header schemas (e.g., enum-constrained
-// Content-Type values).
+// custom header values).
 //
 // See: https://spec.openapis.org/oas/v3.1.0#header-object
 func HeaderOf(description string, schema *Schema) *Header {

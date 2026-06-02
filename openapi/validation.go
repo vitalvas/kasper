@@ -22,6 +22,7 @@ var ValidParameterLocations = []string{
 var ValidSecuritySchemeTypes = []string{
 	SecurityTypeHTTP,
 	SecurityTypeAPIKey,
+	SecurityTypeMutualTLS,
 	SecurityTypeOAuth2,
 	SecurityTypeOpenIDConnect,
 }
@@ -77,6 +78,7 @@ func (s *SecurityScheme) Validate() error {
 		if s.Scheme == "" {
 			return fmt.Errorf("openapi: http security scheme must set scheme")
 		}
+	case SecurityTypeMutualTLS:
 	case SecurityTypeOAuth2:
 		if s.Flows == nil {
 			return fmt.Errorf("openapi: oauth2 security scheme must set flows")

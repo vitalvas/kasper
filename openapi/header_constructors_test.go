@@ -19,8 +19,8 @@ func TestHeaderConstructors(t *testing.T) {
 	})
 
 	t.Run("HeaderOf uses caller-supplied schema", func(t *testing.T) {
-		h := HeaderOf("Content type", EnumSchema("application/json", "application/jwt"))
+		h := HeaderOf("Fetch destination", EnumSchema("document", "script"))
 		assert.Equal(t, SchemaTypeString, h.Schema.Type)
-		assert.Equal(t, []any{"application/json", "application/jwt"}, h.Schema.Enum)
+		assert.Equal(t, []any{"document", "script"}, h.Schema.Enum)
 	})
 }

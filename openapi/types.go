@@ -203,6 +203,7 @@ const (
 const (
 	SecurityTypeHTTP          = "http"
 	SecurityTypeAPIKey        = "apiKey"
+	SecurityTypeMutualTLS     = "mutualTLS"
 	SecurityTypeOAuth2        = "oauth2"
 	SecurityTypeOpenIDConnect = "openIdConnect"
 )
