@@ -34,8 +34,9 @@ func NewTransport(base http.RoundTripper, cfg ClientConfig) *Transport {
 // RoundTrip encrypts the request, delegates to the base transport, then
 // decrypts the response. The original request is cloned before encryption.
 // When the response is an RFC 9457 Problem Details error (non-success status
-// with application/problem+json), it is returned undecrypted so the caller
-// can inspect the protocol error.
+// with application/problem+json), it is returned undecrypted so the caller can
+// inspect the protocol error, since e2ee error responses are sent in plaintext
+// (draft-vasylenko-e2ee-http Sections 9, 11.6).
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 

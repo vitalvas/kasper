@@ -12,38 +12,48 @@ import (
 	"strings"
 )
 
-// AEAD identifies an AES-GCM cipher suite per the draft. The associated key
-// length is fixed by the suite.
+// AEAD identifies an AES-GCM cipher suite.
+//
+// Spec: draft-vasylenko-e2ee-http Section 5 (AEAD Identifiers). The associated
+// key length is fixed by the suite; all suites use 12-octet nonces and
+// 16-octet tags.
 type AEAD string
 
 const (
-	// AEADAES128GCM is AES-128-GCM (16-byte key). Mandatory to implement.
+	// AEADAES128GCM is AES-128-GCM (16-byte key). Mandatory to implement
+	// (draft-vasylenko-e2ee-http Section 5).
 	AEADAES128GCM AEAD = "AES-128-GCM"
 
-	// AEADAES192GCM is AES-192-GCM (24-byte key). Optional.
+	// AEADAES192GCM is AES-192-GCM (24-byte key). Optional
+	// (draft-vasylenko-e2ee-http Section 5).
 	AEADAES192GCM AEAD = "AES-192-GCM"
 
-	// AEADAES256GCM is AES-256-GCM (32-byte key). Mandatory to implement.
+	// AEADAES256GCM is AES-256-GCM (32-byte key). Mandatory to implement
+	// (draft-vasylenko-e2ee-http Section 5).
 	AEADAES256GCM AEAD = "AES-256-GCM"
 )
 
-// Fixed sizes defined by the draft.
+// Fixed sizes defined by draft-vasylenko-e2ee-http.
 const (
-	// keySize is the X25519 public/private key length in bytes.
+	// keySize is the X25519 public/private key length in bytes
+	// (RFC 7748; draft-vasylenko-e2ee-http Section 6.2).
 	keySize = 32
 
-	// nonceSize is the AES-GCM nonce length in bytes.
+	// nonceSize is the AES-GCM nonce length in bytes
+	// (draft-vasylenko-e2ee-http Section 7.2).
 	nonceSize = 12
 
-	// tagSize is the AES-GCM authentication tag length in bytes.
+	// tagSize is the AES-GCM authentication tag length in bytes
+	// (draft-vasylenko-e2ee-http Section 7.2).
 	tagSize = 16
 
 	// minBodySize is the minimum protected body length: nonce + empty
-	// ciphertext + tag.
+	// ciphertext + tag. Recipients reject shorter bodies
+	// (draft-vasylenko-e2ee-http Section 7.2).
 	minBodySize = nonceSize + tagSize
 
 	// fingerprintSize is the number of leading SHA-256 bytes used as a key
-	// fingerprint.
+	// fingerprint (draft-vasylenko-e2ee-http Section 4.2).
 	fingerprintSize = 16
 )
 
@@ -69,7 +79,9 @@ func (a AEAD) valid() bool {
 	return ok
 }
 
-// direction selects which directional key is derived.
+// direction selects which directional key is derived. Separate request and
+// response keys are derived from the same shared secret
+// (draft-vasylenko-e2ee-http Section 6.3).
 type direction string
 
 const (
@@ -146,26 +158,33 @@ type deriveParams struct {
 }
 
 // deriveKeys computes the shared secret via X25519 and derives both
-// directional encryption keys with HKDF-SHA256 per the draft.
+// directional encryption keys with HKDF-SHA256.
 //
-// The HKDF-Extract salt is cpk || serverPub (raw 32-byte keys). The Expand
-// info string binds direction, issuer, AEAD, and kid.
+// Spec: draft-vasylenko-e2ee-http Section 6.2 (Shared Secret) and Section 6.3
+// (Encryption Key Derivation). The HKDF-Extract salt is cpk || serverPub (raw
+// 32-byte keys); the Expand info string binds direction, issuer, AEAD, and kid
+// to prevent cross-origin, cross-protocol, and cross-cipher confusion.
 func deriveKeys(p deriveParams) (ekReq, ekRes []byte, err error) {
 	nk, ok := p.aead.keyLength()
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: %s", ErrAEADUnsupported, p.aead)
 	}
 
+	// Z = X25519(ourPriv, peerPub) (draft-vasylenko-e2ee-http Section 6.2).
 	z, err := ecdhShared(p.ourPriv, p.peerPub)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrInvalidKey, err)
 	}
 
-	// X25519 rejects all-zero output internally; defend explicitly as well.
+	// Implementations MUST reject an all-zero Z (low-order point). X25519
+	// rejects it internally; defend explicitly as well
+	// (draft-vasylenko-e2ee-http Section 6.2).
 	if allZero(z) {
 		return nil, nil, fmt.Errorf("%w: zero shared secret", ErrInvalidKey)
 	}
 
+	// salt = cpk || server_public_key; PRK = HKDF-Extract(salt, Z)
+	// (draft-vasylenko-e2ee-http Section 6.3).
 	salt := make([]byte, 0, len(p.cpk)+len(p.serverPub))
 	salt = append(salt, p.cpk...)
 	salt = append(salt, p.serverPub...)
@@ -200,9 +219,13 @@ var (
 	}
 )
 
-// infoString builds the HKDF-Expand info per the draft:
+// infoString builds the HKDF-Expand info per draft-vasylenko-e2ee-http
+// Section 6.3 (Encryption Key Derivation):
 //
 //	"e2ee/v1:<dir> " || issuer || " " || aead || " " || kid
+//
+// The separators are literal ASCII space characters (0x20) and all components
+// are UTF-8 encoded.
 func infoString(dir direction, issuer string, aead AEAD, kid string) string {
 	var b strings.Builder
 
@@ -219,8 +242,9 @@ func infoString(dir direction, issuer string, aead AEAD, kid string) string {
 }
 
 // seal encrypts plaintext with the directional key and AAD, producing the
-// wire body nonce || ciphertext || tag. A fresh random nonce is drawn from
-// randReader (crypto/rand.Reader when nil).
+// wire body nonce || ciphertext || tag (draft-vasylenko-e2ee-http
+// Section 7.2). A fresh random nonce is drawn from randReader
+// (crypto/rand.Reader when nil); nonces MUST never repeat under one EK.
 func seal(ek []byte, plaintext, aad []byte, randReader io.Reader) ([]byte, error) {
 	if randReader == nil {
 		randReader = rand.Reader
@@ -241,8 +265,9 @@ func seal(ek []byte, plaintext, aad []byte, randReader io.Reader) ([]byte, error
 }
 
 // open decrypts a wire body (nonce || ciphertext || tag) with the directional
-// key and AAD. It returns ErrMalformed for short bodies and ErrDecryptFailed
-// for authentication failures.
+// key and AAD (draft-vasylenko-e2ee-http Section 7.2). It returns ErrMalformed
+// for bodies shorter than the minimum and ErrDecryptFailed for AES-GCM
+// authentication failures.
 func open(ek []byte, body, aad []byte) ([]byte, error) {
 	if len(body) < minBodySize {
 		return nil, fmt.Errorf("%w: body shorter than %d bytes", ErrMalformed, minBodySize)
@@ -283,7 +308,9 @@ var newGCM = func(key []byte) (cipher.AEAD, error) {
 // reachable in tests; for an AES block it does not fail in practice.
 var newCipherGCM = cipher.NewGCM
 
-// fingerprint returns the first 16 bytes of SHA-256 over the public key.
+// fingerprint returns the first 16 bytes of SHA-256 over the public key,
+// the key fingerprint form published in a key set
+// (draft-vasylenko-e2ee-http Section 4.2).
 func fingerprint(pub []byte) []byte {
 	sum := sha256.Sum256(pub)
 

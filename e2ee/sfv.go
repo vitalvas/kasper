@@ -7,16 +7,16 @@ import (
 	"strings"
 )
 
-// Parameter ordering for deterministic serialization of the E2EE-Session
-// field. RFC 9651 preserves parameter insertion order, so the canonical
-// form used for AAD must serialize parameters in a fixed, well-known order.
-// Both peers serialize in this order regardless of receive order.
+// E2EE-Session parameters, per draft-vasylenko-e2ee-http Section 8.1 (Syntax).
+// RFC 9651 preserves parameter insertion order, so the canonical form used for
+// AAD must serialize parameters in a fixed, well-known order. Both peers
+// serialize in this order regardless of receive order.
 const (
-	paramAEAD = "aead"
-	paramEPK  = "epk"
-	paramTS   = "ts"
-	paramNID  = "nid"
-	paramCTY  = "cty"
+	paramAEAD = "aead" // String, required (request and response)
+	paramEPK  = "epk"  // Byte Sequence, required in request, prohibited in response
+	paramTS   = "ts"   // Integer, required (Unix timestamp)
+	paramNID  = "nid"  // String, required (per-message replay identifier)
+	paramCTY  = "cty"  // String, optional (inner plaintext media type)
 )
 
 // canonicalParamOrder is the fixed ordering used when serializing the
@@ -29,9 +29,10 @@ var canonicalParamOrder = []string{paramAEAD, paramEPK, paramTS, paramNID, param
 var serializeSession = func(item sessionItem) (string, error) { return item.serialize() }
 
 // sessionItem is a parsed RFC 9651 Structured Field Item representing the
-// E2EE-Session header. The bare item value is the key identifier (kid),
-// carried as an sf-string. Parameters carry the AEAD identifier, ephemeral
-// public key, timestamp, replay identifier, and optional inner content type.
+// E2EE-Session header (draft-vasylenko-e2ee-http Section 8). The bare item
+// value is the key identifier (kid), carried as an sf-string. Parameters carry
+// the AEAD identifier, ephemeral public key, timestamp, replay identifier, and
+// optional inner content type.
 type sessionItem struct {
 	kid    string
 	aead   string
@@ -46,7 +47,7 @@ type sessionItem struct {
 // serialize renders the item using RFC 9651 deterministic serialization with
 // the fixed canonical parameter order. The result is the field value only
 // (no field name, colon, or surrounding whitespace) and is used both on the
-// wire and as the basis for AAD.
+// wire and as the basis for AAD (draft-vasylenko-e2ee-http Sections 8.1, 7.4).
 func (s sessionItem) serialize() (string, error) {
 	var b strings.Builder
 

@@ -8,9 +8,11 @@ import (
 	"github.com/vitalvas/kasper/muxhandlers"
 )
 
-// Sentinel errors. These map onto the protocol error codes defined in the
-// draft and are surfaced to callers via errors.Is. Server-side they are
-// translated into RFC 9457 Problem Details responses by ProblemFromError.
+// Sentinel errors. These map onto the protocol error codes registered in
+// draft-vasylenko-e2ee-http Section 10.5 (E2EE Error Codes) and used by the
+// error handling of Section 9. They are surfaced to callers via errors.Is.
+// Server-side they are translated into RFC 9457 Problem Details responses by
+// ProblemFromError.
 var (
 	// ErrKeyUnknown is returned when the requested kid is not recognized.
 	ErrKeyUnknown = errors.New("e2ee: key unknown")
@@ -53,8 +55,9 @@ var (
 )
 
 // errorCode returns the protocol error code string for a sentinel error,
-// along with the HTTP status code defined by the draft. It returns ok=false
-// for errors that are not protocol error codes.
+// along with the HTTP status code, per draft-vasylenko-e2ee-http Section 9 and
+// the registry in Section 10.5. It returns ok=false for errors that are not
+// protocol error codes.
 func errorCode(err error) (code string, status int, ok bool) {
 	switch {
 	case errors.Is(err, ErrKeyUnknown):
@@ -94,9 +97,10 @@ var problemTitle = map[string]string{
 type Problem = muxhandlers.ProblemDetails
 
 // ProblemFromError builds a [Problem] from a protocol error. The Type member
-// uses the URN form urn:ietf:params:e2ee:error:<code>. When err is not a
-// recognized protocol error code, a generic malformed problem is returned so
-// that internal details are never leaked to the peer.
+// uses the URN form urn:ietf:params:e2ee:error:<code>
+// (draft-vasylenko-e2ee-http Sections 9, 10.4). When err is not a recognized
+// protocol error code, a generic malformed problem is returned: plaintext
+// error responses must not reveal internal details (Section 11.6).
 func ProblemFromError(err error) Problem {
 	code, status, ok := errorCode(err)
 	if !ok {

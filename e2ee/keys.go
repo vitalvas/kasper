@@ -15,37 +15,43 @@ import (
 )
 
 // WellKnownPath is the well-known URI suffix where servers publish their
-// encryption key set.
+// encryption key set (draft-vasylenko-e2ee-http Section 4.1; IANA registration
+// Section 10.1).
 const WellKnownPath = "/.well-known/encryption-keys"
 
-// algX25519 is the only key agreement algorithm defined by this version.
+// algX25519 is the only key agreement algorithm defined by this version
+// (draft-vasylenko-e2ee-http Section 4.2).
 const algX25519 = "X25519"
 
-// kidPattern constrains key identifiers per the draft.
+// kidPattern constrains key identifiers to 1-128 characters of the unreserved
+// set (draft-vasylenko-e2ee-http Section 4.2).
 var kidPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
 
-// DefaultMaxSkew is the recommended maximum clock skew in seconds.
+// DefaultMaxSkew is the recommended maximum clock skew in seconds
+// (draft-vasylenko-e2ee-http Section 11.5).
 const DefaultMaxSkew = 300
 
-// PublicKey is a single published key entry in a key set document. Byte
-// fields are exposed as base64url strings on the wire and decoded on parse.
+// PublicKey is a single published key entry in a key set document, per the
+// per-key members of draft-vasylenko-e2ee-http Section 4.2. Byte fields are
+// exposed as base64url strings on the wire and decoded on parse.
 type PublicKey struct {
-	KID         string     `json:"kid"`
-	Alg         string     `json:"alg"`
-	AEADs       []AEAD     `json:"aeads"`
-	PublicKey   string     `json:"public_key"`
-	Fingerprint string     `json:"fingerprint,omitempty"`
-	NotBefore   *time.Time `json:"not_before,omitempty"`
-	NotAfter    time.Time  `json:"not_after"`
-	MaxSkew     int        `json:"max_skew"`
+	KID         string     `json:"kid"`                   // unique identifier, required
+	Alg         string     `json:"alg"`                   // "X25519", required
+	AEADs       []AEAD     `json:"aeads"`                 // preferred AEADs, server order, required
+	PublicKey   string     `json:"public_key"`            // 32-byte X25519 key, base64url, required
+	Fingerprint string     `json:"fingerprint,omitempty"` // first 16 bytes of SHA-256, recommended
+	NotBefore   *time.Time `json:"not_before,omitempty"`  // RFC 3339, optional
+	NotAfter    time.Time  `json:"not_after"`             // RFC 3339, required
+	MaxSkew     int        `json:"max_skew"`              // seconds, required
 
 	pub *ecdh.PublicKey // decoded lazily by parse/validate
 }
 
-// KeySetDocument is the JSON document published at WellKnownPath.
+// KeySetDocument is the JSON document published at WellKnownPath, per
+// draft-vasylenko-e2ee-http Section 4.2 (Key Set Document).
 type KeySetDocument struct {
-	Issuer string      `json:"issuer"`
-	Keys   []PublicKey `json:"keys"`
+	Issuer string      `json:"issuer"` // HTTPS origin, required
+	Keys   []PublicKey `json:"keys"`   // ordered most to least preferred, required
 }
 
 // decodeKey parses and validates a single PublicKey entry, decoding the
@@ -92,7 +98,8 @@ func (k *PublicKey) supportsAEAD(a AEAD) bool {
 }
 
 // validAt reports whether the key is within its validity window at t,
-// allowing the key's own max_skew tolerance on both bounds.
+// allowing the key's own max_skew tolerance on both bounds
+// (draft-vasylenko-e2ee-http Sections 4.2, 8.5).
 func (k *PublicKey) validAt(t time.Time) bool {
 	skew := time.Duration(k.MaxSkew) * time.Second
 
@@ -282,7 +289,9 @@ func (s *ServerKeySet) Document() KeySetDocument {
 }
 
 // Handler returns an http.Handler serving the key set document as JSON at
-// WellKnownPath. It responds only to GET and HEAD.
+// WellKnownPath, per draft-vasylenko-e2ee-http Sections 4.1 and 4.2. It
+// responds only to GET and HEAD. The well-known resource MUST be served over
+// HTTPS in production (Section 4.1).
 func (s *ServerKeySet) Handler() http.Handler {
 	doc := s.Document()
 
@@ -376,7 +385,9 @@ func (s *ClientKeySet) Issuer() string { return s.issuer }
 
 // selectKey chooses a usable key valid at t and the AEAD to use. When
 // preferred is non-empty, the client requests that AEAD if any selected key
-// advertises it. Otherwise the first AEAD of the first valid key is used.
+// advertises it. Otherwise the first AEAD of the first valid key is used; keys
+// are ordered most to least preferred (draft-vasylenko-e2ee-http Sections 4.2,
+// 6.1).
 func (s *ClientKeySet) selectKey(t time.Time, preferred AEAD) (*PublicKey, AEAD, error) {
 	for i := range s.keys {
 		k := &s.keys[i]
@@ -399,8 +410,10 @@ func (s *ClientKeySet) selectKey(t time.Time, preferred AEAD) (*PublicKey, AEAD,
 }
 
 // FetchKeySet retrieves and validates the key set published at the issuer's
-// well-known URI using client. The issuer must be an https origin (scheme +
-// host, no path). client must not be nil.
+// well-known URI using client (draft-vasylenko-e2ee-http Sections 4.1, 4.2).
+// The issuer must be an https origin (scheme + host, no path) and is matched
+// case-sensitively against the document's issuer member. client must not be
+// nil.
 func FetchKeySet(client *http.Client, issuer string) (*ClientKeySet, error) {
 	req, err := http.NewRequest(http.MethodGet, issuer+WellKnownPath, nil)
 	if err != nil {

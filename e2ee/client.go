@@ -11,16 +11,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// Session holds a reusable ephemeral X25519 key pair for a client. Reusing a
-// session across requests reduces per-request key generation but widens the
-// window of client-side forward-secrecy exposure. A session must be scoped to
-// a single logical client instance, never persisted, and destroyed on process
-// exit or user logout.
+// Session holds a reusable ephemeral X25519 key pair for a client, per the
+// ephemeral client sessions described in draft-vasylenko-e2ee-http Section 6.1.
+// Reusing a session across requests reduces per-request key generation but
+// widens the window of client-side forward-secrecy exposure. A session must be
+// scoped to a single logical client instance, never persisted, and destroyed
+// on process exit or user logout. Its lifetime must not exceed the shortest
+// key not_after.
 type Session struct {
 	priv *ecdh.PrivateKey
 }
 
-// NewSession creates a Session with a fresh ephemeral key pair.
+// NewSession creates a Session with a fresh ephemeral key pair
+// (draft-vasylenko-e2ee-http Section 6.1).
 func NewSession() (*Session, error) {
 	priv, err := generateKeyPair(nil)
 	if err != nil {
@@ -30,10 +33,12 @@ func NewSession() (*Session, error) {
 	return &Session{priv: priv}, nil
 }
 
-// SessionHeader is the HTTP field carrying E2EE control metadata.
+// SessionHeader is the HTTP field carrying E2EE control metadata
+// (draft-vasylenko-e2ee-http Section 8; IANA registration Section 10.3).
 const SessionHeader = "E2EE-Session"
 
-// MediaType is the media type of a protected (ciphertext) payload.
+// MediaType is the media type of a protected (ciphertext) payload
+// (draft-vasylenko-e2ee-http Section 7.1; IANA registration Section 10.2).
 const MediaType = "application/e2ee"
 
 // ClientConfig configures request encryption and response decryption.
@@ -80,7 +85,8 @@ type clientState struct {
 
 // encryptRequest encrypts plaintext into a protected request body and returns
 // the serialized E2EE-Session field plus the state needed to decrypt the
-// response. A fresh ephemeral key pair is generated for the message.
+// response. A fresh ephemeral key pair is generated for the message by default
+// (draft-vasylenko-e2ee-http Sections 6.1, 7.2, 8.4).
 func (c *ClientConfig) encryptRequest(plaintext []byte) (body []byte, state *clientState, err error) {
 	if c.KeySet == nil {
 		return nil, nil, ErrNoKeySet
@@ -150,10 +156,11 @@ func (c *ClientConfig) encryptRequest(plaintext []byte) (body []byte, state *cli
 }
 
 // decryptResponse decrypts a protected response body using the state captured
-// when the request was encrypted. It validates that the response echoes the
-// request kid, aead, and nid before decryption. It returns the recovered
-// plaintext and the inner content type from the response cty parameter (empty
-// when absent).
+// when the request was encrypted. It validates that the response field values
+// (kid, aead, nid) match the request and that epk is absent before decryption,
+// per draft-vasylenko-e2ee-http Sections 8.4 and the client behavior in
+// Section 6.1. It returns the recovered plaintext and the inner content type
+// from the response cty parameter (empty when absent).
 func (c *ClientConfig) decryptResponse(resField string, body []byte, st *clientState) (plaintext []byte, cty string, err error) {
 	item, err := parseSessionItem(resField)
 	if err != nil {
@@ -196,6 +203,9 @@ func (c *ClientConfig) clock() time.Time {
 	return time.Now()
 }
 
+// nid returns a fresh per-message replay identifier. The client must generate
+// an unpredictable nid per request; a random UUIDv4 is acceptable
+// (draft-vasylenko-e2ee-http Sections 8.1, 11.5).
 func (c *ClientConfig) nid() string {
 	if c.newNID != nil {
 		return c.newNID()

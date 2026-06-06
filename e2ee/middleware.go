@@ -20,10 +20,14 @@ type MiddlewareConfig struct {
 }
 
 // Middleware returns a mux.MiddlewareFunc that decrypts incoming E2EE requests
-// and encrypts handler responses per the E2EE-HTTP scheme.
+// and encrypts handler responses per draft-vasylenko-e2ee-http. Only the body
+// is protected; HTTP semantics (method, target, status, headers) are not bound
+// into the AEAD (Section 7.5), so handlers and intermediaries see normal HTTP
+// metadata.
 //
 // It returns ErrNoKeySet when Server.KeySet is nil. When Server.Replay is nil,
-// a shared in-memory replay cache is installed so replay protection is active.
+// a shared in-memory replay cache is installed so replay protection is active
+// (Section 11.5).
 func Middleware(cfg MiddlewareConfig) (mux.MiddlewareFunc, error) {
 	if cfg.Server.KeySet == nil {
 		return nil, ErrNoKeySet

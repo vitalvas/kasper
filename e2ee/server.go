@@ -40,8 +40,10 @@ type serverState struct {
 }
 
 // decryptRequest validates and decrypts a protected request. It performs the
-// validation steps from the draft in order and returns the recovered
-// plaintext plus the state needed to encrypt the response.
+// strict, sequential validation steps of draft-vasylenko-e2ee-http Section 8.5
+// (Validation Order) and returns the recovered plaintext plus the state needed
+// to encrypt the response. The numbered step comments below correspond to that
+// section.
 func (c *ServerConfig) decryptRequest(reqField string, body []byte) (plaintext []byte, st *serverState, err error) {
 	if c.KeySet == nil {
 		return nil, nil, ErrNoKeySet
@@ -140,8 +142,10 @@ func (c *ServerConfig) decryptRequest(reqField string, body []byte) (plaintext [
 }
 
 // encryptResponse encrypts response plaintext using the state captured during
-// request decryption. It builds the response E2EE-Session field (echoing kid,
-// aead, nid with a fresh timestamp and no epk) and returns the field and body.
+// request decryption. It builds the response E2EE-Session field, which echoes
+// kid, aead, and nid, includes a fresh timestamp, and omits epk, per
+// draft-vasylenko-e2ee-http Section 8.4 (Use in Requests and Responses). The
+// response is encrypted under the response key with response AAD (Section 7.4).
 func (c *ServerConfig) encryptResponse(plaintext []byte, st *serverState) (resField string, body []byte, err error) {
 	now := c.clock()
 
@@ -202,11 +206,14 @@ type noReplay struct{}
 
 func (noReplay) StoreUnique(string, []byte, string, time.Duration) bool { return true }
 
-// skewTolerance is added to a key's max_skew when computing replay-cache TTL,
-// ensuring entries outlive the window in which a replay could be accepted.
+// skewTolerance is added to a key's max_skew when computing replay-cache TTL.
+// The server must maintain the replay cache for at least max_skew plus a
+// tolerance so that entries outlive the window in which a replay could be
+// accepted (draft-vasylenko-e2ee-http Section 11.5).
 const skewTolerance = 60 * time.Second
 
-// withinSkew reports whether ts is within maxSkew seconds of now.
+// withinSkew reports whether ts is within maxSkew seconds of now, the
+// timestamp freshness check of draft-vasylenko-e2ee-http Section 11.5.
 func withinSkew(ts, now int64, maxSkew int) bool {
 	diff := ts - now
 	if diff < 0 {

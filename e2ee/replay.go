@@ -6,15 +6,19 @@ import (
 )
 
 // ReplayCache tracks per-message replay identifiers (nid) to detect and
-// reject replayed requests. Implementations must be safe for concurrent use.
+// reject replayed requests, implementing the nonce (replay ID) validation of
+// draft-vasylenko-e2ee-http Section 11.5 (Replay Protection). Implementations
+// must be safe for concurrent use.
 //
 // StoreUnique atomically records nid for the given (kid, epk) scope: it
 // returns true if the nid was newly inserted (not seen before) and false if
-// it already existed. Entries may be evicted after ttl has elapsed.
+// it already existed. Per Section 11.5 the cache is keyed by (kid, epk) and
+// entries are retained for at least max_skew plus a tolerance, expressed here
+// via ttl.
 //
 // The server inserts the nid only after AES-GCM authentication succeeds and
 // before applying any application side effects, so a duplicate indicates a
-// replayed authenticated message.
+// replayed authenticated message (Section 8.5 steps 9 and 12, Section 11.5).
 type ReplayCache interface {
 	StoreUnique(kid string, epk []byte, nid string, ttl time.Duration) bool
 }
