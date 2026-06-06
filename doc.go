@@ -33,6 +33,11 @@
 //     cookie values using AES-GCM (128/192/256). Provides timestamp validation,
 //     key rotation via multi-codec, configurable AAD, and pluggable serialization.
 //
+//   - [github.com/vitalvas/kasper/e2ee] -- End-to-end encryption for HTTP API
+//     payloads per draft-vasylenko-e2ee-http. Uses X25519, HKDF-SHA256, and
+//     AES-GCM to protect request/response bodies independently of TLS, with
+//     well-known key discovery, client transport, and server middleware.
+//
 // Install with:
 //
 //	go get github.com/vitalvas/kasper
