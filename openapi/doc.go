@@ -540,6 +540,18 @@
 // deduplicated by name, security requirements are unioned, and source servers
 // are dropped (set them on the returned document instead).
 //
+// SpecFromDocuments ingests one or more built documents into a Spec so they
+// can be served with Handle (JSON, YAML, and the docs UI). Unlike
+// MergeDocuments, paths are merged per-method, so a GET from one document and
+// a POST from another on the same path coexist. The resulting Spec may still
+// register routes, which combine with the ingested operations per-method:
+//
+//	spec, err := openapi.SpecFromDocuments(usersDoc, postsDoc)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	spec.Handle(r, "/swagger", nil)
+//
 // # Serving the Specification
 //
 // Handle registers all OpenAPI endpoints under a base path. The config

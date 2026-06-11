@@ -3,6 +3,7 @@ package openapi
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1639,4 +1640,221 @@ func TestBuildHeadersAutoParameters(t *testing.T) {
 		assert.Equal(t, "X-Tenant-Id", params[1].Name)
 		assert.Equal(t, ParameterInHeader, params[1].In)
 	})
+}
+
+func TestSpecFromDocuments(t *testing.T) {
+	usersDoc := func() *Document {
+		return &Document{
+			OpenAPI: OpenAPIVersion,
+			Info:    Info{Title: "Users", Version: "1.0.0"},
+			Servers: []Server{{URL: "https://users.example.com"}},
+			Tags:    []Tag{{Name: "users"}},
+			Paths: map[string]*PathItem{
+				"/api/v1/users": {Get: &Operation{OperationID: "listUsers"}},
+			},
+			Components: &Components{
+				Schemas: map[string]*Schema{
+					"User":  {Type: SchemaTypeObject},
+					"Error": {Type: SchemaTypeObject},
+				},
+			},
+		}
+	}
+	postsDoc := func() *Document {
+		return &Document{
+			OpenAPI: OpenAPIVersion,
+			Info:    Info{Title: "Posts", Version: "2.0.0"},
+			Servers: []Server{{URL: "https://posts.example.com"}},
+			Tags:    []Tag{{Name: "posts"}},
+			Paths: map[string]*PathItem{
+				"/api/v1/posts": {Get: &Operation{OperationID: "listPosts"}},
+			},
+			Components: &Components{
+				Schemas: map[string]*Schema{
+					"Post":  {Type: SchemaTypeObject},
+					"Error": {Type: SchemaTypeObject}, // identical to users' Error
+				},
+			},
+		}
+	}
+
+	t.Run("single document", func(t *testing.T) {
+		spec, err := SpecFromDocuments(usersDoc())
+		require.NoError(t, err)
+
+		doc := spec.Build(mux.NewRouter())
+		assert.Equal(t, "Users", doc.Info.Title)
+		assert.Contains(t, doc.Paths, "/api/v1/users")
+		assert.Contains(t, doc.Components.Schemas, "User")
+	})
+
+	t.Run("accumulates multiple documents", func(t *testing.T) {
+		spec, err := SpecFromDocuments(usersDoc(), postsDoc())
+		require.NoError(t, err)
+
+		doc := spec.Build(mux.NewRouter())
+		assert.ElementsMatch(t, []string{"/api/v1/users", "/api/v1/posts"}, keysOfPaths(doc.Paths))
+		assert.Contains(t, doc.Components.Schemas, "User")
+		assert.Contains(t, doc.Components.Schemas, "Post")
+		assert.Contains(t, doc.Components.Schemas, "Error")
+		assert.Len(t, doc.Servers, 2)
+	})
+
+	t.Run("first document wins for Info", func(t *testing.T) {
+		spec, err := SpecFromDocuments(usersDoc(), postsDoc())
+		require.NoError(t, err)
+		assert.Equal(t, "Users", spec.Build(mux.NewRouter()).Info.Title)
+	})
+
+	t.Run("same path different methods coexist", func(t *testing.T) {
+		a := &Document{Paths: map[string]*PathItem{
+			"/items": {Get: &Operation{OperationID: "list"}},
+		}}
+		b := &Document{Paths: map[string]*PathItem{
+			"/items": {Post: &Operation{OperationID: "create"}},
+		}}
+
+		spec, err := SpecFromDocuments(a, b)
+		require.NoError(t, err)
+
+		item := spec.Build(mux.NewRouter()).Paths["/items"]
+		require.NotNil(t, item.Get)
+		require.NotNil(t, item.Post)
+		assert.Equal(t, "list", item.Get.OperationID)
+		assert.Equal(t, "create", item.Post.OperationID)
+	})
+
+	t.Run("same method same path conflicts", func(t *testing.T) {
+		a := &Document{Paths: map[string]*PathItem{
+			"/items": {Get: &Operation{OperationID: "a"}},
+		}}
+		b := &Document{Paths: map[string]*PathItem{
+			"/items": {Get: &Operation{OperationID: "b"}},
+		}}
+
+		spec, err := SpecFromDocuments(a, b)
+		require.Error(t, err)
+		assert.Nil(t, spec)
+		assert.Contains(t, err.Error(), "GET /items")
+	})
+
+	t.Run("identical components dedupe", func(t *testing.T) {
+		spec, err := SpecFromDocuments(usersDoc(), postsDoc())
+		require.NoError(t, err)
+		// "Error" defined identically in both -> single entry, no conflict.
+		assert.Contains(t, spec.Build(mux.NewRouter()).Components.Schemas, "Error")
+	})
+
+	t.Run("ingests all component types", func(t *testing.T) {
+		doc := &Document{Components: &Components{
+			Schemas:         map[string]*Schema{"S": {Type: SchemaTypeObject}},
+			Responses:       map[string]*Response{"R": {Description: "ok"}},
+			Parameters:      map[string]*Parameter{"P": {Name: "p", In: ParameterInQuery}},
+			Examples:        map[string]*Example{"E": {Summary: "ex"}},
+			RequestBodies:   map[string]*RequestBody{"B": {Description: "body"}},
+			Headers:         map[string]*Header{"H": {Description: "hdr"}},
+			SecuritySchemes: map[string]*SecurityScheme{"A": {Type: SecurityTypeHTTP, Scheme: "bearer"}},
+			Links:           map[string]*Link{"L": {OperationID: "op"}},
+			Callbacks:       map[string]*Callback{"C": {}},
+			PathItems:       map[string]*PathItem{"I": {Get: &Operation{OperationID: "g"}}},
+		}}
+
+		spec, err := SpecFromDocuments(doc)
+		require.NoError(t, err)
+
+		comp := spec.Build(mux.NewRouter()).Components
+		require.NotNil(t, comp)
+		assert.Contains(t, comp.Schemas, "S")
+		assert.Contains(t, comp.Responses, "R")
+		assert.Contains(t, comp.Parameters, "P")
+		assert.Contains(t, comp.Examples, "E")
+		assert.Contains(t, comp.RequestBodies, "B")
+		assert.Contains(t, comp.Headers, "H")
+		assert.Contains(t, comp.SecuritySchemes, "A")
+		assert.Contains(t, comp.Links, "L")
+		assert.Contains(t, comp.Callbacks, "C")
+		assert.Contains(t, comp.PathItems, "I")
+	})
+
+	t.Run("conflicting components error", func(t *testing.T) {
+		a := &Document{Components: &Components{Schemas: map[string]*Schema{
+			"Error": {Type: SchemaTypeObject},
+		}}}
+		b := &Document{Components: &Components{Schemas: map[string]*Schema{
+			"Error": {Type: SchemaTypeString},
+		}}}
+
+		spec, err := SpecFromDocuments(a, b)
+		require.Error(t, err)
+		assert.Nil(t, spec)
+		assert.Contains(t, err.Error(), "components.schemas")
+	})
+
+	t.Run("webhooks merge per-method", func(t *testing.T) {
+		a := &Document{Webhooks: map[string]*PathItem{
+			"event": {Post: &Operation{OperationID: "onEvent"}},
+		}}
+		b := &Document{Webhooks: map[string]*PathItem{
+			"event": {Put: &Operation{OperationID: "onEventPut"}},
+		}}
+
+		spec, err := SpecFromDocuments(a, b)
+		require.NoError(t, err)
+
+		hook := spec.Build(mux.NewRouter()).Webhooks["event"]
+		require.NotNil(t, hook.Post)
+		require.NotNil(t, hook.Put)
+	})
+
+	t.Run("nil documents are skipped", func(t *testing.T) {
+		spec, err := SpecFromDocuments(nil, usersDoc(), nil)
+		require.NoError(t, err)
+		assert.Contains(t, spec.Build(mux.NewRouter()).Paths, "/api/v1/users")
+	})
+
+	t.Run("no documents yields empty spec", func(t *testing.T) {
+		spec, err := SpecFromDocuments()
+		require.NoError(t, err)
+		doc := spec.Build(mux.NewRouter())
+		assert.Empty(t, doc.Paths)
+	})
+
+	t.Run("ingested paths combine with route operations", func(t *testing.T) {
+		spec, err := SpecFromDocuments(usersDoc())
+		require.NoError(t, err)
+
+		r := mux.NewRouter()
+		spec.Route(r.HandleFunc("/api/v1/extra", dummyHandler).Methods(http.MethodGet)).
+			OperationID("extra").
+			Response(http.StatusOK, nil)
+
+		doc := spec.Build(r)
+		assert.Contains(t, doc.Paths, "/api/v1/users") // ingested
+		assert.Contains(t, doc.Paths, "/api/v1/extra") // route-derived
+	})
+
+	t.Run("serves via Handle", func(t *testing.T) {
+		spec, err := SpecFromDocuments(usersDoc(), postsDoc())
+		require.NoError(t, err)
+
+		r := mux.NewRouter()
+		spec.Handle(r, "/swagger", nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/swagger/schema.json", nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		var doc Document
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+		assert.ElementsMatch(t, []string{"/api/v1/users", "/api/v1/posts"}, keysOfPaths(doc.Paths))
+	})
+}
+
+func keysOfPaths(m map[string]*PathItem) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
