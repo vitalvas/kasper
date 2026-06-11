@@ -157,6 +157,26 @@ func (g *RouteGroup) Parameter(param *Parameter) *RouteGroup {
 	return g
 }
 
+// Parameters adds multiple common parameters to the group defaults in one
+// call. It pairs naturally with QueryParamsFromStruct to register every
+// field of a query struct at once.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
+func (g *RouteGroup) Parameters(params ...*Parameter) *RouteGroup {
+	g.defaults.parameters = append(g.defaults.parameters, params...)
+	return g
+}
+
+// Query adds one query parameter per field of v, the same struct passed to
+// mux.BindQuery, to the group defaults. Operations created through this
+// group inherit them. It is a shortcut for
+// Parameters(QueryParamsFromStruct(v)...).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
+func (g *RouteGroup) Query(v any) *RouteGroup {
+	return g.Parameters(QueryParamsFromStruct(v)...)
+}
+
 // ExternalDocs sets external documentation for the group. Operations
 // created through this group inherit this value unless they call
 // ExternalDocs themselves, which replaces it.

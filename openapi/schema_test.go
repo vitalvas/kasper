@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"net/http"
 	"reflect"
 	"testing"
@@ -285,6 +286,164 @@ func TestGenerateStruct(t *testing.T) {
 		require.NotNil(t, schema)
 		assert.Equal(t, []string{"required"}, schema.Required)
 	})
+}
+
+func TestSchemaGeneratorXMLFieldTag(t *testing.T) {
+	gen := func() *SchemaGenerator {
+		g := NewSchemaGenerator()
+		g.fieldTag = "xml"
+		return g
+	}
+
+	t.Run("uses xml tag for element names", func(t *testing.T) {
+		type Order struct {
+			ID    string `xml:"order_id"`
+			Total string `xml:"total_amount"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "order_id")
+		assert.Contains(t, schema.Properties, "total_amount")
+		assert.Len(t, schema.Properties, 2)
+	})
+
+	t.Run("falls back to field name when no xml tag", func(t *testing.T) {
+		type Order struct {
+			Status string
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "Status")
+	})
+
+	t.Run("XMLName sets root element name", func(t *testing.T) {
+		type Order struct {
+			XMLName xml.Name `xml:"order"`
+			ID      string   `xml:"id"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		require.NotNil(t, schema.XML)
+		assert.Equal(t, "order", schema.XML.Name)
+		assert.Contains(t, schema.Properties, "id")
+		assert.NotContains(t, schema.Properties, "XMLName")
+		assert.Len(t, schema.Properties, 1)
+	})
+
+	t.Run("attr fields become XML attributes", func(t *testing.T) {
+		type Order struct {
+			ID   string `xml:"id,attr"`
+			Name string `xml:"name"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		require.Contains(t, schema.Properties, "id")
+		require.NotNil(t, schema.Properties["id"].XML)
+		assert.True(t, schema.Properties["id"].XML.Attribute)
+		require.Contains(t, schema.Properties, "name")
+		assert.Nil(t, schema.Properties["name"].XML, "elements carry no XML attribute metadata")
+	})
+
+	t.Run("dash skips field", func(t *testing.T) {
+		type Order struct {
+			Public string `xml:"public"`
+			Hidden string `xml:"-"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "public")
+		assert.NotContains(t, schema.Properties, "Hidden")
+		assert.Len(t, schema.Properties, 1)
+	})
+
+	t.Run("chardata and innerxml fields are skipped", func(t *testing.T) {
+		type Order struct {
+			Value   string `xml:",chardata"`
+			Raw     string `xml:",innerxml"`
+			Comment string `xml:",comment"`
+			ID      string `xml:"id"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Equal(t, []string{"id"}, keysOf(schema.Properties))
+	})
+
+	t.Run("omitempty marks element optional", func(t *testing.T) {
+		type Order struct {
+			ID    string `xml:"id"`
+			Notes string `xml:"notes,omitempty"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Equal(t, []string{"id"}, schema.Required)
+	})
+
+	t.Run("namespaced and nested names keep local element", func(t *testing.T) {
+		type Order struct {
+			ID   string `xml:"http://example.com id"`
+			City string `xml:"address>city"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "id")
+		assert.Contains(t, schema.Properties, "city")
+	})
+
+	t.Run("openapi tag applies to xml element schema", func(t *testing.T) {
+		type Order struct {
+			Quantity int `xml:"quantity" openapi:"maximum=100"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		require.Contains(t, schema.Properties, "quantity")
+		require.NotNil(t, schema.Properties["quantity"].Maximum)
+		assert.Equal(t, 100.0, *schema.Properties["quantity"].Maximum)
+	})
+
+	t.Run("generates inline schema for named structs", func(t *testing.T) {
+		type Item struct {
+			Name string `xml:"name"`
+		}
+		g := gen()
+		schema := g.Generate(Item{})
+		require.NotNil(t, schema)
+		assert.Empty(t, schema.Ref)
+		assert.Equal(t, SchemaTypeObject, schema.Type)
+		assert.Empty(t, g.Schemas(), "xml fieldTag schemas should not be stored as components")
+	})
+
+	t.Run("inlines anonymous embedded struct without xml name", func(t *testing.T) {
+		type Base struct {
+			ID string `xml:"id"`
+		}
+		type Order struct {
+			Base
+			Name string `xml:"name"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "id")
+		assert.Contains(t, schema.Properties, "name")
+	})
+
+	t.Run("skips field with unrepresentable type", func(t *testing.T) {
+		type Order struct {
+			ID func() `xml:"id"`
+			OK string `xml:"ok"`
+		}
+		schema := gen().Generate(Order{})
+		require.NotNil(t, schema)
+		assert.NotContains(t, schema.Properties, "id")
+		assert.Contains(t, schema.Properties, "ok")
+	})
+}
+
+func keysOf(m map[string]*Schema) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 type EmbeddedBase struct {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,15 @@ type Item struct {
 // CreateItemRequest is the request body for creating or updating an item.
 type CreateItemRequest struct {
 	Title string `json:"title" openapi:"description=Item title,minLength=1,maxLength=200"`
+}
+
+// ListItemsQuery declares the query parameters for listing items. The same
+// struct drives both mux.BindQuery (decoding) and the OpenAPI parameters
+// (documentation), so they cannot drift apart.
+type ListItemsQuery struct {
+	Limit  int    `query:"limit,omitempty" openapi:"description=Maximum items to return,minimum=1,maximum=100"`
+	Offset int    `query:"offset,omitempty" openapi:"description=Number of items to skip,minimum=0"`
+	Title  string `query:"title,omitempty" openapi:"description=Filter by title substring"`
 }
 
 // ErrorResponse is a standard error response.
@@ -55,6 +65,7 @@ func main() {
 		Response(http.StatusNotFound, ErrorResponse{})
 
 	items.Route(api.HandleFunc("/items", db.listItems).Methods(http.MethodGet)).
+		Query(ListItemsQuery{}).
 		Response(http.StatusOK, []Item{})
 
 	items.Route(api.HandleFunc("/items", db.createItem).Methods(http.MethodPost)).
@@ -81,10 +92,34 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
-func (s *store) listItems(w http.ResponseWriter, _ *http.Request) {
+func (s *store) listItems(w http.ResponseWriter, r *http.Request) {
+	var query ListItemsQuery
+	if err := mux.BindQuery(r, &query); err != nil {
+		mux.ResponseJSON(w, http.StatusBadRequest, ErrorResponse{
+			Code:    "INVALID_QUERY",
+			Message: err.Error(),
+		})
+		return
+	}
+
 	result := make([]Item, 0, len(s.items))
 	for _, item := range s.items {
+		if query.Title != "" && !strings.Contains(item.Title, query.Title) {
+			continue
+		}
 		result = append(result, item)
+	}
+
+	if query.Offset > 0 {
+		if query.Offset >= len(result) {
+			result = result[:0]
+		} else {
+			result = result[query.Offset:]
+		}
+	}
+
+	if query.Limit > 0 && query.Limit < len(result) {
+		result = result[:query.Limit]
 	}
 
 	mux.ResponseJSON(w, http.StatusOK, result)

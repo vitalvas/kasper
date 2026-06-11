@@ -243,6 +243,23 @@
 //	openapi.IntegerHeader("Total number of users")
 //	openapi.HeaderOf("Fetch destination", openapi.EnumSchema("document", "script"))
 //
+// QueryParamsFromStruct derives one query parameter per field from the same
+// `query` struct used with mux.BindQuery, so the documented parameters stay
+// in sync with what the binder accepts. Combine it with the variadic
+// Parameters method to register them all at once:
+//
+//	type ListUsersQuery struct {
+//	    Page  int      `query:"page,omitempty"`
+//	    Limit int      `query:"limit,omitempty" openapi:"maximum=100"`
+//	    Tags  []string `query:"tag,omitempty"`
+//	}
+//
+//	route.Parameters(openapi.QueryParamsFromStruct(ListUsersQuery{})...)
+//
+// The Query shortcut method does the same in one call:
+//
+//	route.Query(ListUsersQuery{})
+//
 // Named example sets attach to parameters, headers, and media types:
 //
 //	openapi.QueryParam("status", "", openapi.StringSchema()).
@@ -308,6 +325,15 @@
 //
 // Pass a *Schema directly for explicit schema control (binary, text, etc.)
 // or a Go type for automatic schema generation via reflection.
+//
+// Schema generation reads the struct tag that matches the content type, so
+// the documented property names stay in sync with what the matching mux
+// binder accepts: "json" for JSON bodies (mux.BindJSON), "form" for
+// urlencoded and multipart bodies (mux.BindForm), and "xml" for XML bodies,
+// including the "+xml" suffix (mux.BindXML). For XML, the XMLName field sets
+// the root element name and `,attr` fields are marked as XML attributes;
+// each falls back to the "json" tag and then the Go field name when its own
+// tag is absent.
 //
 // # Request Body Metadata
 //

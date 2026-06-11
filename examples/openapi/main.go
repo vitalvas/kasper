@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/xml"
 	"fmt"
 	"log"
 	"net/http"
@@ -73,11 +74,24 @@ func (User) OpenAPIExample() any {
 	}
 }
 
-// CreateUserRequest is the request body for creating a user.
+// ListUsersQuery declares the query parameters for listing users. The same
+// struct can drive mux.BindQuery (decoding) and the OpenAPI parameters
+// (documentation) via the Query shortcut, keeping them in sync.
+type ListUsersQuery struct {
+	Page    int    `query:"page,omitempty" openapi:"description=Page number,minimum=1"`
+	PerPage int    `query:"per_page,omitempty" openapi:"description=Items per page,minimum=1,maximum=100"`
+	Role    string `query:"role,omitempty" openapi:"description=Filter by role,enum=admin|editor|viewer"`
+}
+
+// CreateUserRequest is the request body for creating a user. The xml tags
+// make the documented XML schema (used for the application/xml content type)
+// match what mux.BindXML accepts: an <user> root with the id sent as an
+// attribute.
 type CreateUserRequest struct {
-	Name  string `json:"name" openapi:"description=Full name,minLength=1,maxLength=200"`
-	Email string `json:"email" openapi:"description=Email address,format=email"`
-	Role  string `json:"role" openapi:"description=User role,enum=admin|editor|viewer"`
+	XMLName xml.Name `json:"-" xml:"user"`
+	Name    string   `json:"name" xml:"name" openapi:"description=Full name,minLength=1,maxLength=200"`
+	Email   string   `json:"email" xml:"email" openapi:"description=Email address,format=email"`
+	Role    string   `json:"role" xml:"role,attr" openapi:"description=User role,enum=admin|editor|viewer"`
 }
 
 // OpenAPIExample returns a representative CreateUserRequest for the OpenAPI spec.
@@ -302,8 +316,7 @@ func main() {
 		Summary("List users").
 		Description("Returns a paginated list of users.").
 		ExternalDocs("https://example.com/docs/users#list", "Pagination guide").
-		Parameter(openapi.QueryParam("page", "Page number", openapi.IntegerSchema())).
-		Parameter(openapi.QueryParam("per_page", "Items per page", openapi.IntegerSchema())).
+		Query(ListUsersQuery{}).
 		Response(http.StatusOK, ResponseData[[]User]{}).
 		ResponseHeader(http.StatusOK, "X-Total-Count", openapi.IntegerHeader("Total number of users")).
 		ResponseLink(http.StatusOK, "GetNextPage", &openapi.Link{
