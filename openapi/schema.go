@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"encoding/xml"
 	"fmt"
 	"maps"
 	"reflect"
@@ -280,7 +281,7 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 		// explicit tag name. encoding/json treats an anonymous field
 		// with a tag name as a regular named field, not inlined.
 		if field.Anonymous {
-			tagName, _ := parseJSONTag(g.fieldTagValue(field))
+			tagName := g.embeddedTagName(field)
 			if tagName == "" {
 				ft := field.Type
 				isPtr := ft.Kind() == reflect.Pointer
@@ -295,6 +296,13 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 					continue
 				}
 			}
+		}
+
+		// XML field naming differs enough from json/form (attributes,
+		// the XMLName root field, chardata) to warrant a dedicated path.
+		if g.fieldTag == "xml" {
+			g.collectXMLField(field, schema, allOptional)
+			continue
 		}
 
 		tag := g.fieldTagValue(field)
@@ -328,6 +336,65 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 	}
 }
 
+// collectXMLField adds a single struct field to an XML object schema,
+// honoring encoding/xml tag semantics: the XMLName field sets the schema's
+// root element name, `,attr` fields become XML attributes, and `,chardata`
+// or `,innerxml` fields are skipped because they have no named property.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#xml-object
+// See: https://pkg.go.dev/encoding/xml#Marshal (field tag semantics)
+func (g *SchemaGenerator) collectXMLField(field reflect.StructField, schema *Schema, allOptional bool) {
+	name, opts := parseXMLTag(field.Tag.Get("xml"))
+
+	// The XMLName field names the enclosing element rather than a property.
+	if field.Type == reflect.TypeFor[xml.Name]() {
+		if name != "" {
+			schema.XML = &XML{Name: name}
+		}
+		return
+	}
+
+	if opts.skip || opts.chardata {
+		return
+	}
+
+	if name == "" {
+		name = field.Name
+	}
+
+	fieldSchema := g.generateType(field.Type)
+	if fieldSchema == nil {
+		return
+	}
+
+	applyOpenAPITag(fieldSchema, field.Tag.Get("openapi"))
+
+	// Attributes carry XML metadata so consumers can distinguish them from
+	// child elements. Record the element name only when it differs from the
+	// property key to keep the schema minimal.
+	if opts.attr {
+		fieldSchema.XML = &XML{Attribute: true}
+	}
+
+	schema.Properties[name] = fieldSchema
+
+	if !opts.omitempty && !allOptional {
+		schema.Required = append(schema.Required, name)
+	}
+}
+
+// embeddedTagName returns the explicit element/property name of an anonymous
+// field, or "" when the field is untagged and should be inlined. It uses the
+// active fieldTag's naming rules so inlining matches the target encoding.
+func (g *SchemaGenerator) embeddedTagName(field reflect.StructField) string {
+	if g.fieldTag == "xml" {
+		name, _ := parseXMLTag(field.Tag.Get("xml"))
+		return name
+	}
+	name, _ := parseJSONTag(g.fieldTagValue(field))
+	return name
+}
+
 // fieldTagValue returns the struct tag value to use for field naming.
 // When fieldTag is set, it reads that tag first and falls back to "json".
 func (g *SchemaGenerator) fieldTagValue(field reflect.StructField) string {
@@ -353,6 +420,49 @@ func parseJSONTag(tag string) (string, jsonTagOpts) {
 		omitempty:    strings.Contains(rest, "omitempty") || strings.Contains(rest, "omitzero"),
 		stringEncode: strings.Contains(rest, "string"),
 	}
+}
+
+type xmlTagOpts struct {
+	omitempty bool
+	attr      bool // ",attr" — field is an XML attribute, not an element
+	skip      bool // tag is "-"
+	chardata  bool // ",chardata", ",innerxml", ",comment", ",cdata", ",any"
+}
+
+// parseXMLTag extracts the element name and options from an encoding/xml
+// struct tag. The name may carry a namespace prefix ("space local"); only
+// the local element name is kept, matching how the value is documented.
+//
+// See: https://pkg.go.dev/encoding/xml#Marshal (field tag semantics)
+func parseXMLTag(tag string) (string, xmlTagOpts) {
+	if tag == "" {
+		return "", xmlTagOpts{}
+	}
+
+	name, rest, _ := strings.Cut(tag, ",")
+	if name == "-" {
+		return "", xmlTagOpts{skip: true}
+	}
+
+	// A leading "namespace local" name keeps only the local part. Nested
+	// "a>b>c" element paths keep the final element name.
+	if i := strings.LastIndexAny(name, " >"); i >= 0 {
+		name = name[i+1:]
+	}
+
+	opts := xmlTagOpts{}
+	for opt := range strings.SplitSeq(rest, ",") {
+		switch opt {
+		case "omitempty":
+			opts.omitempty = true
+		case "attr":
+			opts.attr = true
+		case "chardata", "innerxml", "comment", "cdata", "any":
+			opts.chardata = true
+		}
+	}
+
+	return name, opts
 }
 
 // applyOpenAPITag parses the `openapi` struct tag and applies constraints to the schema.

@@ -303,6 +303,26 @@ func (b *OperationBuilder) Parameter(param *Parameter) *OperationBuilder {
 	return b
 }
 
+// Parameters adds multiple custom parameters to the operation in one call.
+// It pairs naturally with QueryParamsFromStruct to register every field of
+// a query struct at once.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
+func (b *OperationBuilder) Parameters(params ...*Parameter) *OperationBuilder {
+	b.meta.parameters = append(b.meta.parameters, params...)
+	return b
+}
+
+// Query adds one query parameter per field of v, the same struct passed to
+// mux.BindQuery, so the documented parameters stay in sync with what the
+// binder accepts. It is a shortcut for
+// Parameters(QueryParamsFromStruct(v)...).
+//
+// See: https://spec.openapis.org/oas/v3.1.0#parameter-object
+func (b *OperationBuilder) Query(v any) *OperationBuilder {
+	return b.Parameters(QueryParamsFromStruct(v)...)
+}
+
 // Security sets operation-level security requirements.
 // Call with no arguments to explicitly mark the operation as unauthenticated
 // (overrides document-level security).
@@ -398,6 +418,38 @@ func isFormContentType(ct string) bool {
 		strings.HasPrefix(ct, mux.ContentTypeApplicationFormURLEncoded)
 }
 
+// isXMLContentType reports whether the content type is an XML encoding that
+// uses "xml" struct tags for element names. It matches both the canonical
+// XML media types and the "+xml" structured-syntax suffix.
+func isXMLContentType(ct string) bool {
+	return strings.HasPrefix(ct, mux.ContentTypeApplicationXML) ||
+		strings.HasPrefix(ct, mux.ContentTypeTextXML) ||
+		strings.Contains(ct, "+xml")
+}
+
+// fieldTagForContentType returns the struct tag the schema generator should
+// read property names from for the given content type. Form and XML payloads
+// use their own tags so the documented schema matches what mux.BindForm and
+// mux.BindXML accept; everything else defaults to the "json" tag.
+func fieldTagForContentType(ct string) string {
+	switch {
+	case isFormContentType(ct):
+		return "form"
+	case isXMLContentType(ct):
+		return "xml"
+	default:
+		return ""
+	}
+}
+
+// schemaForContent resolves a schema for a body under the given content type,
+// applying the content-type-specific field tag for the duration of the call.
+func schemaForContent(gen *SchemaGenerator, ct string, body any) *Schema {
+	gen.fieldTag = fieldTagForContentType(ct)
+	defer func() { gen.fieldTag = "" }()
+	return resolveSchema(gen, body)
+}
+
 // resolveSchema returns a Schema for the given body value. If body is a
 // *Schema it is used directly; otherwise the schema generator produces one
 // via reflection.
@@ -467,13 +519,9 @@ func (b *OperationBuilder) buildOperation(gen *SchemaGenerator, operationID stri
 		}
 		for ct, body := range b.meta.requestContents {
 			mt := &MediaType{}
-			if isFormContentType(ct) {
-				gen.fieldTag = "form"
-			}
-			if schema := resolveSchema(gen, body); schema != nil {
+			if schema := schemaForContent(gen, ct, body); schema != nil {
 				mt.Schema = schema
 			}
-			gen.fieldTag = ""
 			op.RequestBody.Content[ct] = mt
 		}
 	}
@@ -493,7 +541,7 @@ func (b *OperationBuilder) buildOperation(gen *SchemaGenerator, operationID stri
 				resp.Content = make(map[string]*MediaType, len(contents))
 				for ct, body := range contents {
 					mt := &MediaType{}
-					if schema := resolveSchema(gen, body); schema != nil {
+					if schema := schemaForContent(gen, ct, body); schema != nil {
 						mt.Schema = schema
 					}
 					resp.Content[ct] = mt

@@ -243,6 +243,23 @@
 //	openapi.IntegerHeader("Total number of users")
 //	openapi.HeaderOf("Fetch destination", openapi.EnumSchema("document", "script"))
 //
+// QueryParamsFromStruct derives one query parameter per field from the same
+// `query` struct used with mux.BindQuery, so the documented parameters stay
+// in sync with what the binder accepts. Combine it with the variadic
+// Parameters method to register them all at once:
+//
+//	type ListUsersQuery struct {
+//	    Page  int      `query:"page,omitempty"`
+//	    Limit int      `query:"limit,omitempty" openapi:"maximum=100"`
+//	    Tags  []string `query:"tag,omitempty"`
+//	}
+//
+//	route.Parameters(openapi.QueryParamsFromStruct(ListUsersQuery{})...)
+//
+// The Query shortcut method does the same in one call:
+//
+//	route.Query(ListUsersQuery{})
+//
 // Named example sets attach to parameters, headers, and media types:
 //
 //	openapi.QueryParam("status", "", openapi.StringSchema()).
@@ -308,6 +325,15 @@
 //
 // Pass a *Schema directly for explicit schema control (binary, text, etc.)
 // or a Go type for automatic schema generation via reflection.
+//
+// Schema generation reads the struct tag that matches the content type, so
+// the documented property names stay in sync with what the matching mux
+// binder accepts: "json" for JSON bodies (mux.BindJSON), "form" for
+// urlencoded and multipart bodies (mux.BindForm), and "xml" for XML bodies,
+// including the "+xml" suffix (mux.BindXML). For XML, the XMLName field sets
+// the root element name and `,attr` fields are marked as XML attributes;
+// each falls back to the "json" tag and then the Go field name when its own
+// tag is absent.
 //
 // # Request Body Metadata
 //
@@ -513,6 +539,18 @@
 // identical definitions are deduplicated; conflicts produce an error. Tags are
 // deduplicated by name, security requirements are unioned, and source servers
 // are dropped (set them on the returned document instead).
+//
+// SpecFromDocuments ingests one or more built documents into a Spec so they
+// can be served with Handle (JSON, YAML, and the docs UI). Unlike
+// MergeDocuments, paths are merged per-method, so a GET from one document and
+// a POST from another on the same path coexist. The resulting Spec may still
+// register routes, which combine with the ingested operations per-method:
+//
+//	spec, err := openapi.SpecFromDocuments(usersDoc, postsDoc)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	spec.Handle(r, "/swagger", nil)
 //
 // # Serving the Specification
 //

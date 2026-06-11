@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"encoding/xml"
 	"net/http"
 	"testing"
 
@@ -212,6 +213,61 @@ func TestOperationBuilder(t *testing.T) {
 		op := b.buildOperation(gen, "list", nil)
 
 		assert.Nil(t, op.Parameters)
+	})
+
+	t.Run("Parameters adds multiple in one call", func(t *testing.T) {
+		b := newOperationBuilder().Parameters(
+			&Parameter{Name: "page", In: ParameterInQuery, Schema: &Schema{Type: SchemaTypeInteger}},
+			&Parameter{Name: "limit", In: ParameterInQuery, Schema: &Schema{Type: SchemaTypeInteger}},
+		)
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "list", nil)
+
+		require.Len(t, op.Parameters, 2)
+		assert.Equal(t, "page", op.Parameters[0].Name)
+		assert.Equal(t, "limit", op.Parameters[1].Name)
+	})
+
+	t.Run("Parameters from QueryParamsFromStruct", func(t *testing.T) {
+		type listQuery struct {
+			Page int    `query:"page,omitempty"`
+			Sort string `query:"sort"`
+		}
+
+		b := newOperationBuilder().Parameters(QueryParamsFromStruct(listQuery{})...)
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "list", nil)
+
+		require.Len(t, op.Parameters, 2)
+		assert.Equal(t, "page", op.Parameters[0].Name)
+		assert.False(t, op.Parameters[0].Required)
+		assert.Equal(t, "sort", op.Parameters[1].Name)
+		assert.True(t, op.Parameters[1].Required)
+	})
+
+	t.Run("Query shortcut adds params from struct", func(t *testing.T) {
+		type listQuery struct {
+			Page int    `query:"page,omitempty"`
+			Sort string `query:"sort"`
+		}
+
+		b := newOperationBuilder().
+			Request(struct {
+				Name string `json:"name"`
+			}{}).
+			Query(listQuery{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "list", nil)
+
+		require.Len(t, op.Parameters, 2)
+		assert.Equal(t, "page", op.Parameters[0].Name)
+		assert.False(t, op.Parameters[0].Required)
+		assert.Equal(t, "sort", op.Parameters[1].Name)
+		assert.True(t, op.Parameters[1].Required)
+		assert.Equal(t, ParameterInQuery, op.Parameters[0].In)
 	})
 
 	t.Run("full fluent chain", func(t *testing.T) {
@@ -451,6 +507,80 @@ func TestRequestContent(t *testing.T) {
 		require.NotNil(t, ref)
 		assert.Contains(t, ref.Properties, "json_name")
 		assert.NotContains(t, ref.Properties, "form_name")
+	})
+
+	t.Run("xml data uses xml struct tags", func(t *testing.T) {
+		type Order struct {
+			XMLName xml.Name `xml:"order"`
+			ID      string   `xml:"order_id,attr"`
+			Total   string   `xml:"total_amount"`
+		}
+		b := newOperationBuilder().
+			RequestContent("application/xml", Order{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "createOrder", nil)
+
+		require.NotNil(t, op.RequestBody)
+		schema := op.RequestBody.Content["application/xml"].Schema
+		require.NotNil(t, schema)
+		require.NotNil(t, schema.XML)
+		assert.Equal(t, "order", schema.XML.Name)
+		require.Contains(t, schema.Properties, "order_id")
+		require.NotNil(t, schema.Properties["order_id"].XML)
+		assert.True(t, schema.Properties["order_id"].XML.Attribute)
+		assert.Contains(t, schema.Properties, "total_amount")
+	})
+
+	t.Run("xml suffix content type uses xml struct tags", func(t *testing.T) {
+		type Problem struct {
+			Detail string `xml:"detail" json:"detail_json"`
+		}
+		b := newOperationBuilder().
+			RequestContent("application/problem+xml", Problem{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "report", nil)
+
+		schema := op.RequestBody.Content["application/problem+xml"].Schema
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "detail")
+		assert.NotContains(t, schema.Properties, "detail_json")
+	})
+
+	t.Run("xml response uses xml struct tags", func(t *testing.T) {
+		type Order struct {
+			XMLName xml.Name `xml:"order"`
+			ID      string   `xml:"id"`
+		}
+		b := newOperationBuilder().
+			ResponseContent(200, "application/xml", Order{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "getOrder", nil)
+
+		require.NotNil(t, op.Responses["200"])
+		schema := op.Responses["200"].Content["application/xml"].Schema
+		require.NotNil(t, schema)
+		require.NotNil(t, schema.XML)
+		assert.Equal(t, "order", schema.XML.Name)
+		assert.Contains(t, schema.Properties, "id")
+	})
+
+	t.Run("form response uses form struct tags", func(t *testing.T) {
+		type Result struct {
+			Token string `form:"access_token" json:"token_json"`
+		}
+		b := newOperationBuilder().
+			ResponseContent(200, "application/x-www-form-urlencoded", Result{})
+
+		gen := NewSchemaGenerator()
+		op := b.buildOperation(gen, "issue", nil)
+
+		schema := op.Responses["200"].Content["application/x-www-form-urlencoded"].Schema
+		require.NotNil(t, schema)
+		assert.Contains(t, schema.Properties, "access_token")
+		assert.NotContains(t, schema.Properties, "token_json")
 	})
 
 	t.Run("binary with explicit schema", func(t *testing.T) {

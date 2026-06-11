@@ -150,6 +150,48 @@ func TestRouteGroup(t *testing.T) {
 		assert.Equal(t, "page", doc.Paths["/users"].Get.Parameters[1].Name)
 	})
 
+	t.Run("Parameters adds multiple group defaults", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		type commonQuery struct {
+			Page  int `query:"page,omitempty"`
+			Limit int `query:"limit,omitempty"`
+		}
+
+		g := spec.Group().Parameters(QueryParamsFromStruct(commonQuery{})...)
+		g.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
+			Summary("List users")
+
+		doc := spec.Build(r)
+
+		require.NotNil(t, doc.Paths["/users"].Get)
+		require.Len(t, doc.Paths["/users"].Get.Parameters, 2)
+		assert.Equal(t, "page", doc.Paths["/users"].Get.Parameters[0].Name)
+		assert.Equal(t, "limit", doc.Paths["/users"].Get.Parameters[1].Name)
+	})
+
+	t.Run("Query shortcut adds group defaults from struct", func(t *testing.T) {
+		r := mux.NewRouter()
+		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})
+
+		type commonQuery struct {
+			Page  int `query:"page,omitempty"`
+			Limit int `query:"limit,omitempty"`
+		}
+
+		g := spec.Group().Query(commonQuery{})
+		g.Route(r.HandleFunc("/users", dummyHandler).Methods(http.MethodGet)).
+			Summary("List users")
+
+		doc := spec.Build(r)
+
+		require.NotNil(t, doc.Paths["/users"].Get)
+		require.Len(t, doc.Paths["/users"].Get.Parameters, 2)
+		assert.Equal(t, "page", doc.Paths["/users"].Get.Parameters[0].Name)
+		assert.Equal(t, "limit", doc.Paths["/users"].Get.Parameters[1].Name)
+	})
+
 	t.Run("externalDocs from group", func(t *testing.T) {
 		r := mux.NewRouter()
 		spec := NewSpec(Info{Title: "Test", Version: "1.0.0"})

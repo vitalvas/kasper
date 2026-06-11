@@ -1,6 +1,8 @@
 package openapi
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -47,6 +49,17 @@ type Spec struct {
 	security        []SecurityRequirement
 	tags            []Tag
 	securitySchemes map[string]*SecurityScheme
+
+	// ingestedPaths and ingestedWebhooks hold path items merged from
+	// Documents passed to SpecFromDocuments. Build seeds the output from
+	// these before walking the router, so ingested operations and
+	// route-derived operations combine per-method.
+	ingestedPaths    map[string]*PathItem
+	ingestedWebhooks map[string]*PathItem
+
+	// ingestedSchemas holds component schemas from ingested Documents,
+	// merged with reflection-generated schemas at build time.
+	ingestedSchemas map[string]*Schema
 	compResponses   map[string]*Response
 	compParameters  map[string]*Parameter
 	compExamples    map[string]*Example
@@ -66,6 +79,214 @@ func NewSpec(info Info) *Spec {
 		operations: make(map[string]*OperationBuilder),
 		routeOps:   make(map[*mux.Route]*OperationBuilder),
 	}
+}
+
+// SpecFromDocuments ingests one or more already-built Documents (for example
+// schemas fetched from child services) into a single Spec, merging their
+// paths and webhooks per-method. The resulting Spec is served like any other
+// via Handle, and may still register additional routes; route-derived
+// operations combine with the ingested ones per-method.
+//
+// Document metadata is combined: the Info, JSON Schema dialect, external docs,
+// and security come from the first document that sets them; servers, tags, and
+// components are accumulated. Component entries with the same name must be
+// identical across documents, matching MergeDocuments.
+//
+// An error is returned, listing every conflict, when two documents declare the
+// same method on the same path (or webhook) or define the same component name
+// with different content. On error the returned Spec is nil.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#openapi-object
+func SpecFromDocuments(docs ...*Document) (*Spec, error) {
+	s := NewSpec(Info{})
+	s.ingestedPaths = make(map[string]*PathItem)
+	s.ingestedWebhooks = make(map[string]*PathItem)
+
+	var conflicts []string
+
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+
+		s.ingestDocumentMeta(doc)
+		mergePathItems(s.ingestedPaths, doc.Paths, "paths", &conflicts)
+		mergePathItems(s.ingestedWebhooks, doc.Webhooks, "webhooks", &conflicts)
+		s.ingestComponents(doc.Components, &conflicts)
+	}
+
+	if len(conflicts) > 0 {
+		sort.Strings(conflicts)
+		return nil, errors.New(strings.Join(conflicts, "; "))
+	}
+
+	return s, nil
+}
+
+// ingestDocumentMeta copies document-level metadata into the spec. Scalar
+// fields take the first value that is set; slice fields accumulate.
+func (s *Spec) ingestDocumentMeta(doc *Document) {
+	if s.info.Title == "" {
+		s.info = doc.Info
+	}
+	if s.externalDocs == nil {
+		s.externalDocs = doc.ExternalDocs
+	}
+	if len(s.security) == 0 {
+		s.security = doc.Security
+	}
+	s.servers = append(s.servers, doc.Servers...)
+	s.tags = append(s.tags, doc.Tags...)
+}
+
+// mergePathItems merges src path items into dst per-method. A method already
+// present on a path in dst with a different operation produces a conflict.
+func mergePathItems(dst, src map[string]*PathItem, kind string, conflicts *[]string) {
+	for path, item := range src {
+		existing, ok := dst[path]
+		if !ok {
+			clone := *item
+			dst[path] = &clone
+			continue
+		}
+		mergePathItem(existing, item, kind, path, conflicts)
+	}
+}
+
+// mergePathItem merges the operations of src into dst, reporting a conflict
+// when both define the same HTTP method.
+func mergePathItem(dst, src *PathItem, kind, path string, conflicts *[]string) {
+	ops := []struct {
+		method string
+		dst    **Operation
+		src    *Operation
+	}{
+		{http.MethodGet, &dst.Get, src.Get},
+		{http.MethodPut, &dst.Put, src.Put},
+		{http.MethodPost, &dst.Post, src.Post},
+		{http.MethodDelete, &dst.Delete, src.Delete},
+		{http.MethodOptions, &dst.Options, src.Options},
+		{http.MethodHead, &dst.Head, src.Head},
+		{http.MethodPatch, &dst.Patch, src.Patch},
+		{http.MethodTrace, &dst.Trace, src.Trace},
+	}
+
+	for _, o := range ops {
+		if o.src == nil {
+			continue
+		}
+		if *o.dst != nil {
+			*conflicts = append(*conflicts, fmt.Sprintf("%s: duplicate %s %s", kind, o.method, path))
+			continue
+		}
+		*o.dst = o.src
+	}
+
+	if dst.Summary == "" {
+		dst.Summary = src.Summary
+	}
+	if dst.Description == "" {
+		dst.Description = src.Description
+	}
+	dst.Servers = append(dst.Servers, src.Servers...)
+	dst.Parameters = append(dst.Parameters, src.Parameters...)
+}
+
+// ingestComponents merges a document's components into the spec's component
+// maps. Entries with the same name in two documents must be identical, or a
+// conflict is reported.
+func (s *Spec) ingestComponents(comp *Components, conflicts *[]string) {
+	if comp == nil {
+		return
+	}
+
+	if len(comp.SecuritySchemes) > 0 {
+		if s.securitySchemes == nil {
+			s.securitySchemes = make(map[string]*SecurityScheme)
+		}
+		ingestComponentMap("components.securitySchemes", comp.SecuritySchemes, s.securitySchemes, conflicts)
+	}
+	if len(comp.Responses) > 0 {
+		if s.compResponses == nil {
+			s.compResponses = make(map[string]*Response)
+		}
+		ingestComponentMap("components.responses", comp.Responses, s.compResponses, conflicts)
+	}
+	if len(comp.Parameters) > 0 {
+		if s.compParameters == nil {
+			s.compParameters = make(map[string]*Parameter)
+		}
+		ingestComponentMap("components.parameters", comp.Parameters, s.compParameters, conflicts)
+	}
+	if len(comp.Examples) > 0 {
+		if s.compExamples == nil {
+			s.compExamples = make(map[string]*Example)
+		}
+		ingestComponentMap("components.examples", comp.Examples, s.compExamples, conflicts)
+	}
+	if len(comp.RequestBodies) > 0 {
+		if s.compReqBodies == nil {
+			s.compReqBodies = make(map[string]*RequestBody)
+		}
+		ingestComponentMap("components.requestBodies", comp.RequestBodies, s.compReqBodies, conflicts)
+	}
+	if len(comp.Headers) > 0 {
+		if s.compHeaders == nil {
+			s.compHeaders = make(map[string]*Header)
+		}
+		ingestComponentMap("components.headers", comp.Headers, s.compHeaders, conflicts)
+	}
+	if len(comp.Links) > 0 {
+		if s.compLinks == nil {
+			s.compLinks = make(map[string]*Link)
+		}
+		ingestComponentMap("components.links", comp.Links, s.compLinks, conflicts)
+	}
+	if len(comp.Callbacks) > 0 {
+		if s.compCallbacks == nil {
+			s.compCallbacks = make(map[string]*Callback)
+		}
+		ingestComponentMap("components.callbacks", comp.Callbacks, s.compCallbacks, conflicts)
+	}
+	if len(comp.PathItems) > 0 {
+		if s.compPathItems == nil {
+			s.compPathItems = make(map[string]*PathItem)
+		}
+		ingestComponentMap("components.pathItems", comp.PathItems, s.compPathItems, conflicts)
+	}
+	if len(comp.Schemas) > 0 {
+		if s.ingestedSchemas == nil {
+			s.ingestedSchemas = make(map[string]*Schema)
+		}
+		ingestComponentMap("components.schemas", comp.Schemas, s.ingestedSchemas, conflicts)
+	}
+}
+
+// ingestComponentMap copies src entries into dst. An entry whose name already
+// exists in dst with different JSON content is reported as a conflict.
+func ingestComponentMap[T any](kind string, src, dst map[string]T, conflicts *[]string) {
+	for name, val := range src {
+		if prev, ok := dst[name]; ok {
+			if !jsonEqual(prev, val) {
+				*conflicts = append(*conflicts, fmt.Sprintf("%s: duplicate %q with different definitions", kind, name))
+			}
+			continue
+		}
+		dst[name] = val
+	}
+}
+
+// jsonEqual reports whether two values have identical normalized JSON.
+func jsonEqual(a, b any) bool {
+	aBytes, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bBytes, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(normalizeJSONBytes(aBytes)) == string(normalizeJSONBytes(bBytes))
 }
 
 // AddServer adds a server to the spec.
@@ -321,6 +542,13 @@ func (s *Spec) Build(r *mux.Router) *Document {
 		Security:     s.security,
 	}
 
+	// Seed paths from ingested Documents so route-derived operations merge
+	// on top of them per-method.
+	for path, item := range s.ingestedPaths {
+		clone := *item
+		doc.Paths[path] = &clone
+	}
+
 	_ = r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		// Skip build-only routes: they are used only for URL building
 		// and should not appear in the generated spec.
@@ -408,16 +636,23 @@ func (s *Spec) Build(r *mux.Router) *Document {
 		return nil
 	})
 
-	// Build webhooks.
-	if len(s.webhooks) > 0 {
-		doc.Webhooks = make(map[string]*PathItem, len(s.webhooks))
+	// Build webhooks, seeding from ingested Documents.
+	if len(s.webhooks) > 0 || len(s.ingestedWebhooks) > 0 {
+		doc.Webhooks = make(map[string]*PathItem, len(s.webhooks)+len(s.ingestedWebhooks))
+		for name, item := range s.ingestedWebhooks {
+			clone := *item
+			doc.Webhooks[name] = &clone
+		}
 		for name, methods := range s.webhooks {
-			pathItem := &PathItem{}
+			pathItem, ok := doc.Webhooks[name]
+			if !ok {
+				pathItem = &PathItem{}
+				doc.Webhooks[name] = pathItem
+			}
 			for method, builder := range methods {
 				op := builder.buildOperation(gen, "", nil)
 				assignOperation(pathItem, method, op)
 			}
-			doc.Webhooks[name] = pathItem
 		}
 	}
 
@@ -458,6 +693,19 @@ func (s *Spec) Build(r *mux.Router) *Document {
 // See: https://spec.openapis.org/oas/v3.1.0#components-object
 func (s *Spec) buildComponents(gen *SchemaGenerator) *Components {
 	schemas := gen.Schemas()
+
+	// Merge schemas ingested from Documents. Reflection-generated schemas
+	// take precedence on name collision (the local route is authoritative).
+	if len(s.ingestedSchemas) > 0 {
+		if schemas == nil {
+			schemas = make(map[string]*Schema, len(s.ingestedSchemas))
+		}
+		for name, schema := range s.ingestedSchemas {
+			if _, exists := schemas[name]; !exists {
+				schemas[name] = schema
+			}
+		}
+	}
 
 	hasData := len(schemas) > 0 ||
 		len(s.securitySchemes) > 0 ||

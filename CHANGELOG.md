@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/vitalvas/kasper/compare/v0.20.0...v0.21.0) (2026-06-11)
+
+
+### Features
+
+* **openapi:** add SpecFromDocuments to serve merged documents via Handle ([c719440](https://github.com/vitalvas/kasper/commit/c719440de506b9b42ecfd98b9f2ec5b006ffee51))
+* **openapi:** add struct-based query params and content-type-aware xml tags ([72442a4](https://github.com/vitalvas/kasper/commit/72442a4ae3a1f1b68cbdf2636b10717da4279407))
+
 ## [0.20.0](https://github.com/vitalvas/kasper/compare/v0.19.0...v0.20.0) (2026-06-02)
 
 
