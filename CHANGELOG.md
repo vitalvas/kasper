@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/vitalvas/kasper/compare/v0.22.0...v0.22.1) (2026-06-14)
+
+
+### Bug Fixes
+
+* **websocket:** send single-frame messages with FIN bit set ([a935368](https://github.com/vitalvas/kasper/commit/a93536891559e44e8d88ae3e3e8d8dec80c7c9bd))
+
 ## [0.22.0](https://github.com/vitalvas/kasper/compare/v0.21.0...v0.22.0) (2026-06-14)
 
 
