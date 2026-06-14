@@ -1000,6 +1000,8 @@ type messageWriter struct {
 	closed     bool
 	firstWrite bool
 	buf        []byte // buffer for compressed message assembly (RFC 7692)
+	pending    []byte // last written chunk, held so Close can mark it final
+	hasPending bool
 }
 
 func (w *messageWriter) Write(p []byte) (int, error) {
@@ -1014,6 +1016,23 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 
+	// Defer the chunk by one frame so Close can send the last chunk with the
+	// FIN bit set. This keeps a single-Write message (e.g. WriteJSON) to one
+	// frame instead of a data frame plus a trailing empty continuation frame.
+	if w.hasPending {
+		if err := w.flushPending(false); err != nil {
+			return 0, err
+		}
+	}
+
+	w.pending = append(w.pending[:0], p...)
+	w.hasPending = true
+	return len(p), nil
+}
+
+// flushPending sends the buffered chunk as a single frame. The first frame of
+// the message uses the message type; subsequent frames are continuations.
+func (w *messageWriter) flushPending(final bool) error {
 	frameType := w.c.writeFrameType
 	if w.firstWrite {
 		frameType = continuationFrame
@@ -1021,11 +1040,9 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 		w.firstWrite = true
 	}
 
-	_, err := w.c.writeFrameWithCompress(frameType, p, false, false)
-	if err != nil {
-		return 0, err
-	}
-	return len(p), nil
+	_, err := w.c.writeFrameWithCompress(frameType, w.pending, final, false)
+	w.hasPending = false
+	return err
 }
 
 func (w *messageWriter) Close() error {
@@ -1043,12 +1060,9 @@ func (w *messageWriter) Close() error {
 		return err
 	}
 
-	frameType := w.c.writeFrameType
-	if w.firstWrite {
-		frameType = continuationFrame
-	}
-
-	_, err := w.c.writeFrameWithCompress(frameType, nil, true, false)
+	// Send the final frame with the buffered payload (empty if nothing was
+	// written) and the FIN bit set, completing the message in one frame.
+	err := w.flushPending(true)
 	w.c.writeFrameType = 0
 	w.c.writeMu.Unlock()
 	return err

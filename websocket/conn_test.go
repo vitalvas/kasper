@@ -1112,6 +1112,176 @@ func TestMessageWriter(t *testing.T) {
 		err = w.Close()
 		require.NoError(t, err)
 	})
+
+	t.Run("Close without any Write sends one empty final frame", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+
+		w, err := conn.NextWriter(TextMessage)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		// Exactly one frame: TextMessage opcode, FIN set, zero-length payload.
+		data := mock.writeBuf.Bytes()
+		require.Len(t, data, 2)
+		assert.Equal(t, byte(TextMessage), data[0]&0x0f)
+		assert.NotZero(t, data[0]&finalBit, "empty message must set FIN")
+		assert.EqualValues(t, 0, data[1]&0x7f, "payload length must be zero")
+
+		// The peer reads it as an empty message, not as a stray continuation.
+		clientMock := &mockConn{
+			readBuf:  bytes.NewBuffer(data),
+			writeBuf: &bytes.Buffer{},
+		}
+		clientConn := newConn(clientMock, false, 0, 0)
+		mt, msg, err := clientConn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, mt)
+		assert.Empty(t, msg)
+	})
+
+	t.Run("Empty Write then Close sends one empty final frame", func(t *testing.T) {
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+
+		w, err := conn.NextWriter(TextMessage)
+		require.NoError(t, err)
+
+		n, err := w.Write([]byte{})
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
+
+		require.NoError(t, w.Close())
+
+		data := mock.writeBuf.Bytes()
+		require.Len(t, data, 2)
+		assert.Equal(t, byte(TextMessage), data[0]&0x0f)
+		assert.NotZero(t, data[0]&finalBit)
+		assert.EqualValues(t, 0, data[1]&0x7f)
+	})
+
+	t.Run("Reused write buffer does not corrupt fragmented message", func(t *testing.T) {
+		serverMock := newMockConn()
+		serverConn := newConn(serverMock, true, 4096, 4096)
+
+		w, err := serverConn.NextWriter(TextMessage)
+		require.NoError(t, err)
+
+		// Caller reuses the same backing slice across writes (e.g. a scratch
+		// buffer). The writer must copy each chunk, not retain the caller slice.
+		scratch := make([]byte, 5)
+		copy(scratch, "aaaaa")
+		_, err = w.Write(scratch)
+		require.NoError(t, err)
+
+		copy(scratch, "bbbbb")
+		_, err = w.Write(scratch)
+		require.NoError(t, err)
+
+		require.NoError(t, w.Close())
+
+		clientMock := &mockConn{
+			readBuf:  bytes.NewBuffer(serverMock.writeBuf.Bytes()),
+			writeBuf: &bytes.Buffer{},
+		}
+		clientConn := newConnFromRWC(connConfig{
+			rwc:             clientMock,
+			netConn:         nil,
+			isServer:        false,
+			readBufferSize:  4096,
+			writeBufferSize: 4096,
+			writeBufferPool: nil,
+		})
+
+		mt, msg, err := clientConn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, mt)
+		assert.Equal(t, "aaaaabbbbb", string(msg))
+	})
+
+	t.Run("Large single Write roundtrips through deferred flush", func(t *testing.T) {
+		// A single Write larger than 65535 bytes exercises 64-bit extended
+		// length encoding on the deferred-buffering path (flushPending on Close).
+		serverMock := newMockConn()
+		serverConn := newConn(serverMock, true, 4096, 4096)
+		serverConn.SetReadLimit(1024 * 1024)
+
+		payload := make([]byte, 70000)
+		for i := range payload {
+			payload[i] = byte(i % 256)
+		}
+
+		w, err := serverConn.NextWriter(BinaryMessage)
+		require.NoError(t, err)
+		n, err := w.Write(payload)
+		require.NoError(t, err)
+		assert.Equal(t, len(payload), n)
+		require.NoError(t, w.Close())
+
+		// Single frame: BinaryMessage opcode, FIN set, 64-bit length.
+		data := serverMock.writeBuf.Bytes()
+		require.GreaterOrEqual(t, len(data), 2)
+		assert.Equal(t, byte(BinaryMessage), data[0]&0x0f)
+		assert.NotZero(t, data[0]&finalBit)
+		assert.Equal(t, byte(payloadLen64), data[1]&payloadLenMask)
+
+		clientMock := &mockConn{
+			readBuf:  bytes.NewBuffer(data),
+			writeBuf: &bytes.Buffer{},
+		}
+		clientConn := newConnFromRWC(connConfig{
+			rwc:             clientMock,
+			netConn:         nil,
+			isServer:        false,
+			readBufferSize:  4096,
+			writeBufferSize: 4096,
+			writeBufferPool: nil,
+		})
+		clientConn.SetReadLimit(1024 * 1024)
+
+		mt, got, err := clientConn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, BinaryMessage, mt)
+		assert.Equal(t, payload, got)
+	})
+
+	t.Run("Write exceeding max frame size errors on Close", func(t *testing.T) {
+		// With deferred buffering a single Write is flushed on Close, so the
+		// frame-size limit is enforced there rather than during Write.
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(4)
+
+		w, err := conn.NextWriter(BinaryMessage)
+		require.NoError(t, err)
+
+		n, err := w.Write([]byte("toolong"))
+		require.NoError(t, err, "the over-limit chunk is buffered, not yet flushed")
+		assert.Equal(t, 7, n)
+
+		err = w.Close()
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+	})
+
+	t.Run("Over-limit chunk flushed by next Write errors on that Write", func(t *testing.T) {
+		// The over-limit chunk is buffered by the first Write; the second Write
+		// flushes it, so the error surfaces from Write, not Close. This covers
+		// the flushPending error branch inside Write.
+		mock := newMockConn()
+		conn := newConn(mock, true, 0, 0)
+		conn.SetMaxFrameSize(4)
+
+		w, err := conn.NextWriter(BinaryMessage)
+		require.NoError(t, err)
+
+		// Buffered, not yet flushed: no error here.
+		_, err = w.Write([]byte("toolong"))
+		require.NoError(t, err)
+
+		// This Write flushes the buffered over-limit chunk and fails.
+		_, err = w.Write([]byte("ok"))
+		assert.ErrorIs(t, err, ErrFrameSizeExceeded)
+	})
 }
 
 func TestNextReaderEdgeCases(t *testing.T) {
@@ -1579,6 +1749,42 @@ func BenchmarkWriteMessageClient(b *testing.B) {
 	}
 }
 
+func BenchmarkNextWriterFragmented(b *testing.B) {
+	chunkCounts := []int{1, 4, 16}
+	const chunkSize = 1024
+
+	chunk := make([]byte, chunkSize)
+	for i := range chunk {
+		chunk[i] = byte(i % 256)
+	}
+
+	for _, chunks := range chunkCounts {
+		b.Run(fmt.Sprintf("Chunks_%d", chunks), func(b *testing.B) {
+			mock := &benchMockConn{buf: make([]byte, 0, chunkSize*chunks*2)}
+			conn := newConn(mock, true, 0, 0)
+
+			b.ResetTimer()
+			b.SetBytes(int64(chunkSize * chunks))
+
+			for b.Loop() {
+				mock.Reset()
+				w, err := conn.NextWriter(TextMessage)
+				if err != nil {
+					b.Fatal(err)
+				}
+				for range chunks {
+					if _, err := w.Write(chunk); err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := w.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkReadMessage(b *testing.B) {
 	sizes := []struct {
 		name string
@@ -1729,6 +1935,74 @@ func FuzzReadFrame(f *testing.F) {
 		conn.SetReadLimit(1024 * 1024)
 
 		_, _, _ = conn.ReadMessage()
+	})
+}
+
+// FuzzNextWriterRoundtrip writes an arbitrary payload through NextWriter,
+// fragmented at an arbitrary chunk size, then reads it back. The reassembled
+// message must equal the original regardless of how the payload is split.
+func FuzzNextWriterRoundtrip(f *testing.F) {
+	f.Add([]byte("hello world"), uint8(5))
+	f.Add([]byte(""), uint8(1))
+	f.Add([]byte("a"), uint8(1))
+	f.Add(bytes.Repeat([]byte("x"), 300), uint8(64))
+	f.Add([]byte{0x00, 0xff, 0x10, 0x80}, uint8(2))
+
+	f.Fuzz(func(t *testing.T, payload []byte, chunk uint8) {
+		// Text messages must be valid UTF-8 on read; use BinaryMessage so any
+		// byte sequence is a legal message and only fragmentation is exercised.
+		serverMock := newMockConn()
+		serverConn := newConn(serverMock, true, 4096, 4096)
+		serverConn.SetReadLimit(1024 * 1024)
+
+		w, err := serverConn.NextWriter(BinaryMessage)
+		if err != nil {
+			t.Fatalf("NextWriter: %v", err)
+		}
+
+		step := int(chunk)
+		if step == 0 {
+			step = 1
+		}
+		for off := 0; off < len(payload); off += step {
+			end := min(off+step, len(payload))
+			if _, err := w.Write(payload[off:end]); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		clientMock := &mockConn{
+			readBuf:  bytes.NewBuffer(serverMock.writeBuf.Bytes()),
+			writeBuf: &bytes.Buffer{},
+		}
+		clientConn := newConnFromRWC(connConfig{
+			rwc:             clientMock,
+			netConn:         nil,
+			isServer:        false,
+			readBufferSize:  4096,
+			writeBufferSize: 4096,
+			writeBufferPool: nil,
+		})
+		clientConn.SetReadLimit(1024 * 1024)
+
+		mt, got, err := clientConn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		if mt != BinaryMessage {
+			t.Fatalf("message type: got %d, want %d", mt, BinaryMessage)
+		}
+		if !bytes.Equal(got, payload) {
+			t.Fatalf("payload mismatch: got %q, want %q", got, payload)
+		}
+
+		// No bytes may remain on the wire (no stray trailing frame).
+		if rem := clientMock.readBuf.Len(); rem != 0 {
+			t.Fatalf("unexpected %d trailing bytes on the wire", rem)
+		}
 	})
 }
 
@@ -2058,7 +2332,61 @@ func TestMessageWriterContinuation(t *testing.T) {
 		require.NoError(t, err)
 
 		data := mock.writeBuf.Bytes()
-		assert.True(t, len(data) > 0)
+
+		// First frame: TextMessage opcode, FIN clear (more fragments follow).
+		require.GreaterOrEqual(t, len(data), 2)
+		assert.Equal(t, byte(TextMessage), data[0]&0x0f)
+		assert.Zero(t, data[0]&finalBit, "first fragment must not set FIN")
+
+		// Second frame: continuation opcode, FIN set, carrying the last chunk.
+		// Header is 2 bytes; first frame payload is len("hello")=5.
+		second := data[2+5:]
+		require.GreaterOrEqual(t, len(second), 2)
+		assert.Equal(t, byte(continuationFrame), second[0]&0x0f)
+		assert.NotZero(t, second[0]&finalBit, "last fragment must set FIN")
+		assert.EqualValues(t, len(("world")), second[1]&0x7f, "last fragment carries the final chunk, not an empty frame")
+
+		// Exactly two frames: no trailing empty continuation frame.
+		assert.Len(t, data, (2+5)+(2+5))
+	})
+
+	t.Run("Fragmented write roundtrips and leaves no stray frame", func(t *testing.T) {
+		serverMock := newMockConn()
+		serverConn := newConn(serverMock, true, 4096, 4096)
+
+		w, err := serverConn.NextWriter(TextMessage)
+		require.NoError(t, err)
+		_, err = w.Write([]byte("hello "))
+		require.NoError(t, err)
+		_, err = w.Write([]byte("world"))
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		// A second message follows on the same wire. It must read cleanly,
+		// proving the first message left no trailing empty continuation frame.
+		require.NoError(t, serverConn.WriteMessage(TextMessage, []byte("next")))
+
+		clientMock := &mockConn{
+			readBuf:  bytes.NewBuffer(serverMock.writeBuf.Bytes()),
+			writeBuf: &bytes.Buffer{},
+		}
+		clientConn := newConnFromRWC(connConfig{
+			rwc:             clientMock,
+			netConn:         nil,
+			isServer:        false,
+			readBufferSize:  4096,
+			writeBufferSize: 4096,
+			writeBufferPool: nil,
+		})
+
+		mt, msg, err := clientConn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, mt)
+		assert.Equal(t, "hello world", string(msg))
+
+		_, msg, err = clientConn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, "next", string(msg))
 	})
 }
 
@@ -3225,7 +3553,12 @@ func TestMessageWriterWriteError(t *testing.T) {
 		w, err := conn.NextWriter(TextMessage)
 		require.NoError(t, err)
 
+		// The first Write buffers the chunk; the second Write flushes it to the
+		// wire, where writeFrameWithCompress fails and the error propagates.
 		_, err = w.Write([]byte("hello"))
+		require.NoError(t, err)
+
+		_, err = w.Write([]byte("world"))
 		assert.ErrorIs(t, err, writeErr)
 	})
 }

@@ -83,6 +83,46 @@ func TestJSONReadWrite(t *testing.T) {
 	})
 }
 
+func TestJSONSequentialReadWrite(t *testing.T) {
+	upgrader := &Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		for i := 1; i <= 3; i++ {
+			if err := conn.WriteJSON(testMessage{Name: "msg", Value: i}); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	wsURL := fmt.Sprintf("ws%s", strings.TrimPrefix(server.URL, "http"))
+
+	// Each WriteJSON must produce a single FIN frame so that consecutive
+	// ReadJSON calls do not trip over a trailing empty continuation frame.
+	t.Run("Consecutive reads after consecutive writes", func(t *testing.T) {
+		d := &Dialer{}
+		conn, _, err := d.Dial(wsURL, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		for i := 1; i <= 3; i++ {
+			var received testMessage
+			err = conn.ReadJSON(&received)
+			require.NoError(t, err)
+			assert.Equal(t, "msg", received.Name)
+			assert.Equal(t, i, received.Value)
+		}
+	})
+}
+
 func TestReadJSONErrors(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -272,15 +312,11 @@ func TestWriteJSONEncodingError(t *testing.T) {
 
 func TestWriteJSONCloseError(t *testing.T) {
 	t.Run("Encode succeeds but Close fails", func(t *testing.T) {
-		// failWriter allows the first N writes to succeed, then returns an error.
-		writeCount := 0
+		// Encode only buffers into the message writer; the message is flushed to
+		// the wire as a single FIN frame on Close. Fail that wire write.
 		fw := &failWriterConn{
-			readBuf: new(bytes.Buffer),
-			failAfter: func() bool {
-				writeCount++
-				// First write (Encode's frame) succeeds, second write (Close's final frame) fails.
-				return writeCount > 1
-			},
+			readBuf:   new(bytes.Buffer),
+			failAfter: func() bool { return true },
 		}
 
 		conn := newConnFromRWC(connConfig{
