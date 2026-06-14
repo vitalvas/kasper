@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/vitalvas/kasper/compare/v0.21.0...v0.22.0) (2026-06-14)
+
+
+### Features
+
+* **e2ee:** add end-to-end HTTP payload encryption package ([1b2adc7](https://github.com/vitalvas/kasper/commit/1b2adc716c041eef884fecae2e5def72e40c1882))
+
 ## [0.21.0](https://github.com/vitalvas/kasper/compare/v0.20.0...v0.21.0) (2026-06-11)
 
 
