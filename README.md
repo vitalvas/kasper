@@ -161,3 +161,21 @@ Authenticated cookie values: AES-GCM encryption (`SecureCookie`) or HMAC-SHA256 
 | Key rotation | Multi-codec via `CodecsFromKeys` / `SignedCodecsFromKeys` |
 | Serialization | JSON (default), pluggable `Serializer` interface |
 | Key generation | `GenerateKey(size)` / `GenerateSignedKey(size)` |
+
+---
+
+## e2ee
+
+End-to-end encryption for HTTP API payloads (draft-vasylenko-e2ee-http). Protects request/response bodies independently of TLS, so TLS-terminating intermediaries cannot read or tamper with them.
+
+| Feature | Standard | Details |
+|---------|----------|---------|
+| Key agreement | RFC 7748 | X25519 ephemeral key exchange, per-request or per-`Session` |
+| Key derivation | RFC 5869 | HKDF-SHA256 with separate request/response keys, bound to issuer/AEAD/kid |
+| Encryption | NIST SP 800-38D | AES-128-GCM, AES-192-GCM, AES-256-GCM; body is `nonce \|\| ciphertext \|\| tag` |
+| Control metadata | RFC 9651 | `E2EE-Session` Structured Field, deterministically serialized into AEAD AAD |
+| Key discovery | -- | `/.well-known/encryption-keys` JSON key set, `ServerKeySet.Handler` and `FetchKeySet` |
+| Client Transport | -- | `http.RoundTripper` for automatic request encryption and response decryption |
+| Server Middleware | -- | `mux.MiddlewareFunc` decrypts requests and encrypts handler responses |
+| Replay protection | -- | `ReplayCache` interface with in-memory default, timestamp/skew validation |
+| Errors | RFC 9457 | Problem Details responses with `urn:ietf:params:e2ee:error:<code>` types |
