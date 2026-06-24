@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vitalvas/kasper/compare/v0.22.1...v0.23.0) (2026-06-24)
+
+
+### Features
+
+* **mux:** add VarStruct to decode route variables into a struct ([23970d6](https://github.com/vitalvas/kasper/commit/23970d6a7df798387513441186a3123ae88cb7e9))
+
 ## [0.22.1](https://github.com/vitalvas/kasper/compare/v0.22.0...v0.22.1) (2026-06-14)
 
 
