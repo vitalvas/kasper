@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vitalvas/kasper/compare/v0.23.0...v0.24.0) (2026-06-24)
+
+
+### Features
+
+* **openapi:** add Schemaer interface and RefType for oneOf unions ([adb10f7](https://github.com/vitalvas/kasper/commit/adb10f7dfb967551009383fcc27b0baaa6031916))
+
 ## [0.23.0](https://github.com/vitalvas/kasper/compare/v0.22.1...v0.23.0) (2026-06-24)
 
 
