@@ -1,6 +1,9 @@
 package openapi
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 // OneOf returns a Schema that validates against exactly one of the given
 // subschemas (JSON Schema "oneOf"). Pair it with WithDiscriminator for
@@ -43,6 +46,33 @@ func Not(schema *Schema) *Schema {
 // See: https://spec.openapis.org/oas/v3.1.0#reference-object
 func RefSchema(name string) *Schema {
 	return &Schema{Ref: fmt.Sprintf("#/components/schemas/%s", name)}
+}
+
+// RefType returns a placeholder Schema that the schema generator replaces
+// with a $ref to the component schema generated for v's type, registering
+// that type as a named component if it has not been seen yet. Use it inside
+// an OpenAPISchema override (see Schemaer) to reference another Go type
+// without hardcoding its component name:
+//
+//	func (RecordValues) OpenAPISchema() *openapi.Schema {
+//	    return openapi.ArraySchema(openapi.OneOf(
+//	        openapi.StringSchema(),
+//	        openapi.RefType(RecordValue{}),
+//	    ))
+//	}
+//
+// A marker is resolved wherever it appears in the override, including inside
+// OneOf, AnyOf, AllOf, Not, ArraySchema items, and nested properties.
+//
+// Outside an OpenAPISchema override the marker has no effect and serializes
+// as an empty schema. RefType(nil) returns an empty schema.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#reference-object
+func RefType(v any) *Schema {
+	if v == nil {
+		return &Schema{}
+	}
+	return &Schema{refType: reflect.TypeOf(v)}
 }
 
 // WithDiscriminator sets the OpenAPI discriminator on a composition

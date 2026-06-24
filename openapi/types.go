@@ -3,6 +3,7 @@ package openapi
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"gopkg.in/yaml.v3"
 )
@@ -479,6 +480,12 @@ type Schema struct {
 	Discriminator *Discriminator `json:"discriminator,omitempty"`
 	ExternalDocs  *ExternalDocs  `json:"externalDocs,omitempty"`
 	XML           *XML           `json:"xml,omitempty"`
+
+	// refType, when non-nil, marks this node as a placeholder for a named
+	// component reference to a Go type. The schema generator registers the
+	// type and replaces the node with a real $ref during generation. Being
+	// unexported, it never serializes to JSON or YAML. See RefType.
+	refType reflect.Type
 }
 
 // Components holds reusable OpenAPI objects. All objects defined within the

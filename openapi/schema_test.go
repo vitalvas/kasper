@@ -1603,3 +1603,241 @@ func TestSchemaGeneratorDocument(t *testing.T) {
 		assert.NotContains(t, doc.Components.Schemas, "ExampleUser")
 	})
 }
+
+// RecordValue is the structured variant referenced by RecordValues via RefType.
+type RecordValue struct {
+	Priority int    `json:"priority"`
+	Target   string `json:"target"`
+}
+
+// RecordValues models a DNS RRset value list: each element is either a plain
+// string or a structured RecordValue. It overrides reflective generation to
+// emit the polymorphic oneOf union.
+type RecordValues []any
+
+func (RecordValues) OpenAPISchema() *Schema {
+	return ArraySchema(OneOf(
+		StringSchema(),
+		RefType(RecordValue{}),
+	))
+}
+
+// RecordSet is a parent type embedding a Schemaer field, exercising the
+// end-to-end DNS use case.
+type RecordSet struct {
+	Name   string       `json:"name"`
+	Values RecordValues `json:"values"`
+}
+
+// nilSchemaer returns nil from OpenAPISchema, so the generator must fall back
+// to reflective generation.
+type nilSchemaer struct {
+	Field string `json:"field"`
+}
+
+func (nilSchemaer) OpenAPISchema() *Schema { return nil }
+
+// nestedRefSchemaer places RefType markers at depth inside properties and items.
+type nestedRefSchemaer struct{}
+
+func (nestedRefSchemaer) OpenAPISchema() *Schema {
+	return &Schema{
+		Type: SchemaTypeObject,
+		Properties: map[string]*Schema{
+			"items": ArraySchema(RefType(RecordValue{})),
+		},
+	}
+}
+
+// allContainersSchemaer places a RefType marker in every container field the
+// resolver walks, so a single override exercises the whole walk.
+type allContainersSchemaer struct{}
+
+func (allContainersSchemaer) OpenAPISchema() *Schema {
+	return &Schema{
+		Contains:             RefType(RecordValue{}),
+		AdditionalProperties: RefType(RecordValue{}),
+		Not:                  RefType(RecordValue{}),
+		If:                   RefType(RecordValue{}),
+		Then:                 RefType(RecordValue{}),
+		Else:                 RefType(RecordValue{}),
+		PrefixItems:          []*Schema{RefType(RecordValue{})},
+		AllOf:                []*Schema{RefType(RecordValue{})},
+		AnyOf:                []*Schema{RefType(RecordValue{})},
+		PatternProperties:    map[string]*Schema{"^x-": RefType(RecordValue{})},
+		Defs:                 map[string]*Schema{"rv": RefType(RecordValue{})},
+		DependentSchemas:     map[string]*Schema{"flag": RefType(RecordValue{})},
+	}
+}
+
+func TestSchemaer(t *testing.T) {
+	t.Run("override registers as named component with $ref", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		schema := g.Generate(RecordValues{})
+
+		assert.Equal(t, "#/components/schemas/RecordValues", schema.Ref)
+
+		override := g.Schemas()["RecordValues"]
+		require.NotNil(t, override)
+		assert.Equal(t, SchemaTypeArray, override.Type)
+		require.NotNil(t, override.Items)
+		require.Len(t, override.Items.OneOf, 2)
+		assert.Equal(t, SchemaTypeString, override.Items.OneOf[0].Type)
+		assert.Equal(t, "#/components/schemas/RecordValue", override.Items.OneOf[1].Ref)
+
+		// The referenced type is auto-registered as a component.
+		rv := g.Schemas()["RecordValue"]
+		require.NotNil(t, rv)
+		assert.Contains(t, rv.Properties, "priority")
+		assert.Contains(t, rv.Properties, "target")
+	})
+
+	t.Run("DNS use case end-to-end", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(RecordSet{})
+
+		parent := g.Schemas()["RecordSet"]
+		require.NotNil(t, parent)
+		values := parent.Properties["values"]
+		require.NotNil(t, values)
+		assert.Equal(t, "#/components/schemas/RecordValues", values.Ref)
+
+		items := g.Schemas()["RecordValues"].Items
+		require.NotNil(t, items)
+		require.Len(t, items.OneOf, 2)
+		assert.Equal(t, SchemaTypeString, items.OneOf[0].Type)
+		assert.Equal(t, "#/components/schemas/RecordValue", items.OneOf[1].Ref)
+	})
+
+	t.Run("pointer field yields nullable anyOf wrapping the $ref", func(t *testing.T) {
+		type holder struct {
+			Vals *RecordValues `json:"vals"`
+		}
+
+		g := NewSchemaGenerator()
+		g.Generate(holder{})
+
+		field := g.Schemas()["holder"].Properties["vals"]
+		require.NotNil(t, field)
+		require.Len(t, field.AnyOf, 2)
+		assert.Equal(t, "#/components/schemas/RecordValues", field.AnyOf[0].Ref)
+		assert.Equal(t, SchemaTypeNull, field.AnyOf[1].Type)
+	})
+
+	t.Run("nil override falls back to reflective generation", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		schema := g.Generate(nilSchemaer{})
+
+		assert.Equal(t, "#/components/schemas/nilSchemaer", schema.Ref)
+		reflected := g.Schemas()["nilSchemaer"]
+		require.NotNil(t, reflected)
+		assert.Equal(t, SchemaTypeObject, reflected.Type)
+		assert.Contains(t, reflected.Properties, "field")
+	})
+
+	t.Run("markers nested at depth are resolved", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(nestedRefSchemaer{})
+
+		override := g.Schemas()["nestedRefSchemaer"]
+		require.NotNil(t, override)
+		items := override.Properties["items"]
+		require.NotNil(t, items)
+		require.NotNil(t, items.Items)
+		assert.Equal(t, "#/components/schemas/RecordValue", items.Items.Ref)
+		assert.NotNil(t, g.Schemas()["RecordValue"])
+	})
+
+	t.Run("markers in all container fields are resolved", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(allContainersSchemaer{})
+
+		s := g.Schemas()["allContainersSchemaer"]
+		require.NotNil(t, s)
+
+		ref := "#/components/schemas/RecordValue"
+		assert.Equal(t, ref, s.Contains.Ref)
+		assert.Equal(t, ref, s.AdditionalProperties.Ref)
+		assert.Equal(t, ref, s.Not.Ref)
+		assert.Equal(t, ref, s.If.Ref)
+		assert.Equal(t, ref, s.Then.Ref)
+		assert.Equal(t, ref, s.Else.Ref)
+		assert.Equal(t, ref, s.PrefixItems[0].Ref)
+		assert.Equal(t, ref, s.AllOf[0].Ref)
+		assert.Equal(t, ref, s.AnyOf[0].Ref)
+		assert.Equal(t, ref, s.PatternProperties["^x-"].Ref)
+		assert.Equal(t, ref, s.Defs["rv"].Ref)
+		assert.Equal(t, ref, s.DependentSchemas["flag"].Ref)
+		assert.NotNil(t, g.Schemas()["RecordValue"])
+	})
+
+	t.Run("referenced type registered once across fields", func(t *testing.T) {
+		type twoFields struct {
+			A RecordValues `json:"a"`
+			B RecordValues `json:"b"`
+		}
+
+		g := NewSchemaGenerator()
+		g.Generate(twoFields{})
+
+		// Both the union type and the referenced value type appear exactly once.
+		assert.Contains(t, g.Schemas(), "RecordValues")
+		assert.Contains(t, g.Schemas(), "RecordValue")
+	})
+
+	t.Run("override serializes without the marker field", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.Generate(RecordValues{})
+
+		data, err := json.Marshal(g.Schemas()["RecordValues"])
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"$ref":"#/components/schemas/RecordValue"`)
+		assert.NotContains(t, string(data), "refType")
+	})
+}
+
+func TestSchemaerInline(t *testing.T) {
+	// When fieldTag is set the override is inlined rather than registered as
+	// a $ref component, matching the rule for named structs under fieldTag.
+	// RefType markers inside it likewise inline their referenced struct,
+	// keeping the whole schema self-contained as form/query schemas require.
+	t.Run("fieldTag inlines override and its RefType markers", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		schema := g.Generate(RecordValues{})
+
+		assert.Empty(t, schema.Ref)
+		assert.Empty(t, g.Schemas(), "fieldTag schemas should not be stored as components")
+		assert.Equal(t, SchemaTypeArray, schema.Type)
+		require.Len(t, schema.Items.OneOf, 2)
+		assert.Equal(t, SchemaTypeString, schema.Items.OneOf[0].Type)
+
+		// The referenced struct is inlined, not referenced by $ref.
+		ref := schema.Items.OneOf[1]
+		assert.Empty(t, ref.Ref)
+		assert.Equal(t, SchemaTypeObject, ref.Type)
+		assert.Contains(t, ref.Properties, "priority")
+	})
+
+	t.Run("nullable inline override marks null", func(t *testing.T) {
+		g := NewSchemaGenerator()
+		g.fieldTag = "form"
+		vals := RecordValues{}
+		schema := g.Generate(&vals)
+
+		assert.Contains(t, schema.Type.Values(), "null")
+	})
+}
+
+func TestRefType(t *testing.T) {
+	t.Run("nil value yields empty schema", func(t *testing.T) {
+		assert.Equal(t, &Schema{}, RefType(nil))
+	})
+
+	t.Run("marker is invisible to JSON until resolved", func(t *testing.T) {
+		// An unresolved marker (used outside an override) serializes as {}.
+		data, err := json.Marshal(RefType(RecordValue{}))
+		require.NoError(t, err)
+		assert.Equal(t, "{}", string(data))
+	})
+}

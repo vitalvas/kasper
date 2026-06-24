@@ -38,6 +38,29 @@ type Exampler interface {
 	OpenAPIExample() any
 }
 
+// Schemaer can be implemented by a type to supply its own JSON Schema,
+// overriding the generator's reflection-based output. This is the way to
+// express a polymorphic field (e.g. an interface{} or []any that holds
+// either a string or a structured object) as an explicit oneOf union.
+//
+//	func (RecordValues) OpenAPISchema() *openapi.Schema {
+//	    return openapi.ArraySchema(openapi.OneOf(
+//	        openapi.StringSchema(),
+//	        openapi.RefType(RecordValue{}),
+//	    ))
+//	}
+//
+// The returned schema may embed RefType markers to reference other Go types;
+// the generator registers each referenced type as a named component and
+// replaces the marker with a $ref. When the implementing type itself has a
+// component name (via Namer or as an exported package-level type), its
+// override schema is registered as a named component and referenced via $ref.
+//
+// See: https://spec.openapis.org/oas/v3.1.0#schema-object
+type Schemaer interface {
+	OpenAPISchema() *Schema
+}
+
 // SchemaGenerator converts Go types to JSON Schema objects and collects
 // named types into a component schemas map for $ref deduplication.
 //
@@ -140,6 +163,42 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 		t = t.Elem()
 	}
 
+	// Schemaer override: the type supplies its own schema, overriding
+	// reflective generation. This is checked before the named-struct and
+	// inline dispatch so it can override any kind (struct, slice, interface).
+	if sc, ok := reflect.New(t).Interface().(Schemaer); ok {
+		if override := sc.OpenAPISchema(); override != nil {
+			// Resolve any RefType markers into real $refs, registering the
+			// referenced types as named components along the way.
+			g.resolveRefTypes(override)
+
+			// Register as a named component when the type has a component
+			// name; otherwise inline. fieldTag schemas are always inlined
+			// because their property names differ from the canonical JSON.
+			if name := g.schemaName(t); name != "" && g.fieldTag == "" {
+				if !g.visited[t] {
+					g.visited[t] = true
+					g.schemas[name] = override
+				}
+				ref := &Schema{Ref: fmt.Sprintf("#/components/schemas/%s", name)}
+				if nullable {
+					return &Schema{
+						AnyOf: []*Schema{
+							ref,
+							{Type: SchemaTypeNull},
+						},
+					}
+				}
+				return ref
+			}
+
+			if nullable {
+				applyNullable(override)
+			}
+			return override
+		}
+	}
+
 	// Named struct types → $ref (except time.Time which is a special case).
 	// When fieldTag is set, property names differ from the canonical JSON
 	// representation, so we skip $ref and always generate inline.
@@ -177,6 +236,62 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 		applyNullable(schema)
 	}
 	return schema
+}
+
+// resolveRefTypes recursively walks a Schemaer override schema and replaces
+// every node carrying a RefType marker with the $ref produced by generating
+// that Go type, registering the referenced type as a named component. A
+// resolved node is overwritten in place, so the marker is cleared and the
+// referenced type is registered exactly once across the whole document.
+//
+// See: https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3 ($ref)
+func (g *SchemaGenerator) resolveRefTypes(schema *Schema) {
+	if schema == nil {
+		return
+	}
+
+	if schema.refType != nil {
+		resolved := g.generateType(schema.refType)
+		if resolved != nil {
+			*schema = *resolved
+		}
+		// A resolved node is a $ref (or nullable anyOf wrapping one) and has
+		// no marker children left to walk.
+		return
+	}
+
+	g.resolveRefTypes(schema.Items)
+	g.resolveRefTypes(schema.Contains)
+	g.resolveRefTypes(schema.AdditionalProperties)
+	g.resolveRefTypes(schema.Not)
+	g.resolveRefTypes(schema.If)
+	g.resolveRefTypes(schema.Then)
+	g.resolveRefTypes(schema.Else)
+
+	for _, child := range schema.PrefixItems {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.OneOf {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.AnyOf {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.AllOf {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.Properties {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.PatternProperties {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.Defs {
+		g.resolveRefTypes(child)
+	}
+	for _, child := range schema.DependentSchemas {
+		g.resolveRefTypes(child)
+	}
 }
 
 // generateInlineType maps Go primitive and composite types to JSON Schema types.

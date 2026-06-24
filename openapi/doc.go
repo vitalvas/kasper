@@ -501,6 +501,33 @@
 // If OpenAPIName returns an empty string, the default name (the Go type name)
 // is used as a fallback.
 //
+// # Custom Schemas and Polymorphic Unions
+//
+// Implement the Schemaer interface to supply a type's schema directly,
+// overriding reflective generation. This is the way to express a polymorphic
+// field (such as an interface{} or []any holding either a string or a
+// structured object) as an explicit oneOf union. Inside the override, RefType
+// references another Go type, which the generator registers as a component and
+// replaces with a $ref:
+//
+//	type RecordValues []any
+//
+//	func (RecordValues) OpenAPISchema() *openapi.Schema {
+//	    return openapi.ArraySchema(openapi.OneOf(
+//	        openapi.StringSchema(),
+//	        openapi.RefType(RecordValue{}),
+//	    ))
+//	}
+//	// → array of oneOf: [string, $ref RecordValue], with RecordValue
+//	//   registered as a component automatically.
+//
+// When the implementing type itself has a component name, its override is
+// registered as a named component and referenced via $ref like any struct.
+//
+// RefType markers are resolved anywhere they appear in the override,
+// including inside oneOf, anyOf, allOf, not, items, additionalProperties,
+// nested properties, $defs, and dependentSchemas.
+//
 // # Schema-Only Document (No Server Required)
 //
 // Use SchemaGenerator.Document to produce a complete OpenAPI document from
