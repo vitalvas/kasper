@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,6 +82,135 @@ func TestVarGet(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVarStruct(t *testing.T) {
+	tenant := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	t.Run("decodes vars into struct by field name", func(t *testing.T) {
+		type data struct {
+			Tenant uuid.UUID
+			Plan   string
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{
+			"Tenant": tenant.String(),
+			"Plan":   "pro",
+		})
+
+		var req data
+		require.NoError(t, VarStruct(r, &req))
+		assert.Equal(t, tenant, req.Tenant)
+		assert.Equal(t, "pro", req.Plan)
+	})
+
+	t.Run("mux tag overrides field name", func(t *testing.T) {
+		type data struct {
+			Tenant uuid.UUID `mux:"tenant_id"`
+			Plan   string    `mux:"plan"`
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{
+			"tenant_id": tenant.String(),
+			"plan":      "pro",
+		})
+
+		var req data
+		require.NoError(t, VarStruct(r, &req))
+		assert.Equal(t, tenant, req.Tenant)
+		assert.Equal(t, "pro", req.Plan)
+	})
+
+	t.Run("dash tag skips field", func(t *testing.T) {
+		type data struct {
+			Plan   string
+			Ignore string `mux:"-"`
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{
+			"Plan":   "pro",
+			"Ignore": "value",
+		})
+
+		var req data
+		require.NoError(t, VarStruct(r, &req))
+		assert.Equal(t, "pro", req.Plan)
+		assert.Empty(t, req.Ignore)
+	})
+
+	t.Run("decodes scalar field types", func(t *testing.T) {
+		type data struct {
+			Count   int
+			Size    uint
+			Ratio   float64
+			Enabled bool
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{
+			"Count":   "-7",
+			"Size":    "42",
+			"Ratio":   "1.5",
+			"Enabled": "true",
+		})
+
+		var req data
+		require.NoError(t, VarStruct(r, &req))
+		assert.Equal(t, -7, req.Count)
+		assert.Equal(t, uint(42), req.Size)
+		assert.InDelta(t, 1.5, req.Ratio, 0)
+		assert.True(t, req.Enabled)
+	})
+
+	t.Run("missing var leaves field at zero value", func(t *testing.T) {
+		type data struct {
+			Tenant uuid.UUID
+			Plan   string
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{
+			"Tenant": tenant.String(),
+		})
+
+		var req data
+		require.NoError(t, VarStruct(r, &req))
+		assert.Equal(t, tenant, req.Tenant)
+		assert.Empty(t, req.Plan)
+	})
+
+	t.Run("request without vars leaves struct zero", func(t *testing.T) {
+		type data struct {
+			Plan string
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		var req data
+		require.NoError(t, VarStruct(r, &req))
+		assert.Empty(t, req.Plan)
+	})
+
+	t.Run("present but unparseable var returns error", func(t *testing.T) {
+		type data struct {
+			Tenant uuid.UUID
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{
+			"Tenant": "not-a-uuid",
+		})
+
+		var req data
+		assert.Error(t, VarStruct(r, &req))
+	})
+
+	t.Run("non-pointer destination returns error", func(t *testing.T) {
+		type data struct {
+			Plan string
+		}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = setRouteContext(r, nil, map[string]string{"Plan": "pro"})
+
+		var req data
+		assert.ErrorIs(t, VarStruct(r, req), ErrBindNotPointerToStruct)
+	})
 }
 
 func TestCurrentRoute(t *testing.T) {

@@ -50,6 +50,37 @@ func VarGet(r *http.Request, name string) (string, bool) {
 	return "", false
 }
 
+// VarStruct decodes the route variables for the current request into the
+// struct pointed to by v. Fields are mapped by their exact field name, which
+// can be overridden with a "mux" struct tag (e.g. `mux:"tenant_id"`); a tag of
+// "-" skips the field. Only exported fields are populated.
+//
+// Supported field types are the basic scalars (string, bool, the sized and
+// unsized integer and float types), pointers to them, and any type
+// implementing encoding.TextUnmarshaler (such as uuid.UUID).
+//
+// A variable that is absent leaves the corresponding field at its zero value;
+// a variable that is present but fails to parse into the field type returns an
+// error. Returns ErrBindNotPointerToStruct if v is not a non-nil pointer to a
+// struct.
+//
+// Example:
+//
+//	type data struct {
+//		Tenant uuid.UUID
+//		Plan   string
+//	}
+//	var req data
+//	err := mux.VarStruct(r, &req)
+func VarStruct(r *http.Request, v any) error {
+	vars := Vars(r)
+	src := make(map[string][]string, len(vars))
+	for name, val := range vars {
+		src[name] = []string{val}
+	}
+	return decodeValues(src, v, "mux")
+}
+
 // CurrentRouter returns the innermost router that handled the current
 // request. For subrouters, this returns the subrouter, not the parent.
 // This only works when called inside the handler of the matched route

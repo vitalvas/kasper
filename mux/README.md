@@ -392,6 +392,28 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### VarStruct
+
+Decodes all route variables into a struct. Fields are mapped by their exact name, overridable with a `mux` struct tag; a tag of `-` skips the field. Only exported fields are populated.
+
+Supported field types are the basic scalars (`string`, `bool`, the sized and unsized integer and float types), pointers to them, and any type implementing `encoding.TextUnmarshaler` (such as `uuid.UUID`).
+
+A variable that is absent leaves the field at its zero value; a variable that is present but fails to parse returns an error. Returns `ErrBindNotPointerToStruct` if the destination is not a non-nil pointer to a struct.
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    var req struct {
+        Tenant uuid.UUID `mux:"tenant_id"`
+        Plan   string    `mux:"plan"`
+    }
+    if err := mux.VarStruct(r, &req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    fmt.Fprintf(w, "tenant %s on %s plan", req.Tenant, req.Plan)
+}
+```
+
 ### CurrentRoute
 
 Returns the matched route for the current request. Only works inside the handler of the matched route:

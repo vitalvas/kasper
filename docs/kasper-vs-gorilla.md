@@ -103,6 +103,7 @@ requires migration.
 | **Context Functions** | | |
 | `Vars(r)` | Yes | Yes |
 | `VarGet(r, name)` | No | Yes |
+| `VarStruct(r, v)` | No | Yes |
 | `CurrentRoute(r)` | Yes | Yes |
 | `CurrentRouter(r)` | No | Yes |
 | `SetURLVars(r, vars)` | Yes | Yes |
@@ -294,6 +295,11 @@ id := vars["id"]
 id, ok := mux.VarGet(r, "id")
 
 // kasper/mux only
+var req struct {
+    Tenant uuid.UUID `mux:"tenant_id"`
+    Plan   string    `mux:"plan"`
+}
+_ = mux.VarStruct(r, &req)
 router := mux.CurrentRouter(r)
 md := mux.RequestMetadata(r)
 url, err := mux.Reverse(r, "product-detail", "pk", "123")
