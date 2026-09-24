@@ -354,6 +354,85 @@ func TestBindQuery(t *testing.T) {
 		assert.Contains(t, err.Error(), "exceeds maximum")
 	})
 
+	t.Run("max slice elements exceeded returns error", func(t *testing.T) {
+		type params struct {
+			IDs []int `query:"id"`
+		}
+
+		var b strings.Builder
+		b.WriteString("/?")
+		for i := 0; i <= DefaultMaxSliceElements; i++ {
+			if i > 0 {
+				b.WriteByte('&')
+			}
+			fmt.Fprintf(&b, "id=%d", i)
+		}
+		req := httptest.NewRequest(http.MethodGet, b.String(), nil)
+		var got params
+		err := BindQuery(req, &got)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum")
+	})
+
+	t.Run("slice elements at limit succeeds", func(t *testing.T) {
+		type params struct {
+			IDs []int `query:"id"`
+		}
+
+		var b strings.Builder
+		b.WriteString("/?")
+		for i := range DefaultMaxSliceElements {
+			if i > 0 {
+				b.WriteByte('&')
+			}
+			fmt.Fprintf(&b, "id=%d", i)
+		}
+		req := httptest.NewRequest(http.MethodGet, b.String(), nil)
+		var got params
+		require.NoError(t, BindQuery(req, &got))
+		assert.Len(t, got.IDs, DefaultMaxSliceElements)
+	})
+
+	t.Run("max map keys exceeded returns error", func(t *testing.T) {
+		type params struct {
+			Meta map[string]string `query:"meta"`
+		}
+
+		var b strings.Builder
+		b.WriteString("/?")
+		for i := 0; i <= DefaultMaxMapKeys; i++ {
+			if i > 0 {
+				b.WriteByte('&')
+			}
+			fmt.Fprintf(&b, "meta.k%d=v", i)
+		}
+		req := httptest.NewRequest(http.MethodGet, b.String(), nil)
+		var got params
+		err := BindQuery(req, &got)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum")
+	})
+
+	t.Run("map of slices with too many elements returns error", func(t *testing.T) {
+		type params struct {
+			Meta map[string][]int `query:"meta"`
+		}
+
+		var b strings.Builder
+		b.WriteString("/?")
+		for i := 0; i <= DefaultMaxSliceElements; i++ {
+			if i > 0 {
+				b.WriteByte('&')
+			}
+			fmt.Fprintf(&b, "meta.k=%d", i)
+		}
+		req := httptest.NewRequest(http.MethodGet, b.String(), nil)
+		var got params
+		err := BindQuery(req, &got)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum")
+	})
+
 	t.Run("slice of structs with indexed dot notation", func(t *testing.T) {
 		type item struct {
 			Name  string `query:"name"`

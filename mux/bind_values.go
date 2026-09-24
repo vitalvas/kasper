@@ -25,6 +25,16 @@ var ErrEncodeNotStruct = errors.New("encode: source must be a struct or pointer 
 // Prevents abuse from keys like "items.999999.name" allocating huge slices.
 const DefaultMaxSliceIndex = 1000
 
+// DefaultMaxSliceElements is the maximum number of elements bound into a
+// slice field from repeated request parameters (e.g. "?id=1&id=2&..."),
+// bounding allocation from untrusted input.
+const DefaultMaxSliceElements = 1000
+
+// DefaultMaxMapKeys is the maximum number of keys bound into a map field from
+// dotted request parameters (e.g. "?meta.k1=a&meta.k2=b&..."), bounding
+// allocation from untrusted input.
+const DefaultMaxMapKeys = 1000
+
 // BindQuery decodes URL query parameters into the struct pointed to by v.
 // Fields are mapped using the "query" struct tag. Tag options "required" and
 // "default:<value>" are supported. Nested structs use dot notation
@@ -316,6 +326,7 @@ func decodeMapField(src map[string][]string, fv reflect.Value, prefix string) er
 	dotPrefix := fmt.Sprintf("%s.", prefix)
 	elemType := mapType.Elem()
 
+	keyCount := 0
 	for key, vals := range src {
 		if !strings.HasPrefix(key, dotPrefix) {
 			continue
@@ -334,7 +345,15 @@ func decodeMapField(src map[string][]string, fv reflect.Value, prefix string) er
 			continue
 		}
 
+		keyCount++
+		if keyCount > DefaultMaxMapKeys {
+			return fmt.Errorf("bind: map field %q exceeds maximum %d keys", prefix, DefaultMaxMapKeys)
+		}
+
 		if elemType.Kind() == reflect.Slice {
+			if len(vals) > DefaultMaxSliceElements {
+				return fmt.Errorf("bind: map field %q key %q exceeds maximum %d elements", prefix, mapKey, DefaultMaxSliceElements)
+			}
 			slice := reflect.MakeSlice(elemType, len(vals), len(vals))
 			for i, val := range vals {
 				if err := setBasicField(slice.Index(i), val); err != nil {
@@ -485,6 +504,9 @@ func setPtrField(fv reflect.Value, val string) error {
 
 // setSliceField populates a slice field from multiple string values.
 func setSliceField(fv reflect.Value, vals []string) error {
+	if len(vals) > DefaultMaxSliceElements {
+		return fmt.Errorf("bind: slice field exceeds maximum %d elements", DefaultMaxSliceElements)
+	}
 	elemType := fv.Type().Elem()
 	slice := reflect.MakeSlice(fv.Type(), len(vals), len(vals))
 
