@@ -13,8 +13,11 @@ type ServerConfig struct {
 	// KeySet holds the server's private keys. Required.
 	KeySet *ServerKeySet
 
-	// Replay is the replay cache used to reject duplicate nids. When nil, a
-	// fresh MemoryReplayCache is used.
+	// Replay is the replay cache used to reject duplicate nids. It is
+	// required for direct DecryptRequest callers: when nil, decryption fails
+	// with ErrNoReplayCache rather than silently disabling replay protection.
+	// Middleware installs a shared MemoryReplayCache automatically when this
+	// is nil.
 	Replay ReplayCache
 
 	// ResponseContentType sets the inner plaintext media type advertised via
@@ -47,6 +50,12 @@ type serverState struct {
 func (c *ServerConfig) decryptRequest(reqField string, body []byte) (plaintext []byte, st *serverState, err error) {
 	if c.KeySet == nil {
 		return nil, nil, ErrNoKeySet
+	}
+	// A nil replay cache is a static server misconfiguration; fail closed up
+	// front rather than performing key derivation and decryption only to
+	// reject at the replay step. Middleware installs a cache automatically.
+	if c.Replay == nil {
+		return nil, nil, ErrNoReplayCache
 	}
 
 	// 1-2. Parse and structurally validate the E2EE-Session field.
@@ -126,8 +135,9 @@ func (c *ServerConfig) decryptRequest(reqField string, body []byte) (plaintext [
 	}
 
 	// 12. Insert nid into the replay cache atomically after authentication.
+	// Replay is guaranteed non-nil by the precondition check above.
 	ttl := time.Duration(key.MaxSkew)*time.Second + skewTolerance
-	if !c.replay().StoreUnique(item.kid, item.epk, item.nid, ttl) {
+	if !c.Replay.StoreUnique(item.kid, item.epk, item.nid, ttl) {
 		return nil, nil, ErrReplayDetected
 	}
 
@@ -188,23 +198,6 @@ func (c *ServerConfig) clock() time.Time {
 
 	return time.Now()
 }
-
-func (c *ServerConfig) replay() ReplayCache {
-	if c.Replay != nil {
-		return c.Replay
-	}
-
-	// A nil Replay means the caller did not configure one. Allocating a fresh
-	// cache per call would defeat replay protection, so callers should set
-	// Replay; Middleware ensures a shared instance is installed.
-	return noReplay{}
-}
-
-// noReplay is a ReplayCache that accepts every nid. It is a safe fallback that
-// disables replay protection; Middleware always installs a real cache.
-type noReplay struct{}
-
-func (noReplay) StoreUnique(string, []byte, string, time.Duration) bool { return true }
 
 // skewTolerance is added to a key's max_skew when computing replay-cache TTL.
 // The server must maintain the replay cache for at least max_skew plus a

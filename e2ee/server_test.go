@@ -226,10 +226,10 @@ func TestDecryptRequestMissingHeader(t *testing.T) {
 	require.ErrorIs(t, err, ErrMalformed)
 }
 
-func TestDecryptRequestWithoutReplayCacheAllows(t *testing.T) {
-	// A ServerConfig with no Replay uses the noReplay fallback, which accepts
-	// every nid. DecryptRequest (used directly, not via Middleware) therefore
-	// does not enforce replay protection.
+func TestDecryptRequestWithoutReplayCacheFailsClosed(t *testing.T) {
+	// A ServerConfig with no Replay fails closed with ErrNoReplayCache rather
+	// than silently disabling replay protection. Middleware installs a cache
+	// automatically; this guards direct DecryptRequest callers.
 	key := serverKeyForKID(t, "kid")
 
 	set, err := NewServerKeySet("https://api.example.com", key)
@@ -248,12 +248,9 @@ func TestDecryptRequestWithoutReplayCacheAllows(t *testing.T) {
 	}
 	sc := ServerConfig{KeySet: set} // no Replay configured
 
-	for range 2 {
-		body, st, err := cc.encryptRequest([]byte("hi"))
-		require.NoError(t, err)
+	body, st, err := cc.encryptRequest([]byte("hi"))
+	require.NoError(t, err)
 
-		plain, _, err := sc.decryptRequest(st.reqField, body)
-		require.NoError(t, err)
-		assert.Equal(t, "hi", string(plain))
-	}
+	_, _, err = sc.decryptRequest(st.reqField, body)
+	require.ErrorIs(t, err, ErrNoReplayCache)
 }

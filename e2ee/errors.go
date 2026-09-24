@@ -52,6 +52,13 @@ var (
 	// ErrNoKeySet is returned when a client is configured without a key set
 	// source.
 	ErrNoKeySet = errors.New("e2ee: no key set")
+
+	// ErrNoReplayCache is returned by request decryption when the server is
+	// configured without a replay cache. It signals a server misconfiguration
+	// (like ErrNoKeySet) rather than a client protocol error; Middleware
+	// installs a cache automatically, so it only affects direct DecryptRequest
+	// callers that did not set ServerConfig.Replay.
+	ErrNoReplayCache = errors.New("e2ee: no replay cache")
 )
 
 // errorCode returns the protocol error code string for a sentinel error,
