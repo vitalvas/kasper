@@ -67,8 +67,14 @@ var (
 	// fallback when Origin is missing) is not trusted.
 	ErrRefererRejected = errors.New("csrf: referer not trusted")
 	// ErrRefererMissing is returned for HTTPS requests where both Origin
-	// and Referer headers are absent.
+	// and Referer headers are absent. It is also returned on any scheme
+	// when Config.RequireOriginOrReferer is set and both headers are
+	// absent.
 	ErrRefererMissing = errors.New("csrf: referer missing on https request")
+	// ErrSessionMismatch is returned when Config.SessionID is set and the
+	// session bound to the CSRF cookie does not match the session of the
+	// current request.
+	ErrSessionMismatch = errors.New("csrf: session mismatch")
 )
 
 // Config configures the CSRF middleware.
@@ -89,6 +95,36 @@ type Config struct {
 	// preview-deploy hostnames (Vercel, Netlify, Cloudflare Pages) where
 	// a static or wildcard list is impractical.
 	TrustedOriginFunc func(*url.URL) bool
+
+	// AllowSameSite trusts requests whose Sec-Fetch-Site header is
+	// "same-site" (a registrable-domain match, e.g. a.example.com from
+	// b.example.com). Defaults to false: same-site is rejected because a
+	// subdomain takeover would otherwise bypass CSRF protection (per the
+	// OWASP CSRF Prevention Cheat Sheet). Set to true only when you control
+	// every subdomain of your registrable domain.
+	AllowSameSite bool
+
+	// RequireOriginOrReferer rejects unsafe requests that carry neither an
+	// Origin nor a Referer header, on any scheme. Default false preserves
+	// the HTTP-request allowance (relying on the token layer). OWASP
+	// recommends blocking when both headers are absent.
+	RequireOriginOrReferer bool
+
+	// TrustedHost overrides the Host used as the target origin in the
+	// Origin/Referer comparison. Set this when running behind a reverse
+	// proxy that terminates the public hostname, so a spoofed Host header
+	// cannot pass the origin check. Empty (default) uses r.Host.
+	TrustedHost string
+
+	// SessionID optionally binds the CSRF token to the authenticated
+	// session. When set, the session identifier is stored alongside the
+	// token inside the signed cookie, and validation rejects the request
+	// if the bound session does not match SessionID(r) for the current
+	// request (OWASP Signed Double-Submit Cookie). Return an empty string
+	// for unauthenticated requests; the token then binds to the empty
+	// session and rebinds after login when Rotate is called. Called on
+	// every request.
+	SessionID func(*http.Request) string
 
 	// CookieName is the name of the CSRF cookie. Defaults to "csrf_token".
 	CookieName string
@@ -145,7 +181,17 @@ type requestState struct {
 	cfg    *resolvedConfig
 	codec  *securecookie.SecureCookie
 	cookie string // the unmasked token currently bound to the cookie
+	sess   string // the session bound to the cookie (when SessionID is set)
+	r      *http.Request
 	w      http.ResponseWriter
+}
+
+// cookieValue is the payload stored in the signed CSRF cookie. Raw holds
+// the token; Sess holds the bound session identifier (empty when
+// Config.SessionID is unset).
+type cookieValue struct {
+	Raw  string
+	Sess string
 }
 
 // resolvedConfig is Config with defaults applied and TrustedOrigins
@@ -162,6 +208,10 @@ type resolvedConfig struct {
 	safeMethods   map[string]struct{}
 	trusted       []*originPattern
 	trustedFunc   func(*url.URL) bool
+	trustedHost   string
+	allowSameSite bool
+	requireOrRef  bool
+	sessionIDFn   func(*http.Request) string
 	issueAlways   bool
 	errorHandler  func(http.ResponseWriter, *http.Request, error)
 }
@@ -191,11 +241,14 @@ func Middleware(cfg Config) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			state := &requestState{cfg: rc, codec: codec, w: w}
+			state.r = r
 			r = r.WithContext(stateContext(r, state))
+			state.r = r
 
-			cookieToken, hasCookie := readCookie(r, rc, codec)
+			cookieToken, cookieSess, hasCookie := readCookie(r, rc, codec)
 			if hasCookie {
 				state.cookie = cookieToken
+				state.sess = cookieSess
 			}
 
 			if rc.issueAlways && !hasCookie {
@@ -210,7 +263,7 @@ func Middleware(cfg Config) mux.MiddlewareFunc {
 				return
 			}
 
-			if err := validate(r, rc, cookieToken, hasCookie); err != nil {
+			if err := validate(r, rc, cookieToken, cookieSess, hasCookie); err != nil {
 				rc.errorHandler(w, r, err)
 				return
 			}
@@ -238,16 +291,22 @@ func Validate(r *http.Request) error {
 		return ErrNoCookie
 	}
 	hasCookie := state.cookie != ""
-	return validate(r, state.cfg, state.cookie, hasCookie)
+	return validate(r, state.cfg, state.cookie, state.sess, hasCookie)
 }
 
 // validate is the shared validation core used by Middleware and Validate.
-func validate(r *http.Request, rc *resolvedConfig, cookieToken string, hasCookie bool) error {
+func validate(r *http.Request, rc *resolvedConfig, cookieToken, cookieSess string, hasCookie bool) error {
 	if reason := verifyFetchMetadataAndOrigin(r, rc); reason != nil {
 		return reason
 	}
 	if !hasCookie {
 		return ErrNoCookie
+	}
+	if rc.sessionIDFn != nil {
+		want := rc.sessionIDFn(r)
+		if subtle.ConstantTimeCompare([]byte(cookieSess), []byte(want)) != 1 {
+			return ErrSessionMismatch
+		}
 	}
 	submitted, err := submittedToken(r, rc)
 	if err != nil {
@@ -270,14 +329,20 @@ func validate(r *http.Request, rc *resolvedConfig, cookieToken string, hasCookie
 //     direct user action; trust the origin layer.
 //   - "same-site": registrable-domain match (e.g., a.example.com from
 //     b.example.com). OWASP warns against unconditional same-site trust
-//     because of subdomain takeover risk; reject.
+//     because of subdomain takeover risk; reject unless Config.AllowSameSite
+//     is set.
 //   - "cross-site": reject outright.
 //   - missing: fall through to Origin/Referer.
 func verifyFetchMetadataAndOrigin(r *http.Request, rc *resolvedConfig) error {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "none":
 		return nil
-	case "same-site", "cross-site":
+	case "same-site":
+		if rc.allowSameSite {
+			return nil
+		}
+		return ErrOriginRejected
+	case "cross-site":
 		return ErrOriginRejected
 	}
 	return verifyOrigin(r, rc)
@@ -324,9 +389,15 @@ func TemplateField(r *http.Request) template.HTML {
 	return template.HTML(field) //nolint:gosec // values are HTML-escaped above.
 }
 
-// Rotate forces a new CSRF token for the current request. Useful after
-// privilege transitions such as login. Subsequent calls to Token within
-// the same request return values derived from the new cookie.
+// Rotate forces a new CSRF token for the current request. Subsequent
+// calls to Token within the same request return values derived from the
+// new cookie.
+//
+// Call Rotate immediately after authentication (login) alongside issuing
+// a fresh session. Rotating the token on the privilege transition
+// prevents login CSRF and session-fixation-style attacks where a token
+// minted before login is replayed afterwards. When Config.SessionID is
+// set, Rotate also rebinds the token to the post-login session.
 func Rotate(w http.ResponseWriter, r *http.Request) {
 	state := stateFrom(r)
 	if state == nil {
@@ -337,6 +408,8 @@ func Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.cookie = raw
+	state.r = r
+	state.sess = currentSession(state)
 	_ = writeCookie(w, state)
 }
 
@@ -354,6 +427,10 @@ func resolveConfig(cfg Config) (*resolvedConfig, error) {
 		issueAlways:   !cfg.Lazy,
 		errorHandler:  cfg.ErrorHandler,
 		trustedFunc:   cfg.TrustedOriginFunc,
+		trustedHost:   cfg.TrustedHost,
+		allowSameSite: cfg.AllowSameSite,
+		requireOrRef:  cfg.RequireOriginOrReferer,
+		sessionIDFn:   cfg.SessionID,
 	}
 	if rc.cookieName == "" {
 		rc.cookieName = "csrf_token"
@@ -497,13 +574,25 @@ func verifyOrigin(r *http.Request, rc *resolvedConfig) error {
 		return nil
 	}
 
-	// Origin missing: require Referer for HTTPS requests (legacy fallback);
-	// HTTP requests with no Origin and no Referer pass at this stage.
+	// Origin missing: require Referer for HTTPS requests (legacy fallback).
+	// HTTP requests with no Origin and no Referer pass at this stage unless
+	// Config.RequireOriginOrReferer forces a block on any scheme.
+	referer := r.Header.Get("Referer")
 	if !isHTTPS(r) {
+		if referer == "" {
+			if rc.requireOrRef {
+				return ErrRefererMissing
+			}
+			return nil
+		}
+		// A present Referer on an HTTP request is only enforced under the
+		// strict flag; the default preserves the legacy HTTP allowance.
+		if rc.requireOrRef && !originAllowed(referer, r, rc) {
+			return ErrRefererRejected
+		}
 		return nil
 	}
 
-	referer := r.Header.Get("Referer")
 	if referer == "" {
 		return ErrRefererMissing
 	}
@@ -519,7 +608,11 @@ func originAllowed(raw string, r *http.Request, rc *resolvedConfig) bool {
 		return false
 	}
 
-	if u.Scheme == requestScheme(r) && u.Host == r.Host {
+	targetHost := r.Host
+	if rc.trustedHost != "" {
+		targetHost = rc.trustedHost
+	}
+	if u.Scheme == requestScheme(r) && u.Host == targetHost {
 		return true
 	}
 
@@ -606,16 +699,16 @@ func unmask(s string) string {
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
-func readCookie(r *http.Request, rc *resolvedConfig, codec *securecookie.SecureCookie) (string, bool) {
+func readCookie(r *http.Request, rc *resolvedConfig, codec *securecookie.SecureCookie) (raw, sess string, ok bool) {
 	c, err := r.Cookie(rc.cookieName)
 	if err != nil || c.Value == "" {
-		return "", false
+		return "", "", false
 	}
-	var raw string
-	if err := codec.Decode(c.Value, &raw); err != nil {
-		return "", false
+	var v cookieValue
+	if err := codec.Decode(c.Value, &v); err != nil {
+		return "", "", false
 	}
-	return raw, true
+	return v.Raw, v.Sess, true
 }
 
 func issueCookie(w http.ResponseWriter, state *requestState) error {
@@ -624,11 +717,21 @@ func issueCookie(w http.ResponseWriter, state *requestState) error {
 		return err
 	}
 	state.cookie = raw
+	state.sess = currentSession(state)
 	return writeCookie(w, state)
 }
 
+// currentSession returns the session identifier for the request bound to
+// state, or empty when Config.SessionID is unset.
+func currentSession(state *requestState) string {
+	if state.cfg.sessionIDFn == nil || state.r == nil {
+		return ""
+	}
+	return state.cfg.sessionIDFn(state.r)
+}
+
 func writeCookie(w http.ResponseWriter, state *requestState) error {
-	encoded, err := state.codec.Encode(state.cookie)
+	encoded, err := state.codec.Encode(cookieValue{Raw: state.cookie, Sess: state.sess})
 	if err != nil {
 		return err
 	}

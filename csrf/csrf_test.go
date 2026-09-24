@@ -1204,6 +1204,213 @@ func TestSecFetchSite(t *testing.T) {
 	}
 }
 
+func TestSecFetchSiteAllowSameSite(t *testing.T) {
+	mw := Middleware(Config{Key: newTestKey(t), AllowSameSite: true})
+	cookie, captured := issueTokenCookie(t, mw, "https://example.com/")
+
+	tests := []struct {
+		name       string
+		fetchSite  string
+		wantStatus int
+	}{
+		{"same-site accepted when allowed", "same-site", http.StatusOK},
+		{"same-origin still accepted", "same-origin", http.StatusOK},
+		{"cross-site still rejected", "cross-site", http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			postH := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			postReq := httptest.NewRequest(http.MethodPost, "https://example.com/", nil)
+			postReq.Header.Set("X-CSRF-Token", captured)
+			postReq.Header.Set("Sec-Fetch-Site", tt.fetchSite)
+			postReq.Header.Set("Origin", "https://example.com")
+			postReq.AddCookie(cookie)
+			postW := httptest.NewRecorder()
+			postH.ServeHTTP(postW, postReq)
+			assert.Equal(t, tt.wantStatus, postW.Code)
+		})
+	}
+}
+
+func TestSessionBinding(t *testing.T) {
+	// sessionOf lets each request report a session via a header so a single
+	// middleware can be driven across different sessions.
+	cfg := Config{
+		Key: newTestKey(t),
+		SessionID: func(r *http.Request) string {
+			return r.Header.Get("X-Session")
+		},
+	}
+	mw := Middleware(cfg)
+
+	// Issue a cookie bound to session "A".
+	var captured string
+	getH := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = Token(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	getW := httptest.NewRecorder()
+	getReq := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	getReq.Header.Set("X-Session", "A")
+	getH.ServeHTTP(getW, getReq)
+	cookie := extractCookie(t, getW, "csrf_token")
+	require.NotNil(t, cookie)
+	require.NotEmpty(t, captured)
+
+	post := func(session string) int {
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodPost, "https://example.com/", nil)
+		req.Header.Set("X-CSRF-Token", captured)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		if session != "" {
+			req.Header.Set("X-Session", session)
+		}
+		req.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	t.Run("same session accepted", func(t *testing.T) {
+		assert.Equal(t, http.StatusOK, post("A"))
+	})
+	t.Run("different session rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodPost, "https://example.com/", nil)
+		req.Header.Set("X-CSRF-Token", captured)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("X-Session", "B")
+		req.AddCookie(cookie)
+		h.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "session mismatch")
+	})
+	t.Run("empty session on cookie rejected against named session", func(t *testing.T) {
+		assert.Equal(t, http.StatusForbidden, post(""))
+	})
+}
+
+func TestSessionBindingRotateRebinds(t *testing.T) {
+	cfg := Config{
+		Key: newTestKey(t),
+		SessionID: func(r *http.Request) string {
+			return r.Header.Get("X-Session")
+		},
+	}
+	mw := Middleware(cfg)
+
+	// A single request that rotates the token under a new session "B",
+	// simulating a login that upgrades the pre-session "A".
+	var rotated string
+	var setCookie *http.Cookie
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Rotate(w, r)
+		rotated = Token(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.Header.Set("X-Session", "B")
+	h.ServeHTTP(w, req)
+	// The response carries two Set-Cookie headers: the initial issuance and
+	// the Rotate. The rotated token corresponds to the last one.
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "csrf_token" {
+			setCookie = c
+		}
+	}
+	require.NotNil(t, setCookie)
+	require.NotEmpty(t, rotated)
+
+	// The rotated cookie/token now validate under session "B".
+	postH := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	postReq := httptest.NewRequest(http.MethodPost, "https://example.com/", nil)
+	postReq.Header.Set("X-CSRF-Token", rotated)
+	postReq.Header.Set("Origin", "https://example.com")
+	postReq.Header.Set("Sec-Fetch-Site", "same-origin")
+	postReq.Header.Set("X-Session", "B")
+	postReq.AddCookie(setCookie)
+	postW := httptest.NewRecorder()
+	postH.ServeHTTP(postW, postReq)
+	assert.Equal(t, http.StatusOK, postW.Code)
+}
+
+func TestRequireOriginOrReferer(t *testing.T) {
+	tests := []struct {
+		name       string
+		require    bool
+		referer    string
+		wantStatus int
+	}{
+		{"default allows http with no origin/referer", false, "", http.StatusOK},
+		{"default allows http with untrusted referer", false, "http://evil.com/", http.StatusOK},
+		{"strict blocks http with no origin/referer", true, "", http.StatusForbidden},
+		{"strict allows http with matching referer", true, "http://example.com/page", http.StatusOK},
+		{"strict blocks http with untrusted referer", true, "http://evil.com/", http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mw := Middleware(Config{Key: newTestKey(t), RequireOriginOrReferer: tt.require})
+			cookie, captured := issueTokenCookie(t, mw, "http://example.com/")
+
+			h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/", nil)
+			req.Header.Set("X-CSRF-Token", captured)
+			if tt.referer != "" {
+				req.Header.Set("Referer", tt.referer)
+			}
+			req.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			assert.Equal(t, tt.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestTrustedHost(t *testing.T) {
+	// The middleware sees r.Host = "internal:8080" (proxy backend) but the
+	// public origin is "https://public.example.com". TrustedHost aligns the
+	// target origin with the public hostname.
+	mw := Middleware(Config{Key: newTestKey(t), TrustedHost: "public.example.com"})
+	cookie, captured := issueTokenCookie(t, mw, "https://public.example.com/")
+
+	newPost := func(origin, host string) int {
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodPost, "https://public.example.com/", nil)
+		req.Host = host
+		req.Header.Set("X-CSRF-Token", captured)
+		req.Header.Set("Origin", origin)
+		req.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	t.Run("origin matching trusted host accepted", func(t *testing.T) {
+		assert.Equal(t, http.StatusOK, newPost("https://public.example.com", "internal:8080"))
+	})
+	t.Run("spoofed host does not help attacker origin", func(t *testing.T) {
+		assert.Equal(t, http.StatusForbidden, newPost("https://evil.com", "evil.com"))
+	})
+}
+
 func TestSecFetchSiteStillRequiresToken(t *testing.T) {
 	mw := Middleware(Config{Key: newTestKey(t)})
 	cookie, _ := issueTokenCookie(t, mw, "https://example.com/")
