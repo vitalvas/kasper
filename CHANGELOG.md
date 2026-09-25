@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.25.0](https://github.com/vitalvas/kasper/compare/v0.24.0...v0.25.0) (2026-09-25)
+
+
+### Features
+
+* add Content-Digest middleware and parse httpsig via sfv ([908acc4](https://github.com/vitalvas/kasper/commit/908acc4de48687dc9ef3612e1df2ba065eded8c3))
+* bump go to 1.27 and adopt stdlib uuid ([8e44f78](https://github.com/vitalvas/kasper/commit/8e44f786bf8e8bf60eab0bb60d6c48f14c35ec12))
+* **csrf:** add session binding, strict origin, and trusted host ([591faac](https://github.com/vitalvas/kasper/commit/591faac14cc285538785d4db0b9fa4bb94258af2))
+* **mux:** cap slice and map bind allocations ([2ef4b0e](https://github.com/vitalvas/kasper/commit/2ef4b0e10113725fbb24bdae55d322539a1e590f))
+* **muxhandlers:** add RFC 7239 Forwarded parser ([34b4f2c](https://github.com/vitalvas/kasper/commit/34b4f2c72c04e54085d3c5da21aa711bc7bce680))
+* **privacypass:** add RFC 9578 Blind RSA tokens ([cbc14de](https://github.com/vitalvas/kasper/commit/cbc14de43c09460a659042ad33182bd179783978))
+* **sfv:** add RFC 9651 structured field values parser ([e508a88](https://github.com/vitalvas/kasper/commit/e508a8832a12056c6ba757b7f10f57b82a655c8a))
+
+
+### Bug Fixes
+
+* **e2ee:** fail closed when replay cache is nil ([3b8ce5f](https://github.com/vitalvas/kasper/commit/3b8ce5f97b0b0e3bfbebce652dc173d2b1c9544e))
+
 ## [0.24.0](https://github.com/vitalvas/kasper/compare/v0.23.0...v0.24.0) (2026-06-24)
 
 
