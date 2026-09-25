@@ -21,13 +21,22 @@
 //     (RFC 9421) with optional Content-Digest (RFC 9530). Provides signing,
 //     verification, client transport, and server middleware.
 //
+//   - [github.com/vitalvas/kasper/sfv] -- Structured Field Values for HTTP
+//     (RFC 9651). Provides typed parsing and canonical serialization of
+//     items, lists, and dictionaries.
+//
 //   - [github.com/vitalvas/kasper/muxhandlers] -- HTTP middleware collection
 //     including CORS, authentication, compression, security headers, request
-//     size limits, timeouts, recovery, and more.
+//     size limits, timeouts, recovery, Content-Digest, and more.
 //
 //   - [github.com/vitalvas/kasper/blindrsa] -- RSA Blind Signatures per
 //     RFC 9474 (RSABSSA). Provides blinding, signing, finalizing, and
 //     verification along with HTTP handlers for token issuance.
+//
+//   - [github.com/vitalvas/kasper/privacypass] -- Privacy Pass Blind RSA
+//     tokens (token type 0x0002) per RFC 9578 with the PrivateToken HTTP
+//     authentication scheme (RFC 9577). Provides token encoding, origin
+//     verification with single-use enforcement, and server middleware.
 //
 //   - [github.com/vitalvas/kasper/securecookie] -- Authenticated and encrypted
 //     cookie values using AES-GCM (128/192/256). Provides timestamp validation,

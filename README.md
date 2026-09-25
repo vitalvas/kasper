@@ -105,6 +105,22 @@ RSA Blind Signatures (RFC 9474 / RSABSSA) for privacy-preserving tokens.
 
 ---
 
+## privacypass
+
+Privacy Pass publicly verifiable tokens (token type 0x0002, Blind RSA) built on
+blindrsa.
+
+| Feature | Standard | Details |
+|---------|----------|---------|
+| Token type 0x0002 | RFC 9578 | RSABSSA-SHA384-PSS-Deterministic, publicly verifiable |
+| Wire structures | RFC 9578 | `TokenChallenge`, `Token`, `TokenRequest` encode/decode |
+| Key identity | RFC 9578 | id-RSASSA-PSS SPKI encoding and `TokenKeyID` |
+| HTTP scheme | RFC 9577 | `PrivateToken` challenge and redemption headers |
+| Origin verification | RFC 9578 | `VerifyToken` with single-use nonce cache (fail-closed) |
+| Middleware | RFC 9577 | `mux.MiddlewareFunc` requiring a valid token |
+
+---
+
 ## muxhandlers
 
 HTTP middleware for the mux router.
