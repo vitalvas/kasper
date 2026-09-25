@@ -1,12 +1,12 @@
 package httpsig
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
+
+	"github.com/vitalvas/kasper/sfv"
 )
 
 // KeyResolver returns a Verifier for the given key ID and algorithm.
@@ -121,20 +121,22 @@ func VerifyRequest(r *http.Request, cfg VerifyConfig) error {
 }
 
 // findSignatureInput finds the signature input for the given label in the
-// Signature-Input header dictionary. When label is empty, the first entry
-// is returned.
+// Signature-Input header dictionary (an RFC 9651 dictionary parsed via sfv).
+// When label is empty, the first entry is returned. The returned value is the
+// serialized member (an inner list with parameters) suitable for
+// parseSignatureParams.
 func findSignatureInput(header, label string) (string, string, error) {
-	for _, entry := range splitQuoteAware(header, ',') {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
+	dict, err := sfv.ParseDictionary(header)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %v", ErrMalformedHeader, err)
+	}
 
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-
-		if label == "" || key == label {
-			return key, value, nil
+	for _, entry := range dict {
+		if label == "" || entry.Key == label {
+			if !entry.Member.IsInnerList {
+				return "", "", fmt.Errorf("%w: signature input must be an inner list", ErrMalformedHeader)
+			}
+			return entry.Key, entry.Member.InnerList.String(), nil
 		}
 	}
 
@@ -142,34 +144,22 @@ func findSignatureInput(header, label string) (string, string, error) {
 }
 
 // extractSignatureValue extracts the base64-decoded signature bytes for the
-// given label from the Signature header dictionary.
+// given label from the Signature header dictionary (parsed via sfv). The
+// signature value is a byte-sequence item.
 func extractSignatureValue(header, label string) ([]byte, error) {
-	for _, entry := range splitQuoteAware(header, ',') {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
+	dict, err := sfv.ParseDictionary(header)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformedHeader, err)
+	}
+
+	for _, entry := range dict {
+		if entry.Key != label {
 			continue
 		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-
-		if key != label {
-			continue
-		}
-
-		// Value should be :base64:
-		if len(value) < 2 || value[0] != ':' || value[len(value)-1] != ':' {
+		if entry.Member.IsInnerList || entry.Member.Item.Value.Kind != sfv.KindByteSequence {
 			return nil, fmt.Errorf("%w: signature value not byte-sequence encoded", ErrMalformedHeader)
 		}
-
-		encoded := value[1 : len(value)-1]
-
-		decoded, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid base64 in signature", ErrMalformedHeader)
-		}
-
-		return decoded, nil
+		return entry.Member.Item.Value.Bytes, nil
 	}
 
 	return nil, ErrSignatureNotFound

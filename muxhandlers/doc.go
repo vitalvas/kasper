@@ -587,4 +587,16 @@
 //	    },
 //	    Timeout: 2 * time.Second,
 //	}))
+//
+// # Content Digest Middleware
+//
+// ContentDigestMiddleware adds a Content-Digest response header (RFC 9530)
+// computed over the response body, and optionally verifies the Content-Digest
+// of incoming requests against their body. It supports SHA-256 and SHA-512 and
+// builds the field value with the kasper/sfv structured-fields package.
+//
+//	mw, err := muxhandlers.ContentDigestMiddleware(muxhandlers.ContentDigestConfig{
+//	    Algorithm:      muxhandlers.DigestSHA256,
+//	    VerifyRequests: true,
+//	})
 package muxhandlers

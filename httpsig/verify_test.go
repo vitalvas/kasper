@@ -412,11 +412,12 @@ func TestFindSignatureInput(t *testing.T) {
 		assert.Equal(t, "sig1", label)
 	})
 
-	t.Run("empty entries are skipped", func(t *testing.T) {
+	t.Run("malformed empty entries rejected", func(t *testing.T) {
+		// Leading empty dictionary members are not valid RFC 9651 and are
+		// rejected by the strict sfv parser.
 		header := `, , sig1=("@method");alg="ed25519";keyid="k"`
-		label, _, err := findSignatureInput(header, "")
-		require.NoError(t, err)
-		assert.Equal(t, "sig1", label)
+		_, _, err := findSignatureInput(header, "")
+		require.ErrorIs(t, err, ErrMalformedHeader)
 	})
 }
 
@@ -460,10 +461,11 @@ func TestExtractSignatureValue(t *testing.T) {
 		assert.Equal(t, []byte("test"), sig)
 	})
 
-	t.Run("empty entries are skipped", func(t *testing.T) {
+	t.Run("malformed empty entries rejected", func(t *testing.T) {
+		// Leading empty dictionary members are not valid RFC 9651 and are
+		// rejected by the strict sfv parser.
 		header := `, , sig1=:dGVzdA==:`
-		sig, err := extractSignatureValue(header, "sig1")
-		require.NoError(t, err)
-		assert.Equal(t, []byte("test"), sig)
+		_, err := extractSignatureValue(header, "sig1")
+		require.ErrorIs(t, err, ErrMalformedHeader)
 	})
 }

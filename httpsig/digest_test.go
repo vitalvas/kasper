@@ -123,24 +123,36 @@ func TestVerifyContentDigest(t *testing.T) {
 		assert.ErrorIs(t, err, ErrDigestMismatch)
 	})
 
-	t.Run("unsupported algorithm in header", func(t *testing.T) {
+	t.Run("well-formed unsupported algorithm", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "https://example.com/", strings.NewReader("body"))
+		// A valid byte-sequence value under an unsupported algorithm: the
+		// header parses, but no supported algorithm is present.
+		req.Header.Set("Content-Digest", "md5=:1B2M2Y8AsgTpgAmY7PhCfg==:")
+
+		err := VerifyContentDigest(req)
+		assert.ErrorIs(t, err, ErrUnsupportedDigest)
+	})
+
+	t.Run("unparseable base64 is malformed", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "https://example.com/", strings.NewReader("body"))
 		req.Header.Set("Content-Digest", "md5=:abc123:")
 
 		err := VerifyContentDigest(req)
-		assert.ErrorIs(t, err, ErrUnsupportedDigest)
+		assert.ErrorIs(t, err, ErrMalformedHeader)
 	})
 
-	t.Run("malformed digest header", func(t *testing.T) {
+	t.Run("non-byte-sequence value is malformed", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "https://example.com/", strings.NewReader("body"))
 		req.Header.Set("Content-Digest", "sha-256=notcolonwrapped")
 
 		err := VerifyContentDigest(req)
-		assert.ErrorIs(t, err, ErrUnsupportedDigest)
+		assert.ErrorIs(t, err, ErrMalformedHeader)
 	})
 
-	t.Run("entry without equals is skipped", func(t *testing.T) {
+	t.Run("bare key parses as unsupported algorithm", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "https://example.com/", strings.NewReader("body"))
+		// A bare key is a valid boolean-true dictionary member; the key is not
+		// a supported algorithm, so no supported digest is present.
 		req.Header.Set("Content-Digest", "malformed-no-equals")
 
 		err := VerifyContentDigest(req)

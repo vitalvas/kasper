@@ -1894,3 +1894,37 @@ r.Handle("/readyz", muxhandlers.HealthHandler(muxhandlers.HealthConfig{
     Timeout: 2 * time.Second,
 }))
 ```
+
+## Content Digest Middleware
+
+`ContentDigestMiddleware` adds a `Content-Digest` response header (RFC 9530)
+computed over the response body, and can optionally verify the
+`Content-Digest` of incoming requests against their body. The field value is
+built and parsed with the kasper/sfv structured-fields package.
+
+Supported algorithms: `DigestSHA256` and `DigestSHA512`.
+
+### ContentDigestConfig
+
+| Field | Description |
+|-------|-------------|
+| `Algorithm` | Hash used to emit Content-Digest on responses. Required |
+| `VerifyRequests` | Verify an incoming Content-Digest against the request body |
+| `RequireRequestDigest` | With `VerifyRequests`, reject requests lacking the header |
+| `OnError` | Handler for verification failure. Default: 400 Bad Request |
+
+### Content Digest Usage
+
+```go
+mw, err := muxhandlers.ContentDigestMiddleware(muxhandlers.ContentDigestConfig{
+    Algorithm:      muxhandlers.DigestSHA256,
+    VerifyRequests: true,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+r := mux.NewRouter()
+r.Use(mw)
+// Responses now carry: Content-Digest: sha-256=:<base64>:
+```

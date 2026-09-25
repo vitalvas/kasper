@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vitalvas/kasper/sfv"
 )
 
 // signatureParams holds the parameters that appear in the @signature-params
@@ -88,62 +90,55 @@ func serializeSignatureParams(params signatureParams) string {
 }
 
 // parseSignatureParams parses a signature parameters string as produced by
-// serializeSignatureParams. It extracts the inner list of component
-// identifiers and the key-value parameters.
+// serializeSignatureParams, using the sfv package (RFC 9651) as the underlying
+// structured-field parser. It extracts the inner list of component identifiers
+// and the key-value parameters into a signatureParams. The signature base is
+// reconstructed by re-serializing these values, so parsing does not need to
+// preserve the raw bytes.
 //
 // Expected format: ("@method" "@authority" "@path");created=...;keyid="..."
 func parseSignatureParams(raw string) (signatureParams, error) {
 	var params signatureParams
 
-	// Find the inner list boundaries.
-	openParen := strings.IndexByte(raw, '(')
-	closeParen := strings.IndexByte(raw, ')')
+	// The @signature-params value is an sfv Inner List of component
+	// identifiers carrying the signature parameters. It parses as a List with
+	// a single inner-list member.
+	list, err := sfv.ParseList(raw)
+	if err != nil {
+		return params, fmt.Errorf("%w: %v", ErrMalformedHeader, err)
+	}
+	if len(list) != 1 || !list[0].IsInnerList {
+		return params, fmt.Errorf("%w: signature params must be an inner list", ErrMalformedHeader)
+	}
+	inner := list[0].InnerList
 
-	if openParen < 0 || closeParen < 0 || closeParen <= openParen {
-		return params, fmt.Errorf("%w: invalid signature params format", ErrMalformedHeader)
+	for _, ci := range inner.Items {
+		if ci.Value.Kind != sfv.KindString {
+			return params, fmt.Errorf("%w: component id must be a string", ErrMalformedHeader)
+		}
+		params.components = append(params.components, ci.Value.Str)
 	}
 
-	inner := raw[openParen+1 : closeParen]
-	params.components = parseInnerList(inner)
-
-	// Parse parameters after the closing paren.
-	rest := raw[closeParen+1:]
-	paramParts := splitParams(rest)
-
-	for _, part := range paramParts {
-		key, value, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-
-		switch key {
+	for _, p := range inner.Params {
+		switch p.Key {
 		case "created":
-			ts, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
+			if p.Value.Kind != sfv.KindInteger {
 				return params, fmt.Errorf("%w: invalid created timestamp", ErrMalformedHeader)
 			}
-			t := time.Unix(ts, 0)
-			params.created = t
-
+			params.created = time.Unix(p.Value.Integer, 0)
 		case "expires":
-			ts, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
+			if p.Value.Kind != sfv.KindInteger {
 				return params, fmt.Errorf("%w: invalid expires timestamp", ErrMalformedHeader)
 			}
-			t := time.Unix(ts, 0)
-			params.expires = t
-
+			params.expires = time.Unix(p.Value.Integer, 0)
 		case "nonce":
-			params.nonce = unquote(value)
-
+			params.nonce = p.Value.Str
 		case "alg":
-			params.alg = Algorithm(unquote(value))
-
+			params.alg = Algorithm(p.Value.Str)
 		case "keyid":
-			params.keyID = unquote(value)
-
+			params.keyID = p.Value.Str
 		case "tag":
-			params.tag = unquote(value)
+			params.tag = p.Value.Str
 		}
 	}
 
@@ -158,112 +153,10 @@ func parseSignatureParams(raw string) (signatureParams, error) {
 	return params, nil
 }
 
-// parseInnerList parses a space-separated list of quoted strings inside
-// parentheses.
-func parseInnerList(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-
-	var items []string
-	for len(s) > 0 {
-		s = strings.TrimLeft(s, " ")
-		if len(s) == 0 {
-			break
-		}
-
-		if s[0] == '"' {
-			end := strings.IndexByte(s[1:], '"')
-			if end < 0 {
-				// Malformed, take the rest.
-				items = append(items, s[1:])
-				break
-			}
-
-			items = append(items, s[1:end+1])
-			s = s[end+2:]
-		} else {
-			end := strings.IndexByte(s, ' ')
-			if end < 0 {
-				items = append(items, s)
-				break
-			}
-
-			items = append(items, s[:end])
-			s = s[end+1:]
-		}
-	}
-
-	return items
-}
-
-// splitQuoteAware splits s on delim while respecting "..." quoted regions.
-// Backslash-escaped quotes (\") inside quoted strings are handled. Each
-// resulting part is trimmed of whitespace and empty parts are skipped.
-func splitQuoteAware(s string, delim byte) []string {
-	var result []string
-	var part strings.Builder
-	inQuote := false
-
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-
-		if inQuote {
-			if ch == '\\' && i+1 < len(s) {
-				part.WriteByte(ch)
-				i++
-				part.WriteByte(s[i])
-				continue
-			}
-
-			if ch == '"' {
-				inQuote = false
-			}
-
-			part.WriteByte(ch)
-			continue
-		}
-
-		if ch == '"' {
-			inQuote = true
-			part.WriteByte(ch)
-			continue
-		}
-
-		if ch == delim {
-			p := strings.TrimSpace(part.String())
-			if p != "" {
-				result = append(result, p)
-			}
-
-			part.Reset()
-			continue
-		}
-
-		part.WriteByte(ch)
-	}
-
-	if p := strings.TrimSpace(part.String()); p != "" {
-		result = append(result, p)
-	}
-
-	return result
-}
-
-// splitParams splits ";key=value" parameter pairs.
-func splitParams(s string) []string {
-	s = strings.TrimLeft(s, " ")
-	if s == "" {
-		return nil
-	}
-
-	return splitQuoteAware(s, ';')
-}
-
-// quoteRFC8941 produces an RFC 8941 quoted-string. Only backslash and
-// double-quote are escaped (Section 3.3.3); no other escape sequences
-// are permitted.
+// quoteRFC8941 produces an RFC 8941 / RFC 9651 quoted-string. Only backslash
+// and double-quote are escaped (Section 3.3.3). This is the byte authority for
+// the signed @signature-params value, so it is kept in httpsig rather than
+// delegated to sfv to guarantee the signature base is stable.
 func quoteRFC8941(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 2)
@@ -279,34 +172,6 @@ func quoteRFC8941(s string) string {
 	}
 
 	b.WriteByte('"')
-
-	return b.String()
-}
-
-// unquote removes surrounding double quotes and unescapes RFC 8941
-// escape sequences (\\ → \ and \" → ").
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		s = s[1 : len(s)-1]
-	}
-
-	if !strings.Contains(s, `\`) {
-		return s
-	}
-
-	var b strings.Builder
-	b.Grow(len(s))
-
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			i++
-			b.WriteByte(s[i])
-
-			continue
-		}
-
-		b.WriteByte(s[i])
-	}
 
 	return b.String()
 }

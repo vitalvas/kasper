@@ -443,4 +443,4 @@ Default covered components when none specified: `ComponentMethod`,
 
 - [RFC 9421](https://www.rfc-editor.org/rfc/rfc9421) - HTTP Message Signatures
 - [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530) - Digest Fields
-- [RFC 8941](https://www.rfc-editor.org/rfc/rfc8941) - Structured Field Values (subset)
+- [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651) - Structured Field Values (via kasper/sfv)
