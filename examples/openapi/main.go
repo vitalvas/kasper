@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/vitalvas/kasper/mux"
 	"github.com/vitalvas/kasper/openapi"
 )

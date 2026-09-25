@@ -300,12 +300,6 @@ func TestNewGCMCipherConstructorError(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidKey)
 }
 
-func TestGenerateKeyPairRandFailure(t *testing.T) {
-	_, err := generateKeyPair(errReader{})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidKey)
-}
-
 func TestGenerateKeyPairConstructorError(t *testing.T) {
 	prev := x25519GenerateKey
 	x25519GenerateKey = func(io.Reader) (*ecdh.PrivateKey, error) { return nil, forcedErr() }

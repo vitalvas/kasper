@@ -2344,7 +2344,7 @@ func TestMessageWriterContinuation(t *testing.T) {
 		require.GreaterOrEqual(t, len(second), 2)
 		assert.Equal(t, byte(continuationFrame), second[0]&0x0f)
 		assert.NotZero(t, second[0]&finalBit, "last fragment must set FIN")
-		assert.EqualValues(t, len(("world")), second[1]&0x7f, "last fragment carries the final chunk, not an empty frame")
+		assert.EqualValues(t, len("world"), second[1]&0x7f, "last fragment carries the final chunk, not an empty frame")
 
 		// Exactly two frames: no trailing empty continuation frame.
 		assert.Len(t, data, (2+5)+(2+5))

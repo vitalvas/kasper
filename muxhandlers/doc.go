@@ -91,7 +91,7 @@
 // RequestIDMiddleware generates or propagates a unique request identifier.
 // The ID is set on the request header, the response header, and the request
 // context. Downstream handlers can retrieve it with RequestIDFromContext.
-// By default it generates UUID v4 values using github.com/google/uuid.
+// By default it generates UUID v4 values using the standard library uuid package.
 // Use GenerateUUIDv7 for time-ordered IDs (RFC 9562). The GenerateFunc
 // receives the current request, allowing ID generation based on request
 // context.

@@ -24,6 +24,13 @@ func (r *flateReadWrapper) Read(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 	n, err := r.fr.Read(p)
+	// The appended 0x00 0x00 0xff 0xff marker forms a DEFLATE sync-flush
+	// boundary, not a final block, so flate reports io.ErrUnexpectedEOF at
+	// end of input. Per RFC 7692 that marks the end of the message; treat it
+	// as a clean io.EOF and release the reader.
+	if err == io.ErrUnexpectedEOF {
+		err = io.EOF
+	}
 	if err == io.EOF {
 		r.fr.Close()
 		r.fr = nil
@@ -70,7 +77,15 @@ func (cr *compressedReader) Read(p []byte) (int, error) {
 	if cr.fr == nil {
 		cr.fr = getFlateReader(cr.r)
 	}
-	return cr.fr.Read(p)
+	n, err := cr.fr.Read(p)
+	// The message payload plus the appended 0x00 0x00 0xff 0xff marker forms
+	// a DEFLATE sync-flush boundary, not a final block, so flate reports
+	// io.ErrUnexpectedEOF when the input ends. Per RFC 7692 that boundary
+	// marks the end of the message; normalize it to a clean io.EOF.
+	if err == io.ErrUnexpectedEOF {
+		err = io.EOF
+	}
+	return n, err
 }
 
 func (cr *compressedReader) Close() error {
@@ -134,7 +149,11 @@ func (cw *compressedWriter) Write(p []byte) (int, error) {
 
 func (cw *compressedWriter) Close() error {
 	if cw.fw != nil {
-		if err := cw.fw.Close(); err != nil {
+		// RFC 7692, section 7.2.1: finalize the per-message DEFLATE stream
+		// with a sync flush (not Close) so the output ends in the empty
+		// non-compressed block marker 0x00 0x00 0xff 0xff. Close would emit
+		// a final block instead, and its trailing bytes are not the marker.
+		if err := cw.fw.Flush(); err != nil {
 			return err
 		}
 		cw.fw = nil

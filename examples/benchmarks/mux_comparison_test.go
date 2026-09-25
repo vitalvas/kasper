@@ -29,7 +29,7 @@ func newNopResponseWriter() *nopResponseWriter {
 	return &nopResponseWriter{h: make(http.Header)}
 }
 
-func (w *nopResponseWriter) Header() http.Header        { return w.h }
+func (w *nopResponseWriter) Header() http.Header         { return w.h }
 func (w *nopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (w *nopResponseWriter) WriteHeader(int)             {}
 

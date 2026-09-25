@@ -3,8 +3,8 @@ package muxhandlers
 import (
 	"context"
 	"net/http"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/vitalvas/kasper/mux"
 )
 
@@ -86,5 +86,5 @@ func GenerateUUIDv4(_ *http.Request) string {
 //
 // Spec reference: https://www.rfc-editor.org/rfc/rfc9562#section-5.7
 func GenerateUUIDv7(_ *http.Request) string {
-	return uuid.Must(uuid.NewV7()).String()
+	return uuid.NewV7().String()
 }

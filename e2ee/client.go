@@ -7,8 +7,7 @@ import (
 	"io"
 	"net/http"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // Session holds a reusable ephemeral X25519 key pair for a client, per the
@@ -211,7 +210,7 @@ func (c *ClientConfig) nid() string {
 		return c.newNID()
 	}
 
-	return uuid.NewString()
+	return uuid.New().String()
 }
 
 // EncryptRequest encrypts r's body in place: it replaces the body with the

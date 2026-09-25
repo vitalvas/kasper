@@ -192,12 +192,16 @@ type AuditEntry struct {
 
 // --- Handlers ---
 
-func listUsers(w http.ResponseWriter, _ *http.Request)    { mux.ResponseJSON(w, http.StatusOK, nil) }
-func createUser(w http.ResponseWriter, _ *http.Request)   { mux.ResponseJSON(w, http.StatusCreated, nil) }
-func getUser(w http.ResponseWriter, _ *http.Request)      { mux.ResponseJSON(w, http.StatusOK, nil) }
-func updateUser(w http.ResponseWriter, _ *http.Request)   { mux.ResponseJSON(w, http.StatusOK, nil) }
-func deleteUser(w http.ResponseWriter, _ *http.Request)   { w.WriteHeader(http.StatusNoContent) }
-func exportUsers(w http.ResponseWriter, _ *http.Request)  { mux.ResponseJSON(w, http.StatusOK, nil) }
+func listUsers(w http.ResponseWriter, _ *http.Request) { mux.ResponseJSON(w, http.StatusOK, nil) }
+
+func createUser(w http.ResponseWriter, _ *http.Request) { mux.ResponseJSON(w, http.StatusCreated, nil) }
+
+func getUser(w http.ResponseWriter, _ *http.Request) { mux.ResponseJSON(w, http.StatusOK, nil) }
+
+func updateUser(w http.ResponseWriter, _ *http.Request)  { mux.ResponseJSON(w, http.StatusOK, nil) }
+func deleteUser(w http.ResponseWriter, _ *http.Request)  { w.WriteHeader(http.StatusNoContent) }
+func exportUsers(w http.ResponseWriter, _ *http.Request) { mux.ResponseJSON(w, http.StatusOK, nil) }
+
 func uploadFile(w http.ResponseWriter, _ *http.Request)   { mux.ResponseJSON(w, http.StatusCreated, nil) }
 func downloadFile(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 func subscribeEvt(w http.ResponseWriter, _ *http.Request) {
