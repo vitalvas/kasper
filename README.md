@@ -74,6 +74,20 @@ HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530).
 
 ---
 
+## sfv
+
+Structured Field Values (RFC 9651), the typed HTTP field syntax underlying
+RFC 9421 and other modern headers.
+
+| Feature | Standard | Details |
+|---------|----------|---------|
+| Parsing | RFC 9651 | `ParseItem`, `ParseList`, `ParseDictionary` with strict trailing-character rejection |
+| Serialization | RFC 9651 | Canonical output via `String` methods on each value type |
+| Bare items | RFC 9651 | Integer, Decimal, String, Token, Byte Sequence, Boolean, Date, Display String |
+| Containers | RFC 9651 | Items, Inner Lists, Lists, Dictionaries, each with Parameters |
+
+---
+
 ## blindrsa
 
 RSA Blind Signatures (RFC 9474 / RSABSSA) for privacy-preserving tokens.
