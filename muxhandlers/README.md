@@ -197,6 +197,21 @@ if err != nil {
 r.Use(mw)
 ```
 
+### Parsing Forwarded elements
+
+`ParseForwarded` decodes a full RFC 7239 `Forwarded` header into its
+forwarded-elements, in header order (leftmost first). Values are returned
+verbatim, so obfuscated identifiers (`_hidden`) and `unknown` are preserved.
+Use it to inspect the whole proxy chain rather than the single hop the
+middleware applies.
+
+```go
+elems := muxhandlers.ParseForwarded(r.Header.Get("Forwarded"))
+for _, e := range elems {
+    // e.For, e.By, e.Host, e.Proto
+}
+```
+
 ## Recovery Middleware
 
 `RecoveryMiddleware` recovers from panics in downstream handlers,

@@ -74,6 +74,14 @@
 //	}
 //	r.Use(mw)
 //
+// ParseForwarded decodes a full RFC 7239 Forwarded header into its
+// forwarded-elements in header order, preserving obfuscated ("_hidden") and
+// "unknown" identifiers verbatim, for inspecting the whole proxy chain:
+//
+//	for _, e := range muxhandlers.ParseForwarded(r.Header.Get("Forwarded")) {
+//	    // e.For, e.By, e.Host, e.Proto
+//	}
+//
 // # Recovery Middleware
 //
 // RecoveryMiddleware recovers from panics in downstream handlers, returns
