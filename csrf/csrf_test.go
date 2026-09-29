@@ -1814,3 +1814,36 @@ func BenchmarkUnmask(b *testing.B) {
 		_ = unmask(masked)
 	}
 }
+
+func TestRequireOriginWithFetchMetadata(t *testing.T) {
+	rc, err := resolveConfig(Config{RequireOriginOrReferer: true, AllowSameSite: true})
+	require.NoError(t, err)
+	for _, site := range []string{"same-origin", "none", "same-site"} {
+		r := httptest.NewRequest("POST", "http://example.com/", nil)
+		r.Header.Set("Sec-Fetch-Site", site)
+		require.ErrorIs(t, verifyFetchMetadataAndOrigin(r, rc), ErrRefererMissing)
+		r.Header.Set("Origin", "http://evil.com")
+		require.ErrorIs(t, verifyFetchMetadataAndOrigin(r, rc), ErrOriginRejected)
+		r.Header.Set("Origin", "http://example.com")
+		require.NoError(t, verifyFetchMetadataAndOrigin(r, rc))
+	}
+}
+
+func TestLegacyCookieCompatibility(t *testing.T) {
+	codec, err := securecookie.New(newTestKey(t))
+	require.NoError(t, err)
+	raw, err := newRawToken()
+	require.NoError(t, err)
+	encoded, err := codec.Encode(raw)
+	require.NoError(t, err)
+	r := httptest.NewRequest("POST", "https://example.com/", nil)
+	r.AddCookie(&http.Cookie{Name: "csrf_token", Value: encoded})
+	rc, err := resolveConfig(Config{})
+	require.NoError(t, err)
+	got, _, ok := readCookie(r, rc, codec)
+	require.True(t, ok)
+	require.Equal(t, raw, got)
+	rc.sessionIDFn = func(*http.Request) string { return "" }
+	_, _, ok = readCookie(r, rc, codec)
+	require.False(t, ok, "unbound legacy cookie must not satisfy session binding")
+}

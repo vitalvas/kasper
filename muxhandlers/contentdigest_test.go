@@ -225,3 +225,87 @@ func TestContentDigestCustomOnError(t *testing.T) {
 	assert.True(t, called)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
+
+func TestDigestResponseHeaders(t *testing.T) {
+	mw, err := ContentDigestMiddleware(ContentDigestConfig{Algorithm: DigestSHA256})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	rec.Header().Set("X-Existing", "old")
+	mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.Equal(t, "old", w.Header().Get("X-Existing"))
+		w.Header().Set("X-Existing", "new")
+		_, err := w.Write([]byte("hello"))
+		require.NoError(t, err)
+		w.Header().Set("X-Late", "ignored")
+	})).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	res := rec.Result()
+	defer res.Body.Close()
+	require.Equal(t, []string{"new"}, res.Header.Values("X-Existing"))
+	require.Empty(t, res.Header.Get("X-Late"))
+	require.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
+}
+
+func TestDigestResponsesWithoutContent(t *testing.T) {
+	mw, err := ContentDigestMiddleware(ContentDigestConfig{Algorithm: DigestSHA256})
+	require.NoError(t, err)
+	for _, status := range []int{200, 204, 304} {
+		method := "GET"
+		if status == 200 {
+			method = "HEAD"
+		}
+		rec := httptest.NewRecorder()
+		mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+			n, err := w.Write([]byte("not sent"))
+			if status == 200 {
+				require.NoError(t, err)
+				require.Equal(t, 8, n)
+			} else {
+				require.ErrorIs(t, err, http.ErrBodyNotAllowed)
+			}
+		})).ServeHTTP(rec, httptest.NewRequest(method, "/", nil))
+		require.Equal(t, status, rec.Code)
+		require.Empty(t, rec.Body.String())
+		require.Equal(t, digestHeaderFor("", DigestSHA256), rec.Header().Get("Content-Digest"))
+	}
+}
+
+func TestDigestMultipleFieldLines(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", strings.NewReader("hello"))
+	req.Header.Add("Content-Digest", "unknown=:AA==:")
+	req.Header.Add("Content-Digest", digestHeaderFor("hello", DigestSHA256))
+	require.NoError(t, VerifyContentDigest(req))
+	req.Header.Add("Content-Digest", "other=notbytes")
+	require.ErrorIs(t, VerifyContentDigest(req), ErrDigestMalformed)
+	req.Header = nil
+	require.NoError(t, SetContentDigest(req, DigestSHA256))
+	body, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body))
+}
+
+func TestDigestInformationalResponseAndTrailers(t *testing.T) {
+	mw, err := ContentDigestMiddleware(ContentDigestConfig{Algorithm: DigestSHA256})
+	require.NoError(t, err)
+	server := httptest.NewServer(mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Del("Link")
+		w.Header().Set("Trailer", "X-Checksum")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("hello"))
+		w.Header().Set("X-Checksum", "done")
+	})))
+	defer server.Close()
+	res, err := server.Client().Get(server.URL)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+	require.Equal(t, "hello", string(body))
+	require.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
+	require.Equal(t, digestHeaderFor("hello", DigestSHA256), res.Header.Get("Content-Digest"))
+	require.Equal(t, "done", res.Trailer.Get("X-Checksum"))
+	require.Empty(t, res.Header.Get("Link"))
+}

@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // String serializes the bare item per RFC 9651 Section 4.1.3. It returns an
@@ -12,6 +13,9 @@ import (
 // non-finite Decimal); callers building fields from validated input do not hit
 // that path.
 func (b BareItem) String() string {
+	if !b.valid() {
+		return ""
+	}
 	var sb strings.Builder
 	b.serialize(&sb)
 	return sb.String()
@@ -48,11 +52,14 @@ func (b BareItem) serialize(sb *strings.Builder) {
 // serializeDecimal formats a Decimal per RFC 9651 Section 4.1.5: at least one
 // and at most three fractional digits, round-half-to-even.
 func serializeDecimal(v float64) string {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
+	if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) >= 1e12 {
 		return ""
 	}
 	// Round to 3 fractional digits, half-to-even.
 	scaled := math.RoundToEven(v * 1000)
+	if math.Abs(scaled) > 999999999999999 {
+		return ""
+	}
 	i := int64(scaled)
 	neg := i < 0
 	if neg {
@@ -128,6 +135,9 @@ func (p Parameters) serialize(sb *strings.Builder) {
 
 // String serializes the Item per RFC 9651 Section 4.1.3.
 func (it Item) String() string {
+	if !it.valid() {
+		return ""
+	}
 	var sb strings.Builder
 	sb.Grow(16 + 8*len(it.Params))
 	it.serialize(&sb)
@@ -141,6 +151,9 @@ func (it Item) serialize(sb *strings.Builder) {
 
 // String serializes the Inner List per RFC 9651 Section 4.1.1.1.
 func (il InnerList) String() string {
+	if !il.valid() {
+		return ""
+	}
 	var sb strings.Builder
 	il.serialize(&sb)
 	return sb.String()
@@ -168,6 +181,9 @@ func (m Member) serialize(sb *strings.Builder) {
 
 // String serializes the List per RFC 9651 Section 4.1.1.
 func (l List) String() string {
+	if !validMembers(l) {
+		return ""
+	}
 	var sb strings.Builder
 	sb.Grow(16 * len(l))
 	for i := range l {
@@ -181,6 +197,9 @@ func (l List) String() string {
 
 // String serializes the Dictionary per RFC 9651 Section 4.1.2.
 func (d Dictionary) String() string {
+	if !d.valid() {
+		return ""
+	}
 	var sb strings.Builder
 	sb.Grow(24 * len(d))
 	for i := range d {
@@ -198,4 +217,96 @@ func (d Dictionary) String() string {
 		m.serialize(&sb)
 	}
 	return sb.String()
+}
+
+// Validation is performed before serialization so invalid nested values never
+// produce a partial field that could be interpreted as a different value.
+func (b BareItem) valid() bool {
+	switch b.Kind {
+	case KindInteger, KindDate:
+		return b.Integer >= minInteger && b.Integer <= maxInteger
+	case KindDecimal:
+		return serializeDecimal(b.Decimal) != ""
+	case KindString:
+		for i := range len(b.Str) {
+			if b.Str[i] < 0x20 || b.Str[i] > 0x7e {
+				return false
+			}
+		}
+		return true
+	case KindToken:
+		if len(b.Str) == 0 {
+			return false
+		}
+		c := b.Str[0]
+		if c != '*' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+			return false
+		}
+		for i := range len(b.Str) {
+			if !isTokenChar(b.Str[i]) {
+				return false
+			}
+		}
+		return true
+	case KindByteSequence, KindBoolean:
+		return true
+	case KindDisplayString:
+		return utf8.ValidString(b.Str)
+	default:
+		return false
+	}
+}
+
+func validKey(key string) bool {
+	p := parser{s: key}
+	_, err := p.parseKey()
+	return err == nil && p.eof()
+}
+
+func (p Parameters) valid() bool {
+	for _, param := range p {
+		if !validKey(param.Key) || !param.Value.valid() {
+			return false
+		}
+	}
+	return true
+}
+
+func (it Item) valid() bool { return it.Value.valid() && it.Params.valid() }
+
+func (il InnerList) valid() bool {
+	if !il.Params.valid() {
+		return false
+	}
+	for _, it := range il.Items {
+		if !it.valid() {
+			return false
+		}
+	}
+	return true
+}
+
+func (m Member) valid() bool {
+	if m.IsInnerList {
+		return m.InnerList.valid()
+	}
+	return m.Item.valid()
+}
+
+func validMembers(l List) bool {
+	for _, m := range l {
+		if !m.valid() {
+			return false
+		}
+	}
+	return true
+}
+
+func (d Dictionary) valid() bool {
+	for _, entry := range d {
+		if !validKey(entry.Key) || !entry.Member.valid() {
+			return false
+		}
+	}
+	return true
 }

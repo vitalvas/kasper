@@ -334,6 +334,11 @@ func validate(r *http.Request, rc *resolvedConfig, cookieToken, cookieSess strin
 //   - "cross-site": reject outright.
 //   - missing: fall through to Origin/Referer.
 func verifyFetchMetadataAndOrigin(r *http.Request, rc *resolvedConfig) error {
+	if rc.requireOrRef {
+		if err := verifyOrigin(r, rc); err != nil {
+			return err
+		}
+	}
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "none":
 		return nil
@@ -706,6 +711,14 @@ func readCookie(r *http.Request, rc *resolvedConfig, codec *securecookie.SecureC
 	}
 	var v cookieValue
 	if err := codec.Decode(c.Value, &v); err != nil {
+		// Releases before session binding encoded the raw token as a string.
+		// Preserve those cookies only when session binding is disabled.
+		if rc.sessionIDFn == nil {
+			var legacy string
+			if err := codec.Decode(c.Value, &legacy); err == nil {
+				return legacy, "", true
+			}
+		}
 		return "", "", false
 	}
 	return v.Raw, v.Sess, true

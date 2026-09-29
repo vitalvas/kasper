@@ -3,6 +3,7 @@ package websocket
 import (
 	"compress/flate"
 	"io"
+	"strings"
 	"sync"
 )
 
@@ -24,13 +25,6 @@ func (r *flateReadWrapper) Read(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 	n, err := r.fr.Read(p)
-	// The appended 0x00 0x00 0xff 0xff marker forms a DEFLATE sync-flush
-	// boundary, not a final block, so flate reports io.ErrUnexpectedEOF at
-	// end of input. Per RFC 7692 that marks the end of the message; treat it
-	// as a clean io.EOF and release the reader.
-	if err == io.ErrUnexpectedEOF {
-		err = io.EOF
-	}
 	if err == io.EOF {
 		r.fr.Close()
 		r.fr = nil
@@ -48,6 +42,10 @@ func (r *flateReadWrapper) Close() error {
 }
 
 func getFlateReader(r io.Reader) io.ReadCloser {
+	// The restored sync-flush suffix is not a final DEFLATE block. Append
+	// an empty final block so valid messages end cleanly without hiding
+	// io.ErrUnexpectedEOF from truncated streams.
+	r = io.MultiReader(r, strings.NewReader("\x01\x00\x00\xff\xff"))
 	fr, ok := flateReaderPool.Get().(io.ReadCloser)
 	if ok && fr != nil {
 		if resetter, ok := fr.(flate.Resetter); ok {
@@ -77,15 +75,7 @@ func (cr *compressedReader) Read(p []byte) (int, error) {
 	if cr.fr == nil {
 		cr.fr = getFlateReader(cr.r)
 	}
-	n, err := cr.fr.Read(p)
-	// The message payload plus the appended 0x00 0x00 0xff 0xff marker forms
-	// a DEFLATE sync-flush boundary, not a final block, so flate reports
-	// io.ErrUnexpectedEOF when the input ends. Per RFC 7692 that boundary
-	// marks the end of the message; normalize it to a clean io.EOF.
-	if err == io.ErrUnexpectedEOF {
-		err = io.EOF
-	}
-	return n, err
+	return cr.fr.Read(p)
 }
 
 func (cr *compressedReader) Close() error {

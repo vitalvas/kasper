@@ -50,7 +50,7 @@
 // fails closed with ErrNoNonceCache; a reused nonce returns ErrReplay:
 //
 //	cache := privacypass.NewMemoryNonceCache()
-//	err := privacypass.VerifyToken(issuerPublicKey, challenge, token, cache, time.Hour)
+//	err := privacypass.VerifyToken(issuerPublicKey, challenge, token, cache, 0)
 //
 // NonceCache is an interface. MemoryNonceCache is process-local; for a
 // multi-instance cluster, implement NonceCache over a shared store so a nonce

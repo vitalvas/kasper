@@ -50,7 +50,7 @@ func (c *TokenChallenge) Marshal() ([]byte, error) {
 	if len(c.RedemptionContext) != 0 && len(c.RedemptionContext) != 32 {
 		return nil, ErrMalformed
 	}
-	if len(c.IssuerName) > 0xffff || len(c.OriginInfo) > 0xffff {
+	if len(c.IssuerName) == 0 || len(c.IssuerName) > 0xffff || len(c.OriginInfo) > 0xffff {
 		return nil, ErrMalformed
 	}
 
@@ -75,7 +75,7 @@ func UnmarshalTokenChallenge(b []byte) (*TokenChallenge, error) {
 	if r.err || !r.done() {
 		return nil, ErrMalformed
 	}
-	if len(rc) != 0 && len(rc) != 32 {
+	if len(c.IssuerName) == 0 || (len(rc) != 0 && len(rc) != 32) {
 		return nil, ErrMalformed
 	}
 	return &c, nil

@@ -76,3 +76,14 @@ func TestParseAuthorizationHeaderErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthorizationCaseInsensitive(t *testing.T) {
+	priv := testRSAKey(t)
+	tok := issueToken(t, priv, testChallenge())
+	header, err := BuildAuthorizationHeader(tok)
+	require.NoError(t, err)
+	header = strings.Replace(header, "PrivateToken token=", "privatetoken TOKEN=", 1)
+	parsed, err := ParseAuthorizationHeader(header)
+	require.NoError(t, err)
+	require.Equal(t, tok, parsed)
+}

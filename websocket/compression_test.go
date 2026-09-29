@@ -500,3 +500,9 @@ func FuzzCompressDecompress(f *testing.F) {
 		}
 	})
 }
+
+func TestTruncatedCompressedMessageRejected(t *testing.T) {
+	// An unfinished stored block declaring 100 bytes, with only two present.
+	_, err := decompressData([]byte{0, 100, 0, 155, 255, 'a', 'b'})
+	require.Error(t, err)
+}

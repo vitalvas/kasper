@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -113,4 +114,55 @@ func TestMiddlewareCustomOnError(t *testing.T) {
 
 	assert.True(t, called)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestMiddlewareRequiresNonceRetentionThroughChallengeExpiry(t *testing.T) {
+	priv := testRSAKey(t)
+	cfg := Config{PublicKey: &priv.PublicKey, Challenge: testChallenge(), TokenTTL: time.Hour}
+	_, err := Middleware(cfg)
+	require.ErrorIs(t, err, ErrInvalidTokenTTL)
+	cfg.ChallengeExpires = time.Now().Add(2 * time.Hour)
+	_, err = Middleware(cfg)
+	require.ErrorIs(t, err, ErrInvalidTokenTTL)
+	cfg.ChallengeExpires = time.Now().Add(time.Minute)
+	_, err = Middleware(cfg)
+	require.NoError(t, err)
+}
+
+func TestMiddlewareDefaultCacheDoesNotForgetRedeemedTokens(t *testing.T) {
+	priv := testRSAKey(t)
+	challenge := testChallenge()
+	tok := issueToken(t, priv, challenge)
+	auth, err := BuildAuthorizationHeader(tok)
+	require.NoError(t, err)
+	cache := NewMemoryNonceCache()
+	now := time.Now()
+	cache.now = func() time.Time { return now }
+	mw, err := Middleware(Config{PublicKey: &priv.PublicKey, Challenge: challenge, Cache: cache})
+	require.NoError(t, err)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", auth)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	now = now.Add(24 * time.Hour)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestMiddlewareExpiredChallenge(t *testing.T) {
+	priv := testRSAKey(t)
+	var observed error
+	mw, err := Middleware(Config{
+		PublicKey:        &priv.PublicKey,
+		Challenge:        testChallenge(),
+		ChallengeExpires: time.Now().Add(-time.Second),
+		TokenTTL:         time.Hour,
+		OnError:          func(_ http.ResponseWriter, _ *http.Request, err error) { observed = err },
+	})
+	require.NoError(t, err)
+	mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("expired challenge reached handler") })).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	require.ErrorIs(t, observed, ErrChallengeExpired)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 // parser holds the input and cursor for the RFC 9651 parsing algorithm
-// (Section 4.2). The input must already have leading/trailing OWS removed by
+// (Section 4.2). The input must already have leading SP removed by
 // the entry points.
 type parser struct {
 	s   string
@@ -26,11 +26,12 @@ func (p *parser) errf(format string, args ...any) error {
 
 // ParseItem parses an sf-item (bare item with parameters) from a field value.
 func ParseItem(s string) (Item, error) {
-	p := &parser{s: strings.TrimSpace(s)}
+	p := &parser{s: strings.TrimLeft(s, " ")}
 	it, err := p.parseItem()
 	if err != nil {
 		return Item{}, err
 	}
+	p.skipSP()
 	if !p.eof() {
 		return Item{}, ErrTrailing
 	}
@@ -39,7 +40,7 @@ func ParseItem(s string) (Item, error) {
 
 // ParseList parses an sf-list from a field value.
 func ParseList(s string) (List, error) {
-	p := &parser{s: strings.TrimSpace(s)}
+	p := &parser{s: strings.TrimLeft(s, " ")}
 	l, err := p.parseList()
 	if err != nil {
 		return nil, err
@@ -52,7 +53,7 @@ func ParseList(s string) (List, error) {
 
 // ParseDictionary parses an sf-dictionary from a field value.
 func ParseDictionary(s string) (Dictionary, error) {
-	p := &parser{s: strings.TrimSpace(s)}
+	p := &parser{s: strings.TrimLeft(s, " ")}
 	d, err := p.parseDictionary()
 	if err != nil {
 		return nil, err
@@ -433,6 +434,15 @@ func (p *parser) parseByteSequence() (BareItem, error) {
 		return BareItem{}, p.errf("unterminated byte sequence")
 	}
 	enc := p.s[start:p.pos]
+	for i := range len(enc) {
+		c := enc[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && !isDigit(c) && c != '+' && c != '/' && c != '=' {
+			return BareItem{}, p.errf("invalid base64 character")
+		}
+	}
+	if rem := len(enc) % 4; rem != 0 {
+		enc += strings.Repeat("=", 4-rem)
+	}
 	p.pos++ // consume closing colon
 	raw, err := base64.StdEncoding.DecodeString(enc)
 	if err != nil {

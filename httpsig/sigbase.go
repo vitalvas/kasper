@@ -13,6 +13,7 @@ import (
 // signatureParams holds the parameters that appear in the @signature-params
 // component of the signature base.
 type signatureParams struct {
+	serialized string // canonical parsed parameters, including extensions and their order
 	components []string
 	created    time.Time
 	expires    time.Time
@@ -49,6 +50,9 @@ func buildSignatureBase(r *http.Request, params signatureParams) ([]byte, string
 //
 // Format: (<component-ids>);<key>=<value>;...
 func serializeSignatureParams(params signatureParams) string {
+	if params.serialized != "" {
+		return params.serialized
+	}
 	var b strings.Builder
 
 	// Inner list of component identifiers.
@@ -92,9 +96,8 @@ func serializeSignatureParams(params signatureParams) string {
 // parseSignatureParams parses a signature parameters string as produced by
 // serializeSignatureParams, using the sfv package (RFC 9651) as the underlying
 // structured-field parser. It extracts the inner list of component identifiers
-// and the key-value parameters into a signatureParams. The signature base is
-// reconstructed by re-serializing these values, so parsing does not need to
-// preserve the raw bytes.
+// and the key-value parameters into a signatureParams. The canonical inner list is retained for the
+// signature base so parameter order and extension parameters remain signed.
 //
 // Expected format: ("@method" "@authority" "@path");created=...;keyid="..."
 func parseSignatureParams(raw string) (signatureParams, error) {
@@ -111,15 +114,25 @@ func parseSignatureParams(raw string) (signatureParams, error) {
 		return params, fmt.Errorf("%w: signature params must be an inner list", ErrMalformedHeader)
 	}
 	inner := list[0].InnerList
+	params.serialized = inner.String()
 
 	for _, ci := range inner.Items {
 		if ci.Value.Kind != sfv.KindString {
 			return params, fmt.Errorf("%w: component id must be a string", ErrMalformedHeader)
 		}
+		if len(ci.Params) != 0 {
+			return params, fmt.Errorf("%w: component parameters are not supported", ErrMalformedHeader)
+		}
 		params.components = append(params.components, ci.Value.Str)
 	}
 
 	for _, p := range inner.Params {
+		switch p.Key {
+		case "nonce", "alg", "keyid", "tag":
+			if p.Value.Kind != sfv.KindString {
+				return params, fmt.Errorf("%w: %s must be a string", ErrMalformedHeader, p.Key)
+			}
+		}
 		switch p.Key {
 		case "created":
 			if p.Value.Kind != sfv.KindInteger {

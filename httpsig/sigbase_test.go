@@ -260,10 +260,8 @@ func TestParseSignatureParams(t *testing.T) {
 
 	t.Run("unquoted param values", func(t *testing.T) {
 		input := `("@method");alg=ed25519;keyid=mykey`
-		parsed, err := parseSignatureParams(input)
-		require.NoError(t, err)
-		assert.Equal(t, Algorithm("ed25519"), parsed.alg)
-		assert.Equal(t, "mykey", parsed.keyID)
+		_, err := parseSignatureParams(input)
+		require.ErrorIs(t, err, ErrMalformedHeader)
 	})
 
 	t.Run("round trip with escaped backslash in nonce", func(t *testing.T) {
@@ -338,4 +336,27 @@ func TestQuoteRFC8941(t *testing.T) {
 		// Newline and tab are passed through literally, not Go-escaped.
 		assert.Equal(t, "\"\n\t\"", quoteRFC8941("\n\t"))
 	})
+}
+
+func TestSignatureParamsPreserveOrderAndExtensions(t *testing.T) {
+	raw := `("@method");keyid="k";alg="ed25519";custom="value";nonce=""`
+	params, err := parseSignatureParams(raw)
+	require.NoError(t, err)
+	base, serialized, err := buildSignatureBase(httptest.NewRequest("GET", "/", nil), params)
+	require.NoError(t, err)
+	require.Equal(t, raw, serialized)
+	require.Equal(t, fmt.Sprintf("\"@method\": GET\n\"@signature-params\": %s", raw), string(base))
+}
+
+func TestSignatureParamsRejectTypeConfusion(t *testing.T) {
+	for _, raw := range []string{
+		`("@method");alg=ed25519;keyid="k"`,
+		`("@method");alg="ed25519";keyid=k`,
+		`("@method");alg="ed25519";keyid="k";nonce=?1`,
+		`("@method");alg="ed25519";keyid="k";tag=123`,
+		`("@method";req);alg="ed25519";keyid="k"`,
+	} {
+		_, err := parseSignatureParams(raw)
+		require.ErrorIs(t, err, ErrMalformedHeader)
+	}
 }

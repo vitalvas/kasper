@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/vitalvas/kasper/sfv"
@@ -54,7 +55,7 @@ func VerifyRequest(r *http.Request, cfg VerifyConfig) error {
 	}
 
 	// Parse the Signature-Input header to find the target signature.
-	sigInputHeader := r.Header.Get("Signature-Input")
+	sigInputHeader := strings.Join(r.Header.Values("Signature-Input"), ", ")
 	if sigInputHeader == "" {
 		return ErrSignatureNotFound
 	}
@@ -107,7 +108,7 @@ func VerifyRequest(r *http.Request, cfg VerifyConfig) error {
 	}
 
 	// Extract the signature value.
-	sigHeader := r.Header.Get("Signature")
+	sigHeader := strings.Join(r.Header.Values("Signature"), ", ")
 	if sigHeader == "" {
 		return ErrSignatureNotFound
 	}

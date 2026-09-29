@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func mathInf() float64 { return math.Inf(1) }
@@ -117,4 +118,16 @@ func TestDecimalSerializeEdges(t *testing.T) {
 	assert.Equal(t, "0.0", Decimal(0).String())
 	assert.Equal(t, "-0.5", Decimal(-0.5).String())
 	assert.Equal(t, "123.456", Decimal(123.456).String())
+}
+
+func TestSerializationRejectsUnrepresentableValues(t *testing.T) {
+	for _, value := range []BareItem{
+		Integer(1000000000000000), Decimal(1e30), Decimal(1e12),
+		String("line\nbreak"), Token("1bad"), DisplayString(string([]byte{0xff})),
+	} {
+		require.Empty(t, value.String())
+		require.Empty(t, (Item{Value: value, Params: Parameters{{Key: "ok", Value: Boolean(true)}}}).String())
+		require.Empty(t, (Dictionary{{Key: "a", Member: Member{Item: Item{Value: value}}}}).String())
+	}
+	require.Empty(t, (Dictionary{{Key: "bad key", Member: Member{Item: Item{Value: Boolean(true)}}}}).String())
 }

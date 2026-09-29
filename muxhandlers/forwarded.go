@@ -18,7 +18,8 @@ type ForwardedElement struct {
 // forwarded-elements, in header order (leftmost element first, i.e. closest to
 // the original client). Parameter names are matched case-insensitively per
 // RFC 7239 Section 4; quoted-string values are unquoted. Unknown parameters
-// are ignored. It returns nil for an empty header.
+// are ignored, but their elements are retained to preserve proxy-hop order.
+// It returns nil for an empty header.
 func ParseForwarded(header string) []ForwardedElement {
 	if strings.TrimSpace(header) == "" {
 		return nil
@@ -35,19 +36,16 @@ func ParseForwarded(header string) []ForwardedElement {
 			}
 			key = strings.ToLower(strings.TrimSpace(key))
 			val = unquoteForwarded(strings.TrimSpace(val))
+			hasParam = true
 			switch key {
 			case "for":
 				fe.For = val
-				hasParam = true
 			case "by":
 				fe.By = val
-				hasParam = true
 			case "host":
 				fe.Host = val
-				hasParam = true
 			case "proto":
 				fe.Proto = val
-				hasParam = true
 			}
 		}
 		if hasParam {

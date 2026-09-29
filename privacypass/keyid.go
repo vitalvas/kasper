@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/asn1"
+	"errors"
 	"math/big"
 )
 
@@ -14,6 +15,9 @@ var (
 	oidSHA384    = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 2}
 	oidMGF1      = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 8}
 )
+
+// ErrInvalidPublicKey indicates a key unsuitable for the fixed RSA-2048 token format.
+var ErrInvalidPublicKey = errors.New("privacypass: invalid RSA-2048 public key")
 
 // saltLength is the PSS salt length in bytes for token type 0x0002.
 const saltLength = 48
@@ -49,10 +53,6 @@ type subjectPublicKeyInfo struct {
 	SubjectPublicKey asn1.BitString
 }
 
-// nullRawValue is the DER encoding of ASN.1 NULL, used as the parameters of the
-// SHA-384 and MGF1-inner hash algorithm identifiers.
-var nullRawValue = asn1.RawValue{Tag: asn1.TagNull}
-
 // MarshalPublicKey encodes an RSA public key as the id-RSASSA-PSS
 // SubjectPublicKeyInfo (DER) that RFC 9578 uses for token type 0x0002. This is
 // the encoding advertised in the token-key challenge parameter and hashed to
@@ -62,7 +62,13 @@ var nullRawValue = asn1.RawValue{Tag: asn1.TagNull}
 // would yield a different key id, so this package encodes the RSA-PSS form
 // explicitly.
 func MarshalPublicKey(pub *rsa.PublicKey) ([]byte, error) {
-	sha384 := algorithmIdentifier{Algorithm: oidSHA384, Parameters: nullRawValue}
+	if pub == nil || pub.N == nil || pub.N.Sign() <= 0 || pub.N.BitLen() != 2048 || pub.N.Bit(0) == 0 || pub.E < 3 || pub.E > 1<<31-1 || pub.E%2 == 0 {
+		return nil, ErrInvalidPublicKey
+	}
+	// Match the SHA-384 AlgorithmIdentifiers in RFC 9578 Section 6.5:
+	// parameters are absent, not ASN.1 NULL. Even equivalent encodings
+	// produce different token key IDs because the complete DER is hashed.
+	sha384 := algorithmIdentifier{Algorithm: oidSHA384}
 	params := pssParams{
 		Hash: sha384,
 		MaskGen: mgfIdentifier{

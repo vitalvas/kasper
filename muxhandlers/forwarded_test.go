@@ -99,3 +99,8 @@ func TestParseForwardedDropsEmptyElements(t *testing.T) {
 	assert.Equal(t, "192.0.2.60", got[0].For)
 	assert.Equal(t, "198.51.100.17", got[1].For)
 }
+
+func TestParseForwardedPreservesExtensionOnlyHops(t *testing.T) {
+	got := ParseForwarded(`for=192.0.2.60, extension=proxy, for=198.51.100.17`)
+	require.Equal(t, []ForwardedElement{{For: "192.0.2.60"}, {}, {For: "198.51.100.17"}}, got)
+}

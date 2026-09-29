@@ -1,6 +1,7 @@
 package sfv
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -295,5 +296,40 @@ func TestParseErrorPropagation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Error(t, tc.fn(tc.in))
 		})
+	}
+}
+
+func TestParsingRejectsInvalidWhitespace(t *testing.T) {
+	for _, ws := range []string{"\n", "\r", "\v", "\u00a0", "\t"} {
+		_, err := ParseItem(fmt.Sprintf("%s1", ws))
+		require.Error(t, err)
+		_, err = ParseItem(fmt.Sprintf("1%s", ws))
+		require.Error(t, err)
+		_, err = ParseList(fmt.Sprintf("%s1", ws))
+		require.Error(t, err)
+		_, err = ParseDictionary(fmt.Sprintf("%sa=1", ws))
+		require.Error(t, err)
+		if ws != "\t" {
+			_, err = ParseList(fmt.Sprintf("1%s", ws))
+			require.Error(t, err)
+			_, err = ParseDictionary(fmt.Sprintf("a=1%s", ws))
+			require.Error(t, err)
+		}
+	}
+	_, err := ParseItem(" 1 ")
+	require.NoError(t, err)
+	_, err = ParseList("1\t,\t2\t")
+	require.NoError(t, err)
+}
+
+func TestByteSequencePaddingAndLineBreaks(t *testing.T) {
+	for _, input := range []string{":YQ:", ":YQ=:", ":YQ==:"} {
+		it, err := ParseItem(input)
+		require.NoError(t, err)
+		require.Equal(t, []byte("a"), it.Value.Bytes)
+	}
+	for _, input := range []string{":YQ\n==:", ":YQ\r==:", ":Y:", ":Y===:"} {
+		_, err := ParseItem(input)
+		require.Error(t, err)
 	}
 }

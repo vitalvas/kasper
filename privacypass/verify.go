@@ -35,8 +35,8 @@ var (
 // NonceCache records redeemed token nonces to enforce single use. It must be
 // safe for concurrent use. StoreUnique atomically records nonce and returns
 // true when it was newly inserted (not previously redeemed) and false when it
-// was already present. Entries may be retained for the token's lifetime,
-// expressed via ttl.
+// was already present. A zero ttl requires indefinite retention; a positive ttl
+// requires retention for at least that duration.
 type NonceCache interface {
 	StoreUnique(nonce []byte, ttl time.Duration) bool
 }
@@ -47,12 +47,26 @@ type NonceCache interface {
 // It checks, in order: the token_key_id matches pub; the challenge_digest
 // matches challenge; the authenticator is a valid RSA-PSS signature over
 // token_input; and the nonce has not been redeemed before. A nil cache fails
-// closed with ErrNoNonceCache.
+// closed with ErrNoNonceCache. A zero ttl retains nonces indefinitely. With a
+// positive ttl, the caller must stop accepting this challenge before any cache
+// entry can expire: the token itself contains no expiration timestamp.
 func VerifyToken(pub *rsa.PublicKey, challenge *TokenChallenge, tok *Token, cache NonceCache, ttl time.Duration) error {
 	if cache == nil {
 		return ErrNoNonceCache
 	}
 
+	if ttl < 0 {
+		return ErrInvalidTokenTTL
+	}
+	if tok == nil || challenge == nil {
+		return ErrMalformed
+	}
+	if tok.TokenType != TokenType || challenge.TokenType != TokenType {
+		return ErrWrongTokenType
+	}
+	if _, err := tok.Marshal(); err != nil {
+		return err
+	}
 	keyID, err := TokenKeyID(pub)
 	if err != nil {
 		return err
@@ -117,14 +131,18 @@ func (c *MemoryNonceCache) StoreUnique(nonce []byte, ttl time.Duration) bool {
 
 	now := c.now()
 	for k, exp := range c.entries {
-		if now.After(exp) {
+		if !exp.IsZero() && !now.Before(exp) {
 			delete(c.entries, k)
 		}
 	}
 
-	if exp, ok := c.entries[key]; ok && now.Before(exp) {
+	if exp, ok := c.entries[key]; ok && (exp.IsZero() || now.Before(exp)) {
 		return false
 	}
-	c.entries[key] = now.Add(ttl)
+	var expires time.Time
+	if ttl > 0 {
+		expires = now.Add(ttl)
+	}
+	c.entries[key] = expires
 	return true
 }

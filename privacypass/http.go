@@ -65,7 +65,7 @@ func BuildAuthorizationHeader(tok *Token) (string, error) {
 // ErrMalformed when the token cannot be decoded.
 func ParseAuthorizationHeader(header string) (*Token, error) {
 	scheme, rest, ok := strings.Cut(strings.TrimSpace(header), " ")
-	if !ok || scheme != authScheme {
+	if !ok || !strings.EqualFold(scheme, authScheme) {
 		return nil, ErrNoToken
 	}
 	value, ok := authParam(rest, "token")
@@ -86,7 +86,7 @@ func authParam(params, key string) (string, bool) {
 	for part := range strings.SplitSeq(params, ",") {
 		part = strings.TrimSpace(part)
 		name, value, ok := strings.Cut(part, "=")
-		if !ok || strings.TrimSpace(name) != key {
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), key) {
 			continue
 		}
 		value = strings.TrimSpace(value)

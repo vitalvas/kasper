@@ -90,7 +90,7 @@ redeemed before. The nonce is recorded only after the signature verifies.
 
 ```go
 cache := privacypass.NewMemoryNonceCache()
-err := privacypass.VerifyToken(pub, challenge, token, cache, time.Hour)
+err := privacypass.VerifyToken(pub, challenge, token, cache, 0)
 ```
 
 ## Origin middleware
@@ -124,8 +124,15 @@ r.HandleFunc("/api/v1/resource", handler).Methods(http.MethodGet)
 | `PublicKey` | Issuer public key used to verify redeemed tokens. Required |
 | `Challenge` | TokenChallenge advertised to clients and checked on redemption. Required |
 | `Cache` | NonceCache for single-use enforcement. Defaults to a process-local MemoryNonceCache |
-| `TokenTTL` | Nonce retention window. Defaults to one hour |
-| `OnError` | Verification-failure handler. Defaults to 401 with a fresh challenge |
+| `ChallengeExpires` | Challenge acceptance deadline; zero means no expiration |
+| `TokenTTL` | Nonce retention window. Zero retains indefinitely; a positive value requires `ChallengeExpires` |
+| `OnError` | Verification-failure handler. Defaults to 401 with the configured challenge, unless expired |
+
+Tokens do not carry expiration timestamps. The default cache therefore keeps
+spent nonces indefinitely. To bound retention, configure `ChallengeExpires`
+and a `TokenTTL` covering the challenge's remaining lifetime. Install a new
+challenge before its deadline; expired challenges are rejected. Direct
+`VerifyToken` callers using a positive TTL must enforce challenge expiry themselves.
 
 ## Cluster deployments
 
@@ -171,6 +178,9 @@ mw, _ := privacypass.Middleware(privacypass.Config{
 | `ErrReplay` | Token nonce has already been redeemed |
 | `ErrNoNonceCache` | Verification requested with a nil cache; fails closed |
 | `ErrNoPublicKey` | Middleware configured without an issuer public key |
+| `ErrInvalidPublicKey` | Key is not a valid RSA-2048 public key |
+| `ErrInvalidTokenTTL` | Retention does not cover the configured challenge lifetime |
+| `ErrChallengeExpired` | Configured challenge has expired |
 
 ## Standards
 

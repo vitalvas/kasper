@@ -135,7 +135,7 @@ func TestVerifyContentDigest(t *testing.T) {
 
 	t.Run("unparseable base64 is malformed", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "https://example.com/", strings.NewReader("body"))
-		req.Header.Set("Content-Digest", "md5=:abc123:")
+		req.Header.Set("Content-Digest", "md5=:abc!123:")
 
 		err := VerifyContentDigest(req)
 		assert.ErrorIs(t, err, ErrMalformedHeader)
@@ -149,14 +149,13 @@ func TestVerifyContentDigest(t *testing.T) {
 		assert.ErrorIs(t, err, ErrMalformedHeader)
 	})
 
-	t.Run("bare key parses as unsupported algorithm", func(t *testing.T) {
+	t.Run("bare key is not a digest", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "https://example.com/", strings.NewReader("body"))
-		// A bare key is a valid boolean-true dictionary member; the key is not
-		// a supported algorithm, so no supported digest is present.
+		// A bare key is a boolean, but digest dictionary values must be bytes.
 		req.Header.Set("Content-Digest", "malformed-no-equals")
 
 		err := VerifyContentDigest(req)
-		assert.ErrorIs(t, err, ErrUnsupportedDigest)
+		assert.ErrorIs(t, err, ErrMalformedHeader)
 	})
 
 	t.Run("broken body reader", func(t *testing.T) {

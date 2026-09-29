@@ -6,8 +6,10 @@ import (
 	"crypto/sha512"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/vitalvas/kasper/mux"
 	"github.com/vitalvas/kasper/sfv"
@@ -89,19 +91,32 @@ func ContentDigestMiddleware(cfg ContentDigestConfig) (mux.MiddlewareFunc, error
 				}
 			}
 
-			rec := &digestRecorder{header: http.Header{}, body: &bytes.Buffer{}}
+			rec := &digestRecorder{header: w.Header(), body: &bytes.Buffer{}, writer: w, head: r.Method == http.MethodHead}
 			next.ServeHTTP(rec, r)
 
-			digest := contentDigestField(rec.body.Bytes(), cfg.Algorithm)
-			copyHeader(w.Header(), rec.header)
-			w.Header().Set("Content-Digest", digest)
-
-			status := rec.statusCode
-			if status == 0 {
-				status = http.StatusOK
+			if rec.statusCode == 0 {
+				rec.WriteHeader(http.StatusOK)
 			}
-			w.WriteHeader(status)
-			_, _ = w.Write(rec.body.Bytes())
+			// Preserve only the headers present at the first final write.
+			trailers := rec.header.Clone()
+			clear(w.Header())
+			copyHeader(w.Header(), rec.sentHeader)
+			w.Header().Set("Content-Digest", contentDigestField(rec.body.Bytes(), cfg.Algorithm))
+			w.WriteHeader(rec.statusCode)
+			if rec.body.Len() > 0 {
+				_, _ = w.Write(rec.body.Bytes())
+			}
+			for _, line := range rec.sentHeader.Values("Trailer") {
+				for _, name := range strings.Split(line, ",") {
+					name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+					w.Header()[name] = trailers.Values(name)
+				}
+			}
+			for name, values := range trailers {
+				if strings.HasPrefix(name, http.TrailerPrefix) {
+					w.Header()[name] = values
+				}
+			}
 		})
 	}, nil
 }
@@ -118,6 +133,9 @@ func SetContentDigest(r *http.Request, alg DigestAlgorithm) error {
 	if err != nil {
 		return err
 	}
+	if r.Header == nil {
+		r.Header = make(http.Header)
+	}
 	r.Header.Set("Content-Digest", contentDigestField(body, alg))
 	return nil
 }
@@ -132,7 +150,7 @@ func SetContentDigest(r *http.Request, alg DigestAlgorithm) error {
 //
 // Verification succeeds as soon as one supported entry matches.
 func VerifyContentDigest(r *http.Request) error {
-	header := r.Header.Get("Content-Digest")
+	header := strings.Join(r.Header.Values("Content-Digest"), ", ")
 	if header == "" {
 		return ErrDigestMissing
 	}
@@ -142,6 +160,12 @@ func VerifyContentDigest(r *http.Request) error {
 		return ErrDigestMalformed
 	}
 
+	// Validate every member before accepting any matching digest.
+	for _, entry := range dict {
+		if entry.Member.IsInnerList || entry.Member.Item.Value.Kind != sfv.KindByteSequence {
+			return ErrDigestMalformed
+		}
+	}
 	body, err := readAndRestoreRequestBody(r)
 	if err != nil {
 		return err
@@ -152,9 +176,6 @@ func VerifyContentDigest(r *http.Request) error {
 		alg := DigestAlgorithm(entry.Key)
 		if !supportedDigest(alg) {
 			continue
-		}
-		if entry.Member.IsInnerList || entry.Member.Item.Value.Kind != sfv.KindByteSequence {
-			return ErrDigestMalformed
 		}
 		sawSupported = true
 		want := entry.Member.Item.Value.Bytes
@@ -236,19 +257,43 @@ type digestRecorder struct {
 	header     http.Header
 	body       *bytes.Buffer
 	statusCode int
+	sentHeader http.Header
+	writer     http.ResponseWriter
+	head       bool
 }
 
 func (d *digestRecorder) Header() http.Header { return d.header }
 
 func (d *digestRecorder) WriteHeader(code int) {
-	if d.statusCode == 0 {
-		d.statusCode = code
+	if d.statusCode != 0 {
+		return
 	}
+	if code < 100 || code > 999 {
+		panic(fmt.Sprintf("invalid WriteHeader code %d", code))
+	}
+	if code >= 100 && code < 200 {
+		d.writer.WriteHeader(code)
+		return
+	}
+	d.statusCode = code
+	d.sentHeader = d.header.Clone()
 }
 
 func (d *digestRecorder) Write(b []byte) (int, error) {
 	if d.statusCode == 0 {
-		d.statusCode = http.StatusOK
+		if _, present := d.header["Content-Type"]; !present && d.header.Get("Content-Encoding") == "" && len(b) > 0 {
+			d.header.Set("Content-Type", http.DetectContentType(b))
+		}
+		d.WriteHeader(http.StatusOK)
+	}
+	if d.statusCode == http.StatusNoContent || d.statusCode == http.StatusNotModified {
+		return 0, http.ErrBodyNotAllowed
+	}
+	if _, present := d.sentHeader["Content-Type"]; !present && d.sentHeader.Get("Content-Encoding") == "" && len(b) > 0 && d.body.Len() == 0 {
+		d.sentHeader.Set("Content-Type", http.DetectContentType(b))
+	}
+	if d.head {
+		return len(b), nil
 	}
 	return d.body.Write(b)
 }

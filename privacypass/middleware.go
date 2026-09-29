@@ -9,13 +9,16 @@ import (
 	"github.com/vitalvas/kasper/mux"
 )
 
-// defaultTokenTTL is the nonce retention window used when Config.TokenTTL is
-// zero.
-const defaultTokenTTL = time.Hour
-
 // ErrNoPublicKey is returned when a middleware is configured without an issuer
 // public key.
 var ErrNoPublicKey = errors.New("privacypass: issuer public key is required")
+
+// ErrChallengeExpired means the configured challenge is no longer redeemable.
+var ErrChallengeExpired = errors.New("privacypass: challenge expired")
+
+// ErrInvalidTokenTTL means the nonce retention window could expire while the
+// configured challenge still accepts tokens.
+var ErrInvalidTokenTTL = errors.New("privacypass: token TTL must cover the challenge lifetime")
 
 // Config configures the origin-side PrivateToken middleware.
 type Config struct {
@@ -31,12 +34,19 @@ type Config struct {
 	// process-local MemoryNonceCache is created.
 	Cache NonceCache
 
-	// TokenTTL is the nonce retention window. When zero, defaultTokenTTL is
-	// used.
+	// TokenTTL is the nonce retention window. Zero retains nonces indefinitely.
+	// A positive value requires ChallengeExpires to be set and must cover its
+	// remaining lifetime. Negative values are invalid.
 	TokenTTL time.Duration
 
+	// ChallengeExpires is the last time at which the configured challenge is
+	// accepted. Zero means it does not expire. Replace the middleware with a
+	// new challenge before this deadline to continue accepting tokens.
+	ChallengeExpires time.Time
+
 	// OnError is invoked when a presented token fails verification. When nil,
-	// the middleware responds with 401 and a fresh challenge.
+	// the middleware responds with 401 and the configured challenge, unless
+	// that challenge has expired.
 	OnError func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -54,6 +64,12 @@ func Middleware(cfg Config) (mux.MiddlewareFunc, error) {
 	if cfg.Challenge == nil {
 		return nil, ErrMalformed
 	}
+	if cfg.Challenge.TokenType != TokenType {
+		return nil, ErrWrongTokenType
+	}
+	if cfg.TokenTTL < 0 || (cfg.TokenTTL > 0 && (cfg.ChallengeExpires.IsZero() || time.Until(cfg.ChallengeExpires) > cfg.TokenTTL)) {
+		return nil, ErrInvalidTokenTTL
+	}
 	// Validate the challenge encodes cleanly up front.
 	if _, err := cfg.Challenge.Marshal(); err != nil {
 		return nil, err
@@ -64,9 +80,6 @@ func Middleware(cfg Config) (mux.MiddlewareFunc, error) {
 		cache = NewMemoryNonceCache()
 	}
 	ttl := cfg.TokenTTL
-	if ttl <= 0 {
-		ttl = defaultTokenTTL
-	}
 
 	challengeHeader, err := BuildChallengeHeader(cfg.Challenge, cfg.PublicKey)
 	if err != nil {
@@ -75,14 +88,20 @@ func Middleware(cfg Config) (mux.MiddlewareFunc, error) {
 
 	onError := cfg.OnError
 	if onError == nil {
-		onError = func(w http.ResponseWriter, _ *http.Request, _ error) {
-			w.Header().Set("WWW-Authenticate", challengeHeader)
+		onError = func(w http.ResponseWriter, _ *http.Request, err error) {
+			if !errors.Is(err, ErrChallengeExpired) {
+				w.Header().Set("WWW-Authenticate", challengeHeader)
+			}
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		}
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !cfg.ChallengeExpires.IsZero() && !time.Now().Before(cfg.ChallengeExpires) {
+				onError(w, r, ErrChallengeExpired)
+				return
+			}
 			tok, err := ParseAuthorizationHeader(r.Header.Get("Authorization"))
 			if err != nil {
 				onError(w, r, err)

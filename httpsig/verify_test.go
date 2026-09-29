@@ -3,6 +3,8 @@ package httpsig
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -468,4 +470,23 @@ func TestExtractSignatureValue(t *testing.T) {
 		_, err := extractSignatureValue(header, "sig1")
 		require.ErrorIs(t, err, ErrMalformedHeader)
 	})
+}
+
+func TestVerifySignedParametersAndMultipleLines(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	verifier, err := NewEd25519Verifier("k", pub)
+	require.NoError(t, err)
+	cfg := VerifyConfig{Label: "sig", Resolver: func(*http.Request, string, Algorithm) (Verifier, error) { return verifier, nil }}
+	raw := `("@method");keyid="k";alg="ed25519";extension="signed"`
+	base := fmt.Sprintf("\"@method\": GET\n\"@signature-params\": %s", raw)
+	sig := ed25519.Sign(priv, []byte(base))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Add("Signature-Input", `other=("@method");alg="ed25519";keyid="k"`)
+	req.Header.Add("Signature-Input", fmt.Sprintf("sig=%s", raw))
+	req.Header.Add("Signature", "other=:AA==:")
+	req.Header.Add("Signature", fmt.Sprintf("sig=:%s:", base64.StdEncoding.EncodeToString(sig)))
+	require.NoError(t, VerifyRequest(req, cfg))
+	req.Header.Set("Signature-Input", fmt.Sprintf("sig=%s", strings.Replace(raw, "signed", "changed", 1)))
+	require.ErrorIs(t, VerifyRequest(req, cfg), ErrSignatureInvalid)
 }
