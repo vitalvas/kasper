@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/vitalvas/kasper/compare/v0.25.1...v0.26.0) (2026-10-09)
+
+
+### Features
+
+* **httpsig:** add RFC 9421 response signing and mux middleware ([1d02d1b](https://github.com/vitalvas/kasper/commit/1d02d1b06b6c643d40f3fcdb8b5d7542acdc1623))
+
 ## [0.25.1](https://github.com/vitalvas/kasper/compare/v0.25.0...v0.25.1) (2026-10-09)
 
 
