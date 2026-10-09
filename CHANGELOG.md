@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/vitalvas/kasper/compare/v0.25.0...v0.25.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* require Go 1.27 and migrate off unmaintained gopkg.in/yaml.v3 ([1967052](https://github.com/vitalvas/kasper/commit/1967052fc0746f442a1247b73a57a3f1b84801b1))
+
 ## [0.25.0](https://github.com/vitalvas/kasper/compare/v0.24.0...v0.25.0) (2026-09-29)
 
 
