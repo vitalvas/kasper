@@ -6,7 +6,7 @@ HTTP toolkit for Go. Drop-in gorilla/mux replacement with WebSocket, OpenAPI, an
 go get github.com/vitalvas/kasper
 ```
 
-Requires Go 1.25+.
+Requires Go 1.27+.
 
 ---
 

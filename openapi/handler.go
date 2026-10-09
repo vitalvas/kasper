@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/vitalvas/kasper/mux"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // SchemaDisabled is the sentinel value for JSONFilename or YAMLFilename

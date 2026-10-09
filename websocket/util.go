@@ -32,8 +32,8 @@ func FormatCloseMessage(closeCode int, text string) []byte {
 // IsCloseError returns true if the error is a CloseError with one of the specified codes.
 // Close codes are defined in RFC 6455, section 7.4.1.
 func IsCloseError(err error, codes ...int) bool {
-	var closeErr *CloseError
-	if !errors.As(err, &closeErr) {
+	closeErr, ok := errors.AsType[*CloseError](err)
+	if !ok {
 		return false
 	}
 	return slices.Contains(codes, closeErr.Code)
@@ -42,8 +42,8 @@ func IsCloseError(err error, codes ...int) bool {
 // IsUnexpectedCloseError returns true if the error is a CloseError with a code
 // NOT in the expected codes list. Close codes are defined in RFC 6455, section 7.4.1.
 func IsUnexpectedCloseError(err error, expectedCodes ...int) bool {
-	var closeErr *CloseError
-	if !errors.As(err, &closeErr) {
+	closeErr, ok := errors.AsType[*CloseError](err)
+	if !ok {
 		return false
 	}
 	return !slices.Contains(expectedCodes, closeErr.Code)

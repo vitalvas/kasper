@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Document represents the root of an OpenAPI v3.1.0 document.
@@ -305,7 +305,7 @@ func (st SchemaType) IsEmpty() bool {
 	return len(st.value) == 0
 }
 
-// IsZero implements the yaml.v3 IsZeroer interface so that
+// IsZero implements the yaml.IsZeroer interface so that
 // omitempty on YAML struct tags correctly omits an unset type field.
 //
 // See: https://json-schema.org/draft/2020-12/json-schema-validation#section-6.1.1

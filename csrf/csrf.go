@@ -652,8 +652,7 @@ func requestScheme(r *http.Request) string {
 
 var maskPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, tokenLength)
-		return &b
+		return new(make([]byte, tokenLength))
 	},
 }
 
