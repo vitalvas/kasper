@@ -10,11 +10,76 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
+	"math/big"
 )
+
+// JWKThumbprintEd25519 returns the JWK SHA-256 thumbprint (RFC 7638) of an
+// Ed25519 public key, base64url-encoded without padding.
+//
+// Web Bot Auth (draft-meunier-web-bot-auth-architecture, used by Cloudflare)
+// requires this value as the signature keyid and as the kid of the JWK
+// published in the key directory.
+func JWKThumbprintEd25519(pub ed25519.PublicKey) (string, error) {
+	if len(pub) != ed25519.PublicKeySize {
+		return "", fmt.Errorf("%w: ed25519 public key must be %d bytes", ErrInvalidKey, ed25519.PublicKeySize)
+	}
+
+	// RFC 7638 Section 3.2: hash the canonical JSON of the required JWK
+	// members in lexicographic order, with no whitespace.
+	canonical := fmt.Sprintf(`{"crv":"Ed25519","kty":"OKP","x":"%s"}`, base64.RawURLEncoding.EncodeToString(pub))
+	sum := sha256.Sum256([]byte(canonical))
+
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
+}
 
 // Minimum RSA key size in bits.
 const minRSAKeyBits = 2048
+
+// ECDSA signature element sizes in bytes per RFC 9421 Sections 3.3.3 and
+// 3.3.4: r and s are each zero-padded to the curve's field size.
+const (
+	ecdsaP256ElementBytes = 32
+	ecdsaP384ElementBytes = 48
+)
+
+// ecdsaRawSign signs digest and encodes the signature as the concatenation
+// of r and s, each as a big-endian unsigned integer zero-padded to size
+// bytes, per RFC 9421 Sections 3.3.3 and 3.3.4.
+func ecdsaRawSign(key *ecdsa.PrivateKey, digest []byte, size int) ([]byte, error) {
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest)
+	if err != nil {
+		return nil, err
+	}
+
+	sig := make([]byte, 2*size)
+	r.FillBytes(sig[:size])
+	s.FillBytes(sig[size:])
+
+	return sig, nil
+}
+
+// ecdsaRawVerify verifies a raw r||s signature per RFC 9421 Sections 3.3.3
+// and 3.3.4. ASN.1 DER signatures produced by earlier kasper releases are
+// also accepted for backward compatibility.
+func ecdsaRawVerify(key *ecdsa.PublicKey, digest, signature []byte, size int) error {
+	if len(signature) == 2*size {
+		r := new(big.Int).SetBytes(signature[:size])
+		s := new(big.Int).SetBytes(signature[size:])
+
+		if ecdsa.Verify(key, digest, r, s) {
+			return nil
+		}
+	}
+
+	// Legacy ASN.1 DER encoding from earlier kasper releases.
+	if ecdsa.VerifyASN1(key, digest, signature) {
+		return nil
+	}
+
+	return ErrSignatureInvalid
+}
 
 // --- Ed25519 ---
 
@@ -96,7 +161,7 @@ func NewECDSAP256Signer(keyID string, key *ecdsa.PrivateKey) (Signer, error) {
 func (s *ecdsaP256Signer) Sign(message []byte) ([]byte, error) {
 	digest := sha256.Sum256(message)
 
-	return ecdsa.SignASN1(rand.Reader, s.key, digest[:])
+	return ecdsaRawSign(s.key, digest[:], ecdsaP256ElementBytes)
 }
 
 func (s *ecdsaP256Signer) Algorithm() Algorithm { return AlgorithmECDSAP256SHA256 }
@@ -125,11 +190,8 @@ func NewECDSAP256Verifier(keyID string, key *ecdsa.PublicKey) (Verifier, error) 
 
 func (v *ecdsaP256Verifier) Verify(message, signature []byte) error {
 	digest := sha256.Sum256(message)
-	if !ecdsa.VerifyASN1(v.key, digest[:], signature) {
-		return ErrSignatureInvalid
-	}
 
-	return nil
+	return ecdsaRawVerify(v.key, digest[:], signature, ecdsaP256ElementBytes)
 }
 
 func (v *ecdsaP256Verifier) Algorithm() Algorithm { return AlgorithmECDSAP256SHA256 }
@@ -161,7 +223,7 @@ func NewECDSAP384Signer(keyID string, key *ecdsa.PrivateKey) (Signer, error) {
 func (s *ecdsaP384Signer) Sign(message []byte) ([]byte, error) {
 	digest := sha512.Sum384(message)
 
-	return ecdsa.SignASN1(rand.Reader, s.key, digest[:])
+	return ecdsaRawSign(s.key, digest[:], ecdsaP384ElementBytes)
 }
 
 func (s *ecdsaP384Signer) Algorithm() Algorithm { return AlgorithmECDSAP384SHA384 }
@@ -190,11 +252,8 @@ func NewECDSAP384Verifier(keyID string, key *ecdsa.PublicKey) (Verifier, error) 
 
 func (v *ecdsaP384Verifier) Verify(message, signature []byte) error {
 	digest := sha512.Sum384(message)
-	if !ecdsa.VerifyASN1(v.key, digest[:], signature) {
-		return ErrSignatureInvalid
-	}
 
-	return nil
+	return ecdsaRawVerify(v.key, digest[:], signature, ecdsaP384ElementBytes)
 }
 
 func (v *ecdsaP384Verifier) Algorithm() Algorithm { return AlgorithmECDSAP384SHA384 }

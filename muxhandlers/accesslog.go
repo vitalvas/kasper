@@ -284,7 +284,7 @@ func captureHeaders(h http.Header, include []string, redact map[string]struct{})
 }
 
 // emitSlog writes the entry using a slog logger. Level selection:
-// 5xx → Error, otherwise Info, escalated to Warn when SlowThreshold is
+// 5xx -> Error, otherwise Info, escalated to Warn when SlowThreshold is
 // set and the request exceeded it.
 func emitSlog(logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Duration) {
 	level := slog.LevelInfo

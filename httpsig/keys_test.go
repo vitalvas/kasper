@@ -6,6 +6,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -58,12 +61,41 @@ func TestEd25519(t *testing.T) {
 	})
 }
 
+func TestJWKThumbprintEd25519(t *testing.T) {
+	t.Run("matches RFC 9421 B.1.4 test key thumbprint", func(t *testing.T) {
+		// The Ed25519 test key from RFC 9421 Appendix B.1.4; its thumbprint
+		// is the keyid used by the web-bot-auth draft test vectors.
+		pub, err := base64.RawURLEncoding.DecodeString("JrQLj5P_89iXES9-vFgrIy29clF9CC_oPPsw3c5D0bs")
+		require.NoError(t, err)
+
+		thumb, err := JWKThumbprintEd25519(ed25519.PublicKey(pub))
+		require.NoError(t, err)
+		assert.Equal(t, "poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U", thumb)
+	})
+
+	t.Run("round trip with generated key", func(t *testing.T) {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		require.NoError(t, err)
+
+		thumb, err := JWKThumbprintEd25519(pub)
+		require.NoError(t, err)
+		assert.Len(t, thumb, 43) // unpadded base64url of 32 bytes
+	})
+
+	t.Run("invalid key length rejected", func(t *testing.T) {
+		_, err := JWKThumbprintEd25519(ed25519.PublicKey([]byte("short")))
+		assert.ErrorIs(t, err, ErrInvalidKey)
+	})
+}
+
 func TestECDSA(t *testing.T) {
 	type ecdsaFactory struct {
 		name       string
 		curve      elliptic.Curve
 		wrongCurve elliptic.Curve
 		alg        Algorithm
+		sigBytes   int
+		hash       func([]byte) []byte
 		newSigner  func(string, *ecdsa.PrivateKey) (Signer, error)
 		newVerif   func(string, *ecdsa.PublicKey) (Verifier, error)
 	}
@@ -74,6 +106,8 @@ func TestECDSA(t *testing.T) {
 			curve:      elliptic.P256(),
 			wrongCurve: elliptic.P384(),
 			alg:        AlgorithmECDSAP256SHA256,
+			sigBytes:   64,
+			hash:       func(m []byte) []byte { h := sha256.Sum256(m); return h[:] },
 			newSigner:  NewECDSAP256Signer,
 			newVerif:   NewECDSAP256Verifier,
 		},
@@ -82,6 +116,8 @@ func TestECDSA(t *testing.T) {
 			curve:      elliptic.P384(),
 			wrongCurve: elliptic.P256(),
 			alg:        AlgorithmECDSAP384SHA384,
+			sigBytes:   96,
+			hash:       func(m []byte) []byte { h := sha512.Sum384(m); return h[:] },
 			newSigner:  NewECDSAP384Signer,
 			newVerif:   NewECDSAP384Verifier,
 		},
@@ -108,6 +144,39 @@ func TestECDSA(t *testing.T) {
 				assert.Equal(t, f.alg, verifier.Algorithm())
 				assert.Equal(t, "ec-key", signer.KeyID())
 				assert.Equal(t, "ec-key", verifier.KeyID())
+			})
+
+			t.Run("signature is raw r||s with fixed length", func(t *testing.T) {
+				signer, err := f.newSigner("k", key)
+				require.NoError(t, err)
+
+				sig, err := signer.Sign([]byte("length check"))
+				require.NoError(t, err)
+
+				assert.Len(t, sig, f.sigBytes)
+			})
+
+			t.Run("legacy ASN.1 DER signature verifies", func(t *testing.T) {
+				der, err := ecdsa.SignASN1(rand.Reader, key, f.hash([]byte("legacy")))
+				require.NoError(t, err)
+
+				verifier, err := f.newVerif("k", &key.PublicKey)
+				require.NoError(t, err)
+
+				assert.NoError(t, verifier.Verify([]byte("legacy"), der))
+			})
+
+			t.Run("truncated signature fails verification", func(t *testing.T) {
+				signer, err := f.newSigner("k", key)
+				require.NoError(t, err)
+
+				verifier, err := f.newVerif("k", &key.PublicKey)
+				require.NoError(t, err)
+
+				sig, err := signer.Sign([]byte("msg"))
+				require.NoError(t, err)
+
+				assert.ErrorIs(t, verifier.Verify([]byte("msg"), sig[:len(sig)-1]), ErrSignatureInvalid)
 			})
 
 			t.Run("wrong message fails verification", func(t *testing.T) {

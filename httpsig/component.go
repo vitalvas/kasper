@@ -3,6 +3,7 @@ package httpsig
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -15,19 +16,83 @@ const (
 	ComponentTargetURI     = "@target-uri"
 	ComponentScheme        = "@scheme"
 	ComponentRequestTarget = "@request-target"
+	ComponentStatus        = "@status"
 )
 
-// componentValue extracts the value of a covered component from an HTTP
-// request per RFC 9421 Section 2.
+// reqSuffix marks a covered component that resolves against the originating
+// request when signing or verifying a response (RFC 9421 Section 2.4), for
+// example "@authority;req" or "content-digest;req".
+const reqSuffix = ";req"
+
+// sigMessage is the HTTP message whose components are signed or verified: a
+// request alone, or a response paired with its originating request.
+type sigMessage struct {
+	req  *http.Request
+	resp *http.Response // nil when the message is the request itself
+}
+
+// header returns the header map of the message itself, where Signature and
+// Signature-Input live.
+func (m sigMessage) header() http.Header {
+	if m.resp != nil {
+		return m.resp.Header
+	}
+
+	return m.req.Header
+}
+
+// componentValue extracts the value of a covered component from the message
+// per RFC 9421 Section 2.
 //
-// Derived components start with "@". Header field names are lowercased and
-// multi-value headers are joined with ", ".
-func componentValue(id string, r *http.Request) (string, error) {
+// Components carrying the ";req" parameter resolve against the originating
+// request and are only valid for response messages. "@status" is only valid
+// for response messages. All other derived components are request-only.
+func componentValue(id string, m sigMessage) (string, error) {
+	name, isReq := strings.CutSuffix(id, reqSuffix)
+
+	if m.resp == nil {
+		if isReq || name == ComponentStatus {
+			return "", fmt.Errorf("%w: %s", ErrInvalidComponent, id)
+		}
+
+		return requestComponentValue(name, m.req)
+	}
+
+	if isReq {
+		if m.req == nil {
+			return "", fmt.Errorf("%w: %s requires the originating request", ErrInvalidComponent, id)
+		}
+
+		return requestComponentValue(name, m.req)
+	}
+
+	if name == ComponentStatus {
+		return strconv.Itoa(m.resp.StatusCode), nil
+	}
+
+	if strings.HasPrefix(name, "@") {
+		return "", fmt.Errorf("%w: %s is request-only; use %s%s", ErrInvalidComponent, name, name, reqSuffix)
+	}
+
+	return headerComponentValue(name, m.resp.Header)
+}
+
+// requestComponentValue extracts the value of a covered component from an
+// HTTP request. Derived components start with "@". Header field names are
+// lowercased and multi-value headers are joined with ", ".
+//
+// The "host" header is special-cased because net/http stores it in
+// Request.Host rather than in the header map.
+func requestComponentValue(id string, r *http.Request) (string, error) {
 	if strings.HasPrefix(id, "@") {
 		return derivedComponentValue(id, r)
 	}
 
-	return headerComponentValue(id, r)
+	if len(r.Header[http.CanonicalHeaderKey(id)]) == 0 && strings.EqualFold(id, "host") && r.Host != "" {
+		return r.Host, nil
+	}
+
+	return headerComponentValue(id, r.Header)
 }
 
 // derivedComponentValue extracts the value of a derived component identifier
@@ -68,17 +133,8 @@ func derivedComponentValue(id string, r *http.Request) (string, error) {
 
 // headerComponentValue extracts the value of a header field per RFC 9421
 // Section 2.1. Multiple values for the same header are joined with ", ".
-//
-// The "host" header is special-cased because net/http stores it in
-// Request.Host rather than in the header map.
-func headerComponentValue(id string, r *http.Request) (string, error) {
-	canon := http.CanonicalHeaderKey(id)
-	values := r.Header[canon]
-
-	if len(values) == 0 && strings.EqualFold(id, "host") && r.Host != "" {
-		return r.Host, nil
-	}
-
+func headerComponentValue(id string, hdr http.Header) (string, error) {
+	values := hdr[http.CanonicalHeaderKey(id)]
 	if len(values) == 0 {
 		return "", fmt.Errorf("%w: header %q not present", ErrUnknownComponent, id)
 	}

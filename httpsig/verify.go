@@ -11,12 +11,14 @@ import (
 )
 
 // KeyResolver returns a Verifier for the given key ID and algorithm.
-// It is called during request verification to look up the appropriate key.
+// It is called during verification to look up the appropriate key.
 // The request is provided for context (e.g., to select keys based on
-// the request host or path).
+// the request host or path). During response verification it is the
+// originating request and may be nil when none is available.
 type KeyResolver func(r *http.Request, keyID string, alg Algorithm) (Verifier, error)
 
-// VerifyConfig configures HTTP request signature verification per RFC 9421.
+// VerifyConfig configures HTTP message signature verification per RFC 9421.
+// It is shared by VerifyRequest and VerifyResponse.
 type VerifyConfig struct {
 	// Resolver looks up a Verifier for a given key ID and algorithm.
 	// Required.
@@ -54,8 +56,41 @@ func VerifyRequest(r *http.Request, cfg VerifyConfig) error {
 		}
 	}
 
+	return verifyMessage(sigMessage{req: r}, cfg)
+}
+
+// VerifyResponse verifies an HTTP response signature per RFC 9421. req is
+// the originating request, used to resolve covered components carrying the
+// ";req" parameter; when nil, resp.Request is used (set by net/http clients).
+//
+// When RequireDigest is set, the Content-Digest header is verified against
+// the response body (which is read and restored) before the signature check.
+func VerifyResponse(resp *http.Response, req *http.Request, cfg VerifyConfig) error {
+	if cfg.Resolver == nil {
+		return ErrNoResolver
+	}
+
+	if req == nil {
+		req = resp.Request
+	}
+
+	// Optionally verify Content-Digest.
+	if cfg.RequireDigest {
+		if err := VerifyResponseContentDigest(resp); err != nil {
+			return err
+		}
+	}
+
+	return verifyMessage(sigMessage{req: req, resp: resp}, cfg)
+}
+
+// verifyMessage locates the target signature on the message, reconstructs
+// the signature base, and verifies it with the resolved key.
+func verifyMessage(m sigMessage, cfg VerifyConfig) error {
+	hdr := m.header()
+
 	// Parse the Signature-Input header to find the target signature.
-	sigInputHeader := strings.Join(r.Header.Values("Signature-Input"), ", ")
+	sigInputHeader := strings.Join(hdr.Values("Signature-Input"), ", ")
 	if sigInputHeader == "" {
 		return ErrSignatureNotFound
 	}
@@ -96,19 +131,19 @@ func VerifyRequest(r *http.Request, cfg VerifyConfig) error {
 	}
 
 	// Resolve the verifier.
-	verifier, err := cfg.Resolver(r, params.keyID, params.alg)
+	verifier, err := cfg.Resolver(m.req, params.keyID, params.alg)
 	if err != nil {
 		return err
 	}
 
 	// Reconstruct the signature base.
-	base, _, err := buildSignatureBase(r, params)
+	base, _, err := buildSignatureBase(m, params)
 	if err != nil {
 		return err
 	}
 
 	// Extract the signature value.
-	sigHeader := strings.Join(r.Header.Values("Signature"), ", ")
+	sigHeader := strings.Join(hdr.Values("Signature"), ", ")
 	if sigHeader == "" {
 		return ErrSignatureNotFound
 	}

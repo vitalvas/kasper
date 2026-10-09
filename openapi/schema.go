@@ -199,7 +199,7 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 		}
 	}
 
-	// Named struct types → $ref (except time.Time which is a special case).
+	// Named struct types -> $ref (except time.Time which is a special case).
 	// When fieldTag is set, property names differ from the canonical JSON
 	// representation, so we skip $ref and always generate inline.
 	if t.Kind() == reflect.Struct && t != reflect.TypeFor[time.Time]() && g.fieldTag == "" {
@@ -539,7 +539,7 @@ func parseJSONTag(tag string) (string, jsonTagOpts) {
 
 type xmlTagOpts struct {
 	omitempty bool
-	attr      bool // ",attr" — field is an XML attribute, not an element
+	attr      bool // ",attr" - field is an XML attribute, not an element
 	skip      bool // tag is "-"
 	chardata  bool // ",chardata", ",innerxml", ",comment", ",cdata", ",any"
 }
@@ -849,7 +849,7 @@ func sanitizeSchemaName(name string) string {
 	}
 
 	base := name[:idx]
-	// Strip package path from the base: "github.com/foo/bar.Inner" → "Inner".
+	// Strip package path from the base: "github.com/foo/bar.Inner" -> "Inner".
 	if dot := strings.LastIndexByte(base, '.'); dot >= 0 {
 		base = base[dot+1:]
 	}
@@ -879,7 +879,7 @@ func sanitizeSchemaName(name string) string {
 		if strings.ContainsRune(param, '[') {
 			param = sanitizeSchemaName(param)
 		} else {
-			// Strip package path: "github.com/foo/bar.User" → "User".
+			// Strip package path: "github.com/foo/bar.User" -> "User".
 			if dot := strings.LastIndexByte(param, '.'); dot >= 0 {
 				param = param[dot+1:]
 			}

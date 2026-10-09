@@ -67,7 +67,7 @@
 // if no pong is received within Interval+PongTimeout; leave it zero for
 // heartbeat-only mode where missing pong responses are silently tolerated.
 // PingPayload and OnPong allow the caller to embed arbitrary bytes in the
-// ping frame — useful for round-trip latency measurement.
+// ping frame - useful for round-trip latency measurement.
 //
 // Message Type Policy:
 //

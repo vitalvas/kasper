@@ -40,6 +40,26 @@ func VerifyContentDigest(r *http.Request) error {
 	return nil
 }
 
+// SetResponseContentDigest reads the response body, computes the digest using
+// the specified algorithm, sets the Content-Digest header per RFC 9530, and
+// replaces the body so it can be read again.
+func SetResponseContentDigest(resp *http.Response, alg DigestAlgorithm) error {
+	if err := muxhandlers.SetResponseContentDigest(resp, alg); err != nil {
+		return translateDigestError(err)
+	}
+	return nil
+}
+
+// VerifyResponseContentDigest verifies the Content-Digest header against the
+// response body per RFC 9530. It supports multiple digest values in the
+// header and verifies the first recognized algorithm.
+func VerifyResponseContentDigest(resp *http.Response) error {
+	if err := muxhandlers.VerifyResponseContentDigest(resp); err != nil {
+		return translateDigestError(err)
+	}
+	return nil
+}
+
 // translateDigestError maps the shared muxhandlers digest errors onto the
 // httpsig sentinel errors that this package's public API documents, preserving
 // backward compatibility for callers using errors.Is.

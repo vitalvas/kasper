@@ -114,7 +114,7 @@ func (s *spaFallbackFS) Open(name string) (fs.File, error) {
 }
 
 // StaticFilesHandler returns an http.Handler that serves static files from
-// the provided file system. It is not middleware — it serves files directly
+// the provided file system. It is not middleware - it serves files directly
 // without calling a next handler.
 func StaticFilesHandler(cfg StaticFilesConfig) (http.Handler, error) {
 	if cfg.FS == nil {

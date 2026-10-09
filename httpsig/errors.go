@@ -67,4 +67,10 @@ var (
 	// ErrUnknownComponent is returned when an unrecognized derived component
 	// identifier is used.
 	ErrUnknownComponent = errors.New("httpsig: unknown component identifier")
+
+	// ErrInvalidComponent is returned when a component identifier is not
+	// valid for the message being signed or verified: "@status" or a ";req"
+	// component on a request, a request-derived component without ";req" on
+	// a response, or a ";req" component without an originating request.
+	ErrInvalidComponent = errors.New("httpsig: component not valid for message")
 )

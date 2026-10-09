@@ -483,10 +483,10 @@
 //	}
 //
 //	spec.Op("getUser").Response(http.StatusOK, ResponseData[User]{})
-//	// → schema "ResponseDataUser" with Result typed as $ref User
+//	// -> schema "ResponseDataUser" with Result typed as $ref User
 //
 //	spec.Op("listUsers").Response(http.StatusOK, ResponseData[[]User]{})
-//	// → schema "ResponseDataUserList" with Result typed as array of $ref User
+//	// -> schema "ResponseDataUserList" with Result typed as array of $ref User
 //
 // # Custom Schema Names
 //
@@ -518,7 +518,7 @@
 //	        openapi.RefType(RecordValue{}),
 //	    ))
 //	}
-//	// → array of oneOf: [string, $ref RecordValue], with RecordValue
+//	// -> array of oneOf: [string, $ref RecordValue], with RecordValue
 //	//   registered as a component automatically.
 //
 // When the implementing type itself has a component name, its override is

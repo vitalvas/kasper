@@ -150,7 +150,7 @@ type fixedBlindParams struct {
 //
 // The salt is used directly in PSS encoding (instead of random generation).
 // r and rInv are used as the blinding factor and its inverse (instead of
-// random generation). The caller must ensure r * rInv ≡ 1 (mod n).
+// random generation). The caller must ensure r * rInv == 1 (mod n).
 func fixedBlind(p fixedBlindParams) ([]byte, *State, error) {
 	if err := validatePublicKey(p.pub); err != nil {
 		return nil, nil, err

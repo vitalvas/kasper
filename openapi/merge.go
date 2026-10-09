@@ -240,7 +240,7 @@ func validateVersions(docs []*Document, conflicts *[]string) {
 // mergeJSONSchemaDialect reconciles the jsonSchemaDialect field across
 // documents. If all non-empty values are identical the value is preserved;
 // differing values produce a conflict. When all values are empty the
-// default (implied by the OpenAPI 3.1 spec) is used — an empty string.
+// default (implied by the OpenAPI 3.1 spec) is used - an empty string.
 func mergeJSONSchemaDialect(docs []*Document, conflicts *[]string) string {
 	var dialect string
 	for _, doc := range docs {

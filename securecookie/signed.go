@@ -38,7 +38,7 @@ type SignedCookie struct {
 }
 
 // NewSigned creates a [SignedCookie] with the given HMAC-SHA256 key.
-// Any non-empty key is accepted; 32 bytes is recommended (RFC 2104 §3).
+// Any non-empty key is accepted; 32 bytes is recommended (RFC 2104 Section 3).
 // Use [GenerateSignedKey] to produce a fresh key.
 func NewSigned(key []byte) (*SignedCookie, error) {
 	if len(key) == 0 {

@@ -18,13 +18,13 @@ var ErrInvalidProxy = errors.New("proxy headers: invalid proxy entry")
 // ProxyHeadersConfig.TrustedProxies is empty.
 //
 // Included ranges:
-//   - 127.0.0.0/8    — IPv4 loopback (RFC 1122)
-//   - 10.0.0.0/8     — Class A private (RFC 1918)
-//   - 172.16.0.0/12  — Class B private (RFC 1918)
-//   - 192.168.0.0/16 — Class C private (RFC 1918)
-//   - 100.64.0.0/10  — CGNAT shared address space (RFC 6598)
-//   - ::1/128        — IPv6 loopback (RFC 4291)
-//   - fc00::/7       — IPv6 unique local (RFC 4193)
+//   - 127.0.0.0/8    - IPv4 loopback (RFC 1122)
+//   - 10.0.0.0/8     - Class A private (RFC 1918)
+//   - 172.16.0.0/12  - Class B private (RFC 1918)
+//   - 192.168.0.0/16 - Class C private (RFC 1918)
+//   - 100.64.0.0/10  - CGNAT shared address space (RFC 6598)
+//   - ::1/128        - IPv6 loopback (RFC 4291)
+//   - fc00::/7       - IPv6 unique local (RFC 4193)
 var DefaultTrustedProxies = []string{
 	"127.0.0.0/8",
 	"10.0.0.0/8",

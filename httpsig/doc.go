@@ -1,8 +1,11 @@
 // Package httpsig implements HTTP Message Signatures per RFC 9421 with
 // optional Content-Digest support per RFC 9530.
 //
-// It provides both client-side signing (via Transport) and server-side
-// verification (via Middleware) for the kasper HTTP toolkit.
+// It covers the full request-response flow for the kasper HTTP toolkit:
+// client-side request signing (SignRequest, Transport), server-side request
+// verification (VerifyRequest, Middleware), server-side response signing
+// (SignResponse, SignMiddleware), and client-side response verification
+// (VerifyResponse).
 //
 // # Supported Algorithms
 //
@@ -48,6 +51,36 @@
 //	    MaxAge:             5 * time.Minute,
 //	})
 //
+// # Signing Responses
+//
+// Use SignResponse to sign an HTTP response. Covered components may carry
+// the ";req" parameter (RFC 9421 Section 2.4) to resolve against the
+// originating request, binding the response signature to the request. The
+// "@status" derived component covers the response status code and is the
+// default when no components are configured:
+//
+//	err := httpsig.SignResponse(resp, req, httpsig.SignConfig{
+//	    Signer:            signer,
+//	    CoveredComponents: []string{"@status", "@authority;req", "@path;req"},
+//	    DigestAlgorithm:   httpsig.DigestSHA256,
+//	})
+//
+// # Verifying Responses
+//
+// Use VerifyResponse to verify a signed response. When req is nil, the
+// response's Request field (set by net/http clients) is used to resolve
+// ";req" components:
+//
+//	resp, err := client.Get("https://api.example.com/resource")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	err = httpsig.VerifyResponse(resp, nil, httpsig.VerifyConfig{
+//	    Resolver:      resolver,
+//	    RequireDigest: true,
+//	})
+//
 // # Client Transport
 //
 // NewTransport creates an http.RoundTripper that automatically signs all
@@ -88,6 +121,19 @@
 //	    log.Fatal(err)
 //	}
 //	router.Use(mw)
+//
+// SignMiddleware signs outgoing responses. The handler's response is
+// buffered so the signature covers the final status, headers, and body:
+//
+//	signMW, err := httpsig.SignMiddleware(httpsig.SignConfig{
+//	    Signer:            signer,
+//	    CoveredComponents: []string{"@status", "@authority;req", "@path;req"},
+//	    DigestAlgorithm:   httpsig.DigestSHA256,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	router.Use(signMW)
 //
 // # Content-Digest
 //

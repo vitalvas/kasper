@@ -129,7 +129,7 @@ func SetContentDigest(r *http.Request, alg DigestAlgorithm) error {
 	if !supportedDigest(alg) {
 		return ErrDigestUnsupported
 	}
-	body, err := readAndRestoreRequestBody(r)
+	body, err := readAndRestoreBody(&r.Body)
 	if err != nil {
 		return err
 	}
@@ -137,6 +137,25 @@ func SetContentDigest(r *http.Request, alg DigestAlgorithm) error {
 		r.Header = make(http.Header)
 	}
 	r.Header.Set("Content-Digest", contentDigestField(body, alg))
+	return nil
+}
+
+// SetResponseContentDigest computes the digest of the response body with alg,
+// sets the Content-Digest header (RFC 9530), and restores the body so it can
+// be read again. It returns ErrDigestUnsupported when alg is not a supported
+// algorithm.
+func SetResponseContentDigest(resp *http.Response, alg DigestAlgorithm) error {
+	if !supportedDigest(alg) {
+		return ErrDigestUnsupported
+	}
+	body, err := readAndRestoreBody(&resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.Header == nil {
+		resp.Header = make(http.Header)
+	}
+	resp.Header.Set("Content-Digest", contentDigestField(body, alg))
 	return nil
 }
 
@@ -150,7 +169,20 @@ func SetContentDigest(r *http.Request, alg DigestAlgorithm) error {
 //
 // Verification succeeds as soon as one supported entry matches.
 func VerifyContentDigest(r *http.Request) error {
-	header := strings.Join(r.Header.Values("Content-Digest"), ", ")
+	return verifyDigest(r.Header.Values("Content-Digest"), &r.Body)
+}
+
+// VerifyResponseContentDigest verifies the Content-Digest header (RFC 9530)
+// against the response body, reading and restoring the body. It returns the
+// same errors as VerifyContentDigest.
+func VerifyResponseContentDigest(resp *http.Response) error {
+	return verifyDigest(resp.Header.Values("Content-Digest"), &resp.Body)
+}
+
+// verifyDigest is the shared Content-Digest check over a message's header
+// values and body.
+func verifyDigest(headerValues []string, bodyp *io.ReadCloser) error {
+	header := strings.Join(headerValues, ", ")
 	if header == "" {
 		return ErrDigestMissing
 	}
@@ -166,7 +198,7 @@ func VerifyContentDigest(r *http.Request) error {
 			return ErrDigestMalformed
 		}
 	}
-	body, err := readAndRestoreRequestBody(r)
+	body, err := readAndRestoreBody(bodyp)
 	if err != nil {
 		return err
 	}
@@ -236,18 +268,18 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
-// readAndRestoreRequestBody reads the request body fully and replaces it so
-// downstream handlers can read it again.
-func readAndRestoreRequestBody(r *http.Request) ([]byte, error) {
-	if r.Body == nil {
+// readAndRestoreBody reads a message body fully and replaces it so downstream
+// readers can read it again. A nil body yields nil bytes.
+func readAndRestoreBody(bodyp *io.ReadCloser) ([]byte, error) {
+	if *bodyp == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(*bodyp)
 	if err != nil {
 		return nil, err
 	}
-	r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	(*bodyp).Close()
+	*bodyp = io.NopCloser(bytes.NewReader(body))
 	return body, nil
 }
 

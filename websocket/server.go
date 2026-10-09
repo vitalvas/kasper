@@ -91,10 +91,10 @@ func (u *Upgrader) applyConnPolicy(conn *Conn) {
 
 // applyPingPolicy configures the ping handler on conn according to the
 // Upgrader's ping/pong fields. Priority (highest first):
-//  1. PingHandler — full control; RequireEmptyPingPayload is still pre-checked
-//  2. DisablePongReply — no pong sent
-//  3. RequireEmptyPingPayload / EmptyPongPayload — convenience options
-//  4. No fields set — default RFC 6455 echo behaviour
+//  1. PingHandler - full control; RequireEmptyPingPayload is still pre-checked
+//  2. DisablePongReply - no pong sent
+//  3. RequireEmptyPingPayload / EmptyPongPayload - convenience options
+//  4. No fields set - default RFC 6455 echo behaviour
 func (u *Upgrader) applyPingPolicy(conn *Conn) {
 	requireEmpty := u.RequireEmptyPingPayload
 

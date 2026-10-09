@@ -315,7 +315,7 @@ func collectSliceIndices(src map[string][]string, prefix string) []int {
 }
 
 // decodeMapField handles dot notation for map fields.
-// e.g. "meta.key1" → map["key1"]
+// e.g. "meta.key1" -> map["key1"]
 // Supports map[string][]string for multiple values per key.
 func decodeMapField(src map[string][]string, fv reflect.Value, prefix string) error {
 	mapType := fv.Type()

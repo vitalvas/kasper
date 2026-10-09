@@ -2,6 +2,11 @@
 
 HTTP Message Signatures (RFC 9421) for Go with optional Content-Digest (RFC 9530) support.
 
+Covers the full request-response flow: request signing (`SignRequest`,
+`Transport`), request verification (`VerifyRequest`, `Middleware`), response
+signing (`SignResponse`, `SignMiddleware`), and response verification
+(`VerifyResponse`).
+
 ```bash
 go get github.com/vitalvas/kasper/httpsig
 ```
@@ -16,6 +21,21 @@ go get github.com/vitalvas/kasper/httpsig
 | RSA-PSS SHA-512 | `AlgorithmRSAPSSSHA512` | `*rsa.PrivateKey` / `*rsa.PublicKey` (2048+ bits) |
 | RSA v1.5 SHA-256 | `AlgorithmRSAv15SHA256` | `*rsa.PrivateKey` / `*rsa.PublicKey` (2048+ bits) |
 | HMAC SHA-256 | `AlgorithmHMACSHA256` | `[]byte` (32+ bytes) |
+
+ECDSA signatures use the raw `r || s` encoding mandated by RFC 9421
+Section 3.3 (64 bytes for P-256, 96 bytes for P-384). For backward
+compatibility, verification also accepts ASN.1 DER signatures produced by
+earlier kasper releases.
+
+For Web Bot Auth (used by Cloudflare), `JWKThumbprintEd25519` computes the
+RFC 7638 JWK SHA-256 thumbprint of an Ed25519 public key — the value
+required as the signature `keyid` and as the JWK `kid` in the key
+directory:
+
+```go
+thumbprint, err := httpsig.JWKThumbprintEd25519(pub)
+signer, err := httpsig.NewEd25519Signer(thumbprint, priv)
+```
 
 ## Creating Keys
 
@@ -168,6 +188,51 @@ if err != nil {
 }
 ```
 
+## Signing Responses
+
+`SignResponse` signs an HTTP response in-place. Covered components may carry
+the `;req` parameter (RFC 9421 Section 2.4) to resolve against the
+originating request, binding the response signature to the request. The
+`@status` derived component covers the response status code and is the
+default when no components are configured.
+
+```go
+err := httpsig.SignResponse(resp, req, httpsig.SignConfig{
+    Signer: signer,
+    CoveredComponents: []string{
+        httpsig.ComponentStatus, // "@status"
+        "@authority;req",        // authority of the originating request
+        "@path;req",             // path of the originating request
+        "content-type",          // response header
+    },
+    // Computes Content-Digest over the response body and covers it.
+    DigestAlgorithm: httpsig.DigestSHA256,
+})
+```
+
+`req` may be nil when no `;req` components are covered.
+
+## Verifying Responses
+
+`VerifyResponse` checks the `Signature` and `Signature-Input` headers on a
+response. When `req` is nil, `resp.Request` (set by `net/http` clients) is
+used to resolve `;req` components.
+
+```go
+resp, err := client.Get("https://api.example.com/resource")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+err = httpsig.VerifyResponse(resp, nil, httpsig.VerifyConfig{
+    Resolver:           resolver,
+    RequiredComponents: []string{httpsig.ComponentStatus, "@authority;req"},
+    MaxAge:             5 * time.Minute,
+    RequireDigest:      true, // verifies Content-Digest against the response body
+})
+```
+
 ## Client Transport
 
 `NewTransport` creates an `http.RoundTripper` that automatically signs
@@ -276,6 +341,30 @@ router.Use(mw)
 router.HandleFunc("/api/v1/orders", handleOrders).Methods(http.MethodPost)
 ```
 
+### Response Signing Middleware
+
+`SignMiddleware` signs every outgoing response via `SignResponse`. The
+handler's response is buffered so the signature (and the optional
+Content-Digest) covers the final status code, headers, and complete body.
+When signing fails, a plain 500 Internal Server Error is sent instead of the
+handler's response.
+
+```go
+signMW, err := httpsig.SignMiddleware(httpsig.SignConfig{
+    Signer: signer,
+    CoveredComponents: []string{
+        httpsig.ComponentStatus, "@authority;req", "@path;req",
+    },
+    DigestAlgorithm: httpsig.DigestSHA256,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+router := mux.NewRouter()
+router.Use(mw, signMW) // verify incoming requests, sign outgoing responses
+```
+
 ## Content-Digest (RFC 9530)
 
 Standalone Content-Digest generation and verification, independent of
@@ -295,6 +384,10 @@ err = httpsig.VerifyContentDigest(req)
 // Returns ErrDigestMismatch if the body was tampered with.
 // Returns ErrDigestNotFound if the header is missing.
 // Returns ErrUnsupportedDigest if the algorithm is not recognized.
+
+// Response equivalents:
+err = httpsig.SetResponseContentDigest(resp, httpsig.DigestSHA256)
+err = httpsig.VerifyResponseContentDigest(resp)
 ```
 
 When used with `SignRequest`, setting `DigestAlgorithm` computes the digest
@@ -413,13 +506,21 @@ Derived components (prefixed with `@`):
 | `ComponentScheme` | `@scheme` | Request scheme (`http` or `https`) |
 | `ComponentTargetURI` | `@target-uri` | Full target URI (e.g., `https://example.com/path?q=1`) |
 | `ComponentRequestTarget` | `@request-target` | Path and optional query (e.g., `/path?q=1`) |
+| `ComponentStatus` | `@status` | Response status code (responses only) |
 
 Header fields: any HTTP header name, lowercased (e.g., `content-type`,
 `content-digest`, `authorization`). Multi-value headers are joined with
 `, `.
 
+In response signatures, appending `;req` to a component identifier
+(e.g. `"@authority;req"`, `"content-digest;req"`) resolves it against the
+originating request per RFC 9421 Section 2.4. All derived components except
+`@status` are request-only: on responses they require `;req`, and on
+requests `;req` and `@status` are invalid (`ErrInvalidComponent`).
+
 Default covered components when none specified: `ComponentMethod`,
-`ComponentAuthority`, `ComponentPath`.
+`ComponentAuthority`, `ComponentPath` for requests; `ComponentStatus` for
+responses.
 
 ## Errors
 
@@ -438,6 +539,7 @@ Default covered components when none specified: `ComponentMethod`,
 | `ErrDigestNotFound` | Content-Digest header missing when required |
 | `ErrUnsupportedDigest` | Digest algorithm not recognized |
 | `ErrUnknownComponent` | Unrecognized component identifier |
+| `ErrInvalidComponent` | Component not valid for the message (e.g. `@status` on a request, `;req` without an originating request) |
 
 ## Standards
 

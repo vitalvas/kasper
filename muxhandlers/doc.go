@@ -248,7 +248,7 @@
 //
 // StaticFilesHandler serves static files from any fs.FS implementation
 // (os.DirFS, embed.FS, fstest.MapFS, etc.) using http.FileServerFS.
-// It is not middleware — it returns an http.Handler that serves files
+// It is not middleware - it returns an http.Handler that serves files
 // directly. Directory listing is disabled by default; when a directory
 // has no index.html, a 404 is returned instead of a file listing.
 // When SPAFallback is enabled, requests for non-existent paths serve
@@ -273,7 +273,7 @@
 // # Profiler Handler
 //
 // RegisterProfiler registers the standard net/http/pprof and expvar
-// endpoints on the given router. It is not middleware — it registers
+// endpoints on the given router. It is not middleware - it registers
 // routes directly. Endpoints use the standard /debug/pprof/ and
 // /debug/vars paths. Mount with any prefix using Route:
 //

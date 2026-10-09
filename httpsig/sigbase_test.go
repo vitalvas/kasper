@@ -23,7 +23,7 @@ func TestBuildSignatureBase(t *testing.T) {
 			keyID:      "test-key-ed25519",
 		}
 
-		base, sigParams, err := buildSignatureBase(req, params)
+		base, sigParams, err := buildSignatureBase(sigMessage{req: req}, params)
 		require.NoError(t, err)
 
 		expected := fmt.Sprintf("\"@method\": POST\n\"@authority\": example.com\n\"@path\": /api/items\n\"@signature-params\": %s", sigParams)
@@ -47,7 +47,7 @@ func TestBuildSignatureBase(t *testing.T) {
 			keyID:      "shared-key",
 		}
 
-		base, _, err := buildSignatureBase(req, params)
+		base, _, err := buildSignatureBase(sigMessage{req: req}, params)
 		require.NoError(t, err)
 
 		assert.Contains(t, string(base), "\"@method\": GET\n")
@@ -63,7 +63,7 @@ func TestBuildSignatureBase(t *testing.T) {
 			keyID:      "k",
 		}
 
-		_, _, err := buildSignatureBase(req, params)
+		_, _, err := buildSignatureBase(sigMessage{req: req}, params)
 		assert.ErrorIs(t, err, ErrUnknownComponent)
 	})
 
@@ -76,7 +76,7 @@ func TestBuildSignatureBase(t *testing.T) {
 			keyID:      "k",
 		}
 
-		_, _, err := buildSignatureBase(req, params)
+		_, _, err := buildSignatureBase(sigMessage{req: req}, params)
 		assert.ErrorIs(t, err, ErrUnknownComponent)
 	})
 }
@@ -342,7 +342,7 @@ func TestSignatureParamsPreserveOrderAndExtensions(t *testing.T) {
 	raw := `("@method");keyid="k";alg="ed25519";custom="value";nonce=""`
 	params, err := parseSignatureParams(raw)
 	require.NoError(t, err)
-	base, serialized, err := buildSignatureBase(httptest.NewRequest("GET", "/", nil), params)
+	base, serialized, err := buildSignatureBase(sigMessage{req: httptest.NewRequest("GET", "/", nil)}, params)
 	require.NoError(t, err)
 	require.Equal(t, raw, serialized)
 	require.Equal(t, fmt.Sprintf("\"@method\": GET\n\"@signature-params\": %s", raw), string(base))
@@ -354,9 +354,22 @@ func TestSignatureParamsRejectTypeConfusion(t *testing.T) {
 		`("@method");alg="ed25519";keyid=k`,
 		`("@method");alg="ed25519";keyid="k";nonce=?1`,
 		`("@method");alg="ed25519";keyid="k";tag=123`,
-		`("@method";req);alg="ed25519";keyid="k"`,
+		`("@method";key="a");alg="ed25519";keyid="k"`,
+		`("@method";req=?0);alg="ed25519";keyid="k"`,
 	} {
 		_, err := parseSignatureParams(raw)
 		require.ErrorIs(t, err, ErrMalformedHeader)
 	}
+}
+
+func TestSignatureParamsReqComponent(t *testing.T) {
+	raw := `("@status" "@authority";req "content-digest";req);alg="ed25519";keyid="k"`
+	params, err := parseSignatureParams(raw)
+	require.NoError(t, err)
+	require.Equal(t, []string{"@status", "@authority;req", "content-digest;req"}, params.components)
+	require.Equal(t, raw, serializeSignatureParams(params))
+
+	// Round-trip through serializeComponentID without the parsed canonical form.
+	params.serialized = ""
+	require.Equal(t, raw, serializeSignatureParams(params))
 }

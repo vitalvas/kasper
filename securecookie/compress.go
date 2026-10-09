@@ -112,7 +112,7 @@ func maybeDecompress(data []byte) ([]byte, error) {
 
 		return result, nil
 	default:
-		// No recognized prefix — legacy uncompressed data from before
+		// No recognized prefix - legacy uncompressed data from before
 		// compression was added. Return as-is for backward compatibility.
 		// GCM authentication guarantees integrity, so this is safe.
 		return data, nil

@@ -2,6 +2,7 @@ package httpsig
 
 import (
 	"crypto/tls"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestComponentValue(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				val, err := componentValue(tt.id, req)
+				val, err := componentValue(tt.id, sigMessage{req: req})
 				require.NoError(t, err)
 				assert.Equal(t, tt.want, val)
 			})
@@ -54,7 +55,7 @@ func TestComponentValue(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				val, err := componentValue(tt.id, req)
+				val, err := componentValue(tt.id, sigMessage{req: req})
 				require.NoError(t, err)
 				assert.Equal(t, tt.want, val)
 			})
@@ -64,14 +65,14 @@ func TestComponentValue(t *testing.T) {
 	t.Run("missing header returns error", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com/", nil)
 
-		_, err := componentValue("x-missing", req)
+		_, err := componentValue("x-missing", sigMessage{req: req})
 		assert.ErrorIs(t, err, ErrUnknownComponent)
 	})
 
 	t.Run("unknown derived component returns error", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com/", nil)
 
-		_, err := componentValue("@unknown", req)
+		_, err := componentValue("@unknown", sigMessage{req: req})
 		assert.ErrorIs(t, err, ErrUnknownComponent)
 	})
 
@@ -79,7 +80,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com", nil)
 		req.URL.Path = ""
 
-		val, err := componentValue("@path", req)
+		val, err := componentValue("@path", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "/", val)
 	})
@@ -87,7 +88,7 @@ func TestComponentValue(t *testing.T) {
 	t.Run("empty query", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com/path", nil)
 
-		val, err := componentValue("@query", req)
+		val, err := componentValue("@query", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "?", val)
 	})
@@ -96,7 +97,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://other.com/", nil)
 		req.Host = "Example.COM:8080"
 
-		val, err := componentValue("@authority", req)
+		val, err := componentValue("@authority", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "example.com:8080", val)
 	})
@@ -105,7 +106,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "http://example.com/", nil)
 		req.TLS = &tls.ConnectionState{}
 
-		val, err := componentValue("@scheme", req)
+		val, err := componentValue("@scheme", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "https", val)
 	})
@@ -115,7 +116,7 @@ func TestComponentValue(t *testing.T) {
 		req.URL.Scheme = ""
 		req.TLS = nil
 
-		val, err := componentValue("@scheme", req)
+		val, err := componentValue("@scheme", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "http", val)
 	})
@@ -123,7 +124,7 @@ func TestComponentValue(t *testing.T) {
 	t.Run("request-target without query", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com/api/items", nil)
 
-		val, err := componentValue("@request-target", req)
+		val, err := componentValue("@request-target", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "/api/items", val)
 	})
@@ -132,7 +133,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com/api/items", nil)
 		req.Host = "example.com"
 
-		val, err := componentValue("@target-uri", req)
+		val, err := componentValue("@target-uri", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "https://example.com/api/items", val)
 	})
@@ -141,7 +142,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://url-host.com/", nil)
 		req.Host = ""
 
-		val, err := componentValue("@authority", req)
+		val, err := componentValue("@authority", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "url-host.com", val)
 	})
@@ -151,7 +152,7 @@ func TestComponentValue(t *testing.T) {
 		req.Host = ""
 		req.URL.Host = ""
 
-		val, err := componentValue("@authority", req)
+		val, err := componentValue("@authority", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "", val)
 	})
@@ -161,7 +162,7 @@ func TestComponentValue(t *testing.T) {
 		req.TLS = nil
 		req.URL.Scheme = "https"
 
-		val, err := componentValue("@scheme", req)
+		val, err := componentValue("@scheme", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "https", val)
 	})
@@ -171,7 +172,7 @@ func TestComponentValue(t *testing.T) {
 		req.Host = "example.com"
 		req.URL.Path = ""
 
-		val, err := componentValue("@target-uri", req)
+		val, err := componentValue("@target-uri", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "https://example.com/", val)
 	})
@@ -180,7 +181,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com", nil)
 		req.URL.Path = ""
 
-		val, err := componentValue("@request-target", req)
+		val, err := componentValue("@request-target", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "/", val)
 	})
@@ -189,7 +190,7 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "https://example.com/", nil)
 		req.Host = "example.com"
 
-		val, err := componentValue("host", req)
+		val, err := componentValue("host", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "example.com", val)
 	})
@@ -199,7 +200,7 @@ func TestComponentValue(t *testing.T) {
 		req.Host = "from-field.com"
 		req.Header.Set("Host", "from-header.com")
 
-		val, err := componentValue("host", req)
+		val, err := componentValue("host", sigMessage{req: req})
 		require.NoError(t, err)
 		assert.Equal(t, "from-header.com", val)
 	})
@@ -208,7 +209,85 @@ func TestComponentValue(t *testing.T) {
 		req := httptest.NewRequest("GET", "/relative", nil)
 		req.Host = ""
 
-		_, err := componentValue("host", req)
+		_, err := componentValue("host", sigMessage{req: req})
+		assert.ErrorIs(t, err, ErrUnknownComponent)
+	})
+}
+
+func TestComponentValueResponse(t *testing.T) {
+	newMessage := func() sigMessage {
+		req := httptest.NewRequest("POST", "https://example.com/api/items?page=2", nil)
+		req.Host = "example.com"
+		req.Header.Set("X-Request-ID", "req-123")
+
+		resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header)}
+		resp.Header.Set("Content-Type", "application/json")
+
+		return sigMessage{req: req, resp: resp}
+	}
+
+	t.Run("@status", func(t *testing.T) {
+		val, err := componentValue("@status", newMessage())
+		require.NoError(t, err)
+		assert.Equal(t, "503", val)
+	})
+
+	t.Run("response header field", func(t *testing.T) {
+		val, err := componentValue("content-type", newMessage())
+		require.NoError(t, err)
+		assert.Equal(t, "application/json", val)
+	})
+
+	t.Run("req components resolve against request", func(t *testing.T) {
+		tests := []struct {
+			id   string
+			want string
+		}{
+			{id: "@method;req", want: "POST"},
+			{id: "@authority;req", want: "example.com"},
+			{id: "@path;req", want: "/api/items"},
+			{id: "@query;req", want: "?page=2"},
+			{id: "x-request-id;req", want: "req-123"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.id, func(t *testing.T) {
+				val, err := componentValue(tt.id, newMessage())
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, val)
+			})
+		}
+	})
+
+	t.Run("request-only derived component without req returns error", func(t *testing.T) {
+		_, err := componentValue("@method", newMessage())
+		assert.ErrorIs(t, err, ErrInvalidComponent)
+	})
+
+	t.Run("req component without request returns error", func(t *testing.T) {
+		m := newMessage()
+		m.req = nil
+
+		_, err := componentValue("@method;req", m)
+		assert.ErrorIs(t, err, ErrInvalidComponent)
+	})
+
+	t.Run("@status on request returns error", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/", nil)
+
+		_, err := componentValue("@status", sigMessage{req: req})
+		assert.ErrorIs(t, err, ErrInvalidComponent)
+	})
+
+	t.Run("req component on request returns error", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/", nil)
+
+		_, err := componentValue("@authority;req", sigMessage{req: req})
+		assert.ErrorIs(t, err, ErrInvalidComponent)
+	})
+
+	t.Run("missing response header returns error", func(t *testing.T) {
+		_, err := componentValue("x-missing", newMessage())
 		assert.ErrorIs(t, err, ErrUnknownComponent)
 	})
 }

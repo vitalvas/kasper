@@ -2,7 +2,6 @@ package httpsig
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -27,16 +26,16 @@ type signatureParams struct {
 // Section 2.5. Each covered component produces a line
 // "<component-id>": <value>\n and the final line is
 // "@signature-params": <params>.
-func buildSignatureBase(r *http.Request, params signatureParams) ([]byte, string, error) {
+func buildSignatureBase(m sigMessage, params signatureParams) ([]byte, string, error) {
 	var base strings.Builder
 
 	for _, id := range params.components {
-		val, err := componentValue(id, r)
+		val, err := componentValue(id, m)
 		if err != nil {
 			return nil, "", err
 		}
 
-		fmt.Fprintf(&base, "%q: %s\n", id, val)
+		fmt.Fprintf(&base, "%s: %s\n", serializeComponentID(id), val)
 	}
 
 	sigParamsStr := serializeSignatureParams(params)
@@ -62,7 +61,7 @@ func serializeSignatureParams(params signatureParams) string {
 			b.WriteByte(' ')
 		}
 
-		b.WriteString(strconv.Quote(id))
+		b.WriteString(serializeComponentID(id))
 	}
 	b.WriteByte(')')
 
@@ -120,10 +119,16 @@ func parseSignatureParams(raw string) (signatureParams, error) {
 		if ci.Value.Kind != sfv.KindString {
 			return params, fmt.Errorf("%w: component id must be a string", ErrMalformedHeader)
 		}
-		if len(ci.Params) != 0 {
-			return params, fmt.Errorf("%w: component parameters are not supported", ErrMalformedHeader)
+		id := ci.Value.Str
+		for _, p := range ci.Params {
+			// Only the boolean ";req" parameter (RFC 9421 Section 2.4) is
+			// supported; it is folded into the component id string.
+			if p.Key != "req" || p.Value.Kind != sfv.KindBoolean || !p.Value.Boolean {
+				return params, fmt.Errorf("%w: unsupported component parameter %q", ErrMalformedHeader, p.Key)
+			}
+			id += reqSuffix
 		}
-		params.components = append(params.components, ci.Value.Str)
+		params.components = append(params.components, id)
 	}
 
 	for _, p := range inner.Params {
@@ -164,6 +169,18 @@ func parseSignatureParams(raw string) (signatureParams, error) {
 	}
 
 	return params, nil
+}
+
+// serializeComponentID renders a covered component identifier for the
+// signature base and @signature-params, quoting the component name and
+// emitting the ";req" flag as a bare boolean parameter per RFC 8941.
+func serializeComponentID(id string) string {
+	name, isReq := strings.CutSuffix(id, reqSuffix)
+	if isReq {
+		return strconv.Quote(name) + reqSuffix
+	}
+
+	return strconv.Quote(name)
 }
 
 // quoteRFC8941 produces an RFC 8941 / RFC 9651 quoted-string. Only backslash

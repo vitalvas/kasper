@@ -490,3 +490,199 @@ func TestVerifySignedParametersAndMultipleLines(t *testing.T) {
 	req.Header.Set("Signature-Input", fmt.Sprintf("sig=%s", strings.Replace(raw, "signed", "changed", 1)))
 	require.ErrorIs(t, VerifyRequest(req, cfg), ErrSignatureInvalid)
 }
+
+// TestWebBotAuthDraftVector checks interoperability against the official
+// test vector from draft-meunier-web-bot-auth-architecture-03 (the signature
+// scheme used by Cloudflare Web Bot Auth), which signs with the Ed25519 test
+// key from RFC 9421 Appendix B.1.4.
+func TestWebBotAuthDraftVector(t *testing.T) {
+	pubBytes, err := base64.RawURLEncoding.DecodeString("JrQLj5P_89iXES9-vFgrIy29clF9CC_oPPsw3c5D0bs")
+	require.NoError(t, err)
+
+	verifier, err := NewEd25519Verifier("poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U", ed25519.PublicKey(pubBytes))
+	require.NoError(t, err)
+
+	resolver := func(*http.Request, string, Algorithm) (Verifier, error) { return verifier, nil }
+
+	vectors := []struct {
+		name      string
+		label     string
+		sigInput  string
+		sigHeader string
+		sigAgent  string
+	}{
+		{
+			name:      "A.2.1 Signature-Agent absent",
+			label:     "sig1",
+			sigInput:  `sig1=("@authority");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="mYotfW3CUjI68sbGw6oKd7kyXqPjZEtU8xFPGWFrqOAf5qC6MDe3pys3SWWCudB0MvwslHy32WXUpkR7u0lt/w==";tag="web-bot-auth"`,
+			sigHeader: `sig1=:+NA/cssf4Y2bQTMTkyvTGRCaVzp9quyUevdwwMtMOWhhOOZ2T1subBj0BtvdnrpDEuwSAbiTeElXDzHL3WWKCw==:`,
+		},
+		{
+			name:      "A.2.2 Signature-Agent covered",
+			label:     "sig2",
+			sigInput:  `sig2=("@authority" "signature-agent");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=1735693200;nonce="e8N7S2MFd/qrd6T2R3tdfAuuANngKI7LFtKYI/vowzk4lAZYadIX6wW25MwG7DCT9RUKAJ0qVkU0mEeLElW1qg==";tag="web-bot-auth"`,
+			sigHeader: `sig2=:jdq0SqOwHdyHr9+r5jw3iYZH6aNGKijYp/EstF4RQTQdi5N5YYKrD+mCT1HA1nZDsi6nJKuHxUi/5Syp3rLWBA==:`,
+			sigAgent:  `"https://signature-agent.test"`,
+		},
+	}
+
+	for _, v := range vectors {
+		t.Run(v.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+			req.Host = "example.com"
+			req.Header.Set("Signature-Input", v.sigInput)
+			req.Header.Set("Signature", v.sigHeader)
+			if v.sigAgent != "" {
+				req.Header.Set("Signature-Agent", v.sigAgent)
+			}
+
+			// The vector's expires timestamp (2025-01-01) is in the past,
+			// so the full VerifyRequest path must reject it as expired -
+			// which proves the parameters parse correctly.
+			assert.ErrorIs(t, VerifyRequest(req, VerifyConfig{Resolver: resolver}), ErrSignatureExpired)
+
+			// Reconstruct the signature base from the wire headers and
+			// verify the vector's signature cryptographically.
+			_, raw, err := findSignatureInput(v.sigInput, v.label)
+			require.NoError(t, err)
+
+			params, err := parseSignatureParams(raw)
+			require.NoError(t, err)
+
+			base, serialized, err := buildSignatureBase(sigMessage{req: req}, params)
+			require.NoError(t, err)
+
+			// The signed @signature-params must round-trip byte-exactly,
+			// including the vector's parameter order.
+			assert.Equal(t, v.sigInput, fmt.Sprintf("%s=%s", v.label, serialized))
+
+			sig, err := extractSignatureValue(v.sigHeader, v.label)
+			require.NoError(t, err)
+
+			assert.NoError(t, verifier.Verify(base, sig))
+		})
+	}
+}
+
+func TestVerifyResponse(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	signer, err := NewEd25519Signer("resp-key", priv)
+	require.NoError(t, err)
+
+	verifier, err := NewEd25519Verifier("resp-key", pub)
+	require.NoError(t, err)
+
+	resolver := func(_ *http.Request, keyID string, alg Algorithm) (Verifier, error) {
+		if keyID == "resp-key" && alg == AlgorithmEd25519 {
+			return verifier, nil
+		}
+		return nil, ErrInvalidKey
+	}
+
+	signedResponse := func(t *testing.T, status int, body string, req *http.Request, cfg SignConfig) *http.Response {
+		t.Helper()
+
+		resp := &http.Response{
+			StatusCode: status,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+		cfg.Signer = signer
+		require.NoError(t, SignResponse(resp, req, cfg))
+
+		return resp
+	}
+
+	t.Run("nil resolver returns error", func(t *testing.T) {
+		resp := signedResponse(t, http.StatusOK, "", nil, SignConfig{})
+		assert.ErrorIs(t, VerifyResponse(resp, nil, VerifyConfig{}), ErrNoResolver)
+	})
+
+	t.Run("round trip with req components and digest", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/api/items", nil)
+		req.Host = "example.com"
+
+		resp := signedResponse(t, http.StatusOK, `{"ok":true}`, req, SignConfig{
+			CoveredComponents: []string{"@status", "@authority;req", "@path;req"},
+			DigestAlgorithm:   DigestSHA256,
+		})
+
+		err := VerifyResponse(resp, req, VerifyConfig{
+			Resolver:           resolver,
+			RequiredComponents: []string{"@status", "@authority;req", "content-digest"},
+			RequireDigest:      true,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("tampered status fails", func(t *testing.T) {
+		resp := signedResponse(t, http.StatusOK, "", nil, SignConfig{})
+		resp.StatusCode = http.StatusCreated
+
+		err := VerifyResponse(resp, nil, VerifyConfig{Resolver: resolver})
+		assert.ErrorIs(t, err, ErrSignatureInvalid)
+	})
+
+	t.Run("tampered request component fails", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/api/items", nil)
+		req.Host = "example.com"
+
+		resp := signedResponse(t, http.StatusOK, "", req, SignConfig{
+			CoveredComponents: []string{"@status", "@path;req"},
+		})
+		req.URL.Path = "/api/other"
+
+		err := VerifyResponse(resp, req, VerifyConfig{Resolver: resolver})
+		assert.ErrorIs(t, err, ErrSignatureInvalid)
+	})
+
+	t.Run("tampered body fails digest check", func(t *testing.T) {
+		resp := signedResponse(t, http.StatusOK, "original", nil, SignConfig{DigestAlgorithm: DigestSHA256})
+		resp.Body = io.NopCloser(strings.NewReader("tampered"))
+
+		err := VerifyResponse(resp, nil, VerifyConfig{Resolver: resolver, RequireDigest: true})
+		assert.ErrorIs(t, err, ErrDigestMismatch)
+	})
+
+	t.Run("missing signature returns error", func(t *testing.T) {
+		resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}
+
+		err := VerifyResponse(resp, nil, VerifyConfig{Resolver: resolver})
+		assert.ErrorIs(t, err, ErrSignatureNotFound)
+	})
+
+	t.Run("nil req falls back to resp.Request", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/x", nil)
+		req.Host = "example.com"
+
+		resp := signedResponse(t, http.StatusOK, "", req, SignConfig{
+			CoveredComponents: []string{"@status", "@path;req"},
+		})
+		resp.Request = req
+
+		require.NoError(t, VerifyResponse(resp, nil, VerifyConfig{Resolver: resolver}))
+	})
+
+	t.Run("req component without request fails", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/x", nil)
+
+		resp := signedResponse(t, http.StatusOK, "", req, SignConfig{
+			CoveredComponents: []string{"@status", "@path;req"},
+		})
+
+		err := VerifyResponse(resp, nil, VerifyConfig{Resolver: resolver})
+		assert.ErrorIs(t, err, ErrInvalidComponent)
+	})
+
+	t.Run("missing required component fails", func(t *testing.T) {
+		resp := signedResponse(t, http.StatusOK, "", nil, SignConfig{})
+
+		err := VerifyResponse(resp, nil, VerifyConfig{
+			Resolver:           resolver,
+			RequiredComponents: []string{"@authority;req"},
+		})
+		assert.ErrorIs(t, err, ErrMissingComponent)
+	})
+}

@@ -127,7 +127,7 @@ func noCacheApplier(preset NoCachePreset) func(http.Header) {
 
 // noCacheResponseWriter is the base wrapper that rewrites caching
 // headers exactly once, at the moment the response is committed
-// (WriteHeader or the first Write). It does not buffer the body —
+// (WriteHeader or the first Write). It does not buffer the body -
 // only header values are touched. The base always exposes Unwrap so
 // http.ResponseController can reach optional methods on the inner
 // writer; Flusher, Hijacker, and Pusher are exposed through

@@ -459,7 +459,7 @@ func resolveConfig(cfg Config) (*resolvedConfig, error) {
 	}
 
 	// Enforce browser constraints for the __Host- and __Secure- cookie
-	// prefixes (RFC 6265bis §4.1.3). Misconfiguration would silently
+	// prefixes (RFC 6265bis Section 4.1.3). Misconfiguration would silently
 	// cause browsers to reject the cookie.
 	if strings.HasPrefix(rc.cookieName, "__Host-") {
 		if !rc.cookieSecure {
@@ -566,7 +566,7 @@ func verifyOrigin(r *http.Request, rc *resolvedConfig) error {
 	origin := r.Header.Get("Origin")
 	switch {
 	case origin == "null":
-		// RFC 6454 §7.3 "null" denotes a privacy-sensitive context with no
+		// RFC 6454 Section 7.3 "null" denotes a privacy-sensitive context with no
 		// trustworthy origin (sandboxed iframes, redirected POSTs, etc.).
 		// When present, treat it as an explicit rejection regardless of
 		// scheme; do not fall through to the Referer fallback or the

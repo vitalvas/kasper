@@ -16,6 +16,10 @@ const nonceSize = 16
 // SignConfig.CoveredComponents is empty.
 var defaultCoveredComponents = []string{ComponentMethod, ComponentAuthority, ComponentPath}
 
+// defaultResponseComponents are the default components signed by SignResponse
+// when SignConfig.CoveredComponents is empty.
+var defaultResponseComponents = []string{ComponentStatus}
+
 // GenerateNonce returns a cryptographically random nonce string suitable
 // for use in SignConfig.Nonce. The returned value is 16 random bytes
 // encoded as unpadded base64url (22 characters).
@@ -28,7 +32,8 @@ func GenerateNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// SignConfig configures HTTP request signing per RFC 9421.
+// SignConfig configures HTTP message signing per RFC 9421. It is shared by
+// SignRequest and SignResponse.
 type SignConfig struct {
 	// Signer produces signatures. Required.
 	Signer Signer
@@ -55,10 +60,10 @@ type SignConfig struct {
 	// is set.
 	Expires time.Time
 
-	// DigestAlgorithm, when set, causes SignRequest to compute and set a
-	// Content-Digest header (RFC 9530) before signing. The
-	// "content-digest" component is automatically added to covered
-	// components if not already present.
+	// DigestAlgorithm, when set, causes SignRequest and SignResponse to
+	// compute and set a Content-Digest header (RFC 9530) over the message
+	// body before signing. The "content-digest" component is automatically
+	// added to covered components if not already present.
 	DigestAlgorithm DigestAlgorithm
 }
 
@@ -67,11 +72,6 @@ type SignConfig struct {
 func SignRequest(r *http.Request, cfg SignConfig) error {
 	if cfg.Signer == nil {
 		return ErrNoSigner
-	}
-
-	label := cfg.Label
-	if label == "" {
-		label = "sig1"
 	}
 
 	components := cfg.CoveredComponents
@@ -90,6 +90,51 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 		}
 	}
 
+	return signMessage(sigMessage{req: r}, components, cfg)
+}
+
+// SignResponse signs an HTTP response in-place by adding Signature and
+// Signature-Input headers per RFC 9421. req is the originating request;
+// covered components carrying the ";req" parameter (for example
+// "@authority;req") resolve against it, binding the response signature to
+// the request. req may be nil when no ";req" components are covered.
+//
+// When CoveredComponents is empty, [ComponentStatus] is signed. When
+// DigestAlgorithm is set, a Content-Digest header is computed over the
+// response body (which is read and restored) and "content-digest" is added
+// to the covered components.
+func SignResponse(resp *http.Response, req *http.Request, cfg SignConfig) error {
+	if cfg.Signer == nil {
+		return ErrNoSigner
+	}
+
+	components := cfg.CoveredComponents
+	if len(components) == 0 {
+		components = defaultResponseComponents
+	}
+
+	// Optionally set Content-Digest.
+	if cfg.DigestAlgorithm != "" {
+		if err := SetResponseContentDigest(resp, cfg.DigestAlgorithm); err != nil {
+			return err
+		}
+
+		if !slices.Contains(components, "content-digest") {
+			components = append(components, "content-digest")
+		}
+	}
+
+	return signMessage(sigMessage{req: req, resp: resp}, components, cfg)
+}
+
+// signMessage builds the signature base for the message, signs it, and
+// appends Signature and Signature-Input headers to the message.
+func signMessage(m sigMessage, components []string, cfg SignConfig) error {
+	label := cfg.Label
+	if label == "" {
+		label = "sig1"
+	}
+
 	// Determine created time.
 	created := cfg.Created
 	if created.IsZero() {
@@ -106,7 +151,7 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 		tag:        cfg.Tag,
 	}
 
-	base, sigParamsStr, err := buildSignatureBase(r, params)
+	base, sigParamsStr, err := buildSignatureBase(m, params)
 	if err != nil {
 		return err
 	}
@@ -119,8 +164,9 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 	encoded := base64.StdEncoding.EncodeToString(sig)
 
 	// Append to existing headers (supports multiple signatures).
-	appendDictMember(r, "Signature-Input", label, sigParamsStr)
-	appendDictMember(r, "Signature", label, fmt.Sprintf(":%s:", encoded))
+	hdr := m.header()
+	appendDictMember(hdr, "Signature-Input", label, sigParamsStr)
+	appendDictMember(hdr, "Signature", label, fmt.Sprintf(":%s:", encoded))
 
 	return nil
 }
@@ -128,13 +174,13 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 // appendDictMember appends a key=value member to an RFC 8941 dictionary
 // header. If the header already has content, the new member is appended
 // with a comma separator.
-func appendDictMember(r *http.Request, header, key, value string) {
-	existing := r.Header.Get(header)
+func appendDictMember(hdr http.Header, header, key, value string) {
+	existing := hdr.Get(header)
 	entry := fmt.Sprintf("%s=%s", key, value)
 
 	if existing == "" {
-		r.Header.Set(header, entry)
+		hdr.Set(header, entry)
 	} else {
-		r.Header.Set(header, fmt.Sprintf("%s, %s", existing, entry))
+		hdr.Set(header, fmt.Sprintf("%s, %s", existing, entry))
 	}
 }

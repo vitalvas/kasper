@@ -309,3 +309,51 @@ func TestDigestInformationalResponseAndTrailers(t *testing.T) {
 	require.Equal(t, "done", res.Trailer.Get("X-Checksum"))
 	require.Empty(t, res.Header.Get("Link"))
 }
+
+func TestResponseContentDigest(t *testing.T) {
+	newResponse := func(body string) *http.Response {
+		return &http.Response{Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+	}
+
+	t.Run("set and verify round trip restores body", func(t *testing.T) {
+		resp := newResponse("hello")
+
+		require.NoError(t, SetResponseContentDigest(resp, DigestSHA256))
+		assert.Equal(t, digestHeaderFor("hello", DigestSHA256), resp.Header.Get("Content-Digest"))
+		require.NoError(t, VerifyResponseContentDigest(resp))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(body))
+	})
+
+	t.Run("unsupported algorithm returns error", func(t *testing.T) {
+		assert.ErrorIs(t, SetResponseContentDigest(newResponse(""), "md5"), ErrDigestUnsupported)
+	})
+
+	t.Run("tampered body returns mismatch", func(t *testing.T) {
+		resp := newResponse("hello")
+		require.NoError(t, SetResponseContentDigest(resp, DigestSHA512))
+		resp.Body = io.NopCloser(strings.NewReader("tampered"))
+
+		assert.ErrorIs(t, VerifyResponseContentDigest(resp), ErrDigestMismatch)
+	})
+
+	t.Run("missing header returns error", func(t *testing.T) {
+		assert.ErrorIs(t, VerifyResponseContentDigest(newResponse("x")), ErrDigestMissing)
+	})
+
+	t.Run("nil body digests empty content", func(t *testing.T) {
+		resp := &http.Response{Header: make(http.Header)}
+
+		require.NoError(t, SetResponseContentDigest(resp, DigestSHA256))
+		require.NoError(t, VerifyResponseContentDigest(resp))
+	})
+
+	t.Run("nil header map is created on set", func(t *testing.T) {
+		resp := &http.Response{Body: io.NopCloser(strings.NewReader("x"))}
+
+		require.NoError(t, SetResponseContentDigest(resp, DigestSHA256))
+		assert.NotEmpty(t, resp.Header.Get("Content-Digest"))
+	})
+}
