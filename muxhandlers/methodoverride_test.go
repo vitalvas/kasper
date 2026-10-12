@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 func TestMethodOverrideMiddleware(t *testing.T) {

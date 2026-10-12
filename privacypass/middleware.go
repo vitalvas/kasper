@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ErrNoPublicKey is returned when a middleware is configured without an issuer

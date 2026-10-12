@@ -4,7 +4,7 @@ import (
 	"maps"
 	"strconv"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // groupDefaults holds the default metadata that a RouteGroup applies

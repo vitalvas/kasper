@@ -3,7 +3,7 @@
 HTTP toolkit for Go. Drop-in gorilla/mux replacement with WebSocket, OpenAPI, and middleware support.
 
 ```bash
-go get github.com/vitalvas/kasper
+go get go.vitalvas.com/kasper
 ```
 
 Requires Go 1.27+.

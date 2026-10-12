@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // MaintenanceConfig configures the MaintenanceMode middleware.

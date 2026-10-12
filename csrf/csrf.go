@@ -39,8 +39,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/vitalvas/kasper/mux"
-	"github.com/vitalvas/kasper/securecookie"
+	"go.vitalvas.com/kasper/mux"
+	"go.vitalvas.com/kasper/securecookie"
 )
 
 // tokenLength is the size in bytes of the raw CSRF token.

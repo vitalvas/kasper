@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // NoCachePreset selects the set of response headers NoCacheMiddleware

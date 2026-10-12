@@ -8,8 +8,8 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/vitalvas/kasper/mux"
-	"github.com/vitalvas/kasper/openapi"
+	"go.vitalvas.com/kasper/mux"
+	"go.vitalvas.com/kasper/openapi"
 )
 
 // Item represents a simple resource.

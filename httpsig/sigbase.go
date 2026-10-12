@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vitalvas/kasper/sfv"
+	"go.vitalvas.com/kasper/sfv"
 )
 
 // signatureParams holds the parameters that appear in the @signature-params

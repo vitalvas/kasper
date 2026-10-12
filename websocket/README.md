@@ -21,7 +21,7 @@ RFC 6455 compliant WebSocket implementation.
 ## Installation
 
 ```bash
-go get github.com/vitalvas/kasper/websocket
+go get go.vitalvas.com/kasper/websocket
 ```
 
 ## Server

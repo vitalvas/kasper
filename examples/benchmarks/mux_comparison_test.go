@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	gorillamux "github.com/gorilla/mux"
-	kaspermux "github.com/vitalvas/kasper/mux"
+	kaspermux "go.vitalvas.com/kasper/mux"
 )
 
 var endpointCounts = []int{5, 10, 50, 100, 500}

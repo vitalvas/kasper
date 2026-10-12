@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ErrInvalidTimeout is returned when TimeoutConfig.Duration is not greater

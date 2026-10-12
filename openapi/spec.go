@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // macroTypeMap maps mux route macros to OpenAPI type and format.

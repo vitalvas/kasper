@@ -217,8 +217,8 @@ import (
     "log"
     "net/http"
 
-    "github.com/vitalvas/kasper/blindrsa"
-    "github.com/vitalvas/kasper/mux"
+    "go.vitalvas.com/kasper/blindrsa"
+    "go.vitalvas.com/kasper/mux"
 )
 
 func main() {

@@ -11,7 +11,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // WellKnownPath is the well-known URI suffix where servers publish their

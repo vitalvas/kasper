@@ -11,7 +11,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/vitalvas/kasper/blindrsa"
+	"go.vitalvas.com/kasper/blindrsa"
 )
 
 func main() {

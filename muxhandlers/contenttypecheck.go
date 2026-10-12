@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ErrNoAllowedTypes is returned when ContentTypeCheckConfig.AllowedTypes is

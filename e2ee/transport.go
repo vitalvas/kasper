@@ -4,7 +4,7 @@ import (
 	"mime"
 	"net/http"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // Transport is an http.RoundTripper that encrypts outgoing request bodies and

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // newSlogCapture builds an slog logger whose JSON output is captured

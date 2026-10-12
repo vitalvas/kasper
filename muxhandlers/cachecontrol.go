@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ErrNoCacheControlRules is returned when CacheControlConfig.Rules is empty.

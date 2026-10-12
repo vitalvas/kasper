@@ -22,7 +22,7 @@ Use `SecureCookie` for sensitive data (PII, tokens, credentials). Use `SignedCoo
 ## Installation
 
 ```bash
-go get github.com/vitalvas/kasper/securecookie
+go get go.vitalvas.com/kasper/securecookie
 ```
 
 ## Usage

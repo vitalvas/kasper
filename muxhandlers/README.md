@@ -5,7 +5,7 @@ HTTP middleware handlers for the `mux` router.
 ## Installation
 
 ```bash
-go get github.com/vitalvas/kasper/muxhandlers
+go get go.vitalvas.com/kasper/muxhandlers
 ```
 
 ## CORS Middleware

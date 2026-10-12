@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
-	"github.com/vitalvas/kasper/openapi"
+	"go.vitalvas.com/kasper/mux"
+	"go.vitalvas.com/kasper/openapi"
 )
 
 // --- Domain types ---

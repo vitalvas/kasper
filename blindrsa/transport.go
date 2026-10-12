@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ClientConfig configures the blind signature client.

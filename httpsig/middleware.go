@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // MiddlewareConfig configures the server-side signature verification

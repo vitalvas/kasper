@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vitalvas/kasper/sfv"
+	"go.vitalvas.com/kasper/sfv"
 )
 
 // KeyResolver returns a Verifier for the given key ID and algorithm.

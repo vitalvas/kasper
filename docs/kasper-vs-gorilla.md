@@ -35,9 +35,9 @@ import "github.com/gorilla/websocket"
 import "github.com/gorilla/handlers"
 
 // After
-import "github.com/vitalvas/kasper/mux"
-import "github.com/vitalvas/kasper/websocket"
-import "github.com/vitalvas/kasper/muxhandlers" // API differs, see below
+import "go.vitalvas.com/kasper/mux"
+import "go.vitalvas.com/kasper/websocket"
+import "go.vitalvas.com/kasper/muxhandlers" // API differs, see below
 ```
 
 `kasper/mux` and `kasper/websocket` are drop-in replacements with no code changes

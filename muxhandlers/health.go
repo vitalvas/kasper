@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // healthOffered lists the media types HealthHandler can produce, in

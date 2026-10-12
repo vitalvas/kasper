@@ -3,51 +3,51 @@
 //
 // The toolkit is organized into the following sub-packages:
 //
-//   - [github.com/vitalvas/kasper/mux] -- HTTP request multiplexer, API-compatible
+//   - [go.vitalvas.com/kasper/mux] -- HTTP request multiplexer, API-compatible
 //     with gorilla/mux. Supports path variables with regex constraints and macros,
 //     host/method/header/query matchers, subrouters, middleware, named routes,
 //     URL building, request binding, and response helpers.
 //
-//   - [github.com/vitalvas/kasper/websocket] -- RFC 6455 / RFC 8441 WebSocket
+//   - [go.vitalvas.com/kasper/websocket] -- RFC 6455 / RFC 8441 WebSocket
 //     implementation with client and server support, streaming, JSON helpers,
 //     permessage-deflate compression, and prepared messages for broadcasting.
 //
-//   - [github.com/vitalvas/kasper/openapi] -- Automatic OpenAPI v3.1.0 spec
+//   - [go.vitalvas.com/kasper/openapi] -- Automatic OpenAPI v3.1.0 spec
 //     generation from mux routes via reflection and struct tags. Supports
 //     JSON Schema Draft 2020-12, security schemes, webhooks, callbacks,
 //     and multiple documentation UIs.
 //
-//   - [github.com/vitalvas/kasper/httpsig] -- HTTP Message Signatures
+//   - [go.vitalvas.com/kasper/httpsig] -- HTTP Message Signatures
 //     (RFC 9421) with optional Content-Digest (RFC 9530). Provides signing,
 //     verification, client transport, and server middleware.
 //
-//   - [github.com/vitalvas/kasper/sfv] -- Structured Field Values for HTTP
+//   - [go.vitalvas.com/kasper/sfv] -- Structured Field Values for HTTP
 //     (RFC 9651). Provides typed parsing and canonical serialization of
 //     items, lists, and dictionaries.
 //
-//   - [github.com/vitalvas/kasper/muxhandlers] -- HTTP middleware collection
+//   - [go.vitalvas.com/kasper/muxhandlers] -- HTTP middleware collection
 //     including CORS, authentication, compression, security headers, request
 //     size limits, timeouts, recovery, Content-Digest, and more.
 //
-//   - [github.com/vitalvas/kasper/blindrsa] -- RSA Blind Signatures per
+//   - [go.vitalvas.com/kasper/blindrsa] -- RSA Blind Signatures per
 //     RFC 9474 (RSABSSA). Provides blinding, signing, finalizing, and
 //     verification along with HTTP handlers for token issuance.
 //
-//   - [github.com/vitalvas/kasper/privacypass] -- Privacy Pass Blind RSA
+//   - [go.vitalvas.com/kasper/privacypass] -- Privacy Pass Blind RSA
 //     tokens (token type 0x0002) per RFC 9578 with the PrivateToken HTTP
 //     authentication scheme (RFC 9577). Provides token encoding, origin
 //     verification with single-use enforcement, and server middleware.
 //
-//   - [github.com/vitalvas/kasper/securecookie] -- Authenticated and encrypted
+//   - [go.vitalvas.com/kasper/securecookie] -- Authenticated and encrypted
 //     cookie values using AES-GCM (128/192/256). Provides timestamp validation,
 //     key rotation via multi-codec, configurable AAD, and pluggable serialization.
 //
-//   - [github.com/vitalvas/kasper/e2ee] -- End-to-end encryption for HTTP API
+//   - [go.vitalvas.com/kasper/e2ee] -- End-to-end encryption for HTTP API
 //     payloads per draft-vasylenko-e2ee-http. Uses X25519, HKDF-SHA256, and
 //     AES-GCM to protect request/response bodies independently of TLS, with
 //     well-known key discovery, client transport, and server middleware.
 //
 // Install with:
 //
-//	go get github.com/vitalvas/kasper
+//	go get go.vitalvas.com/kasper
 package kasper

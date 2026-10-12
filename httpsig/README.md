@@ -8,7 +8,7 @@ signing (`SignResponse`, `SignMiddleware`), and response verification
 (`VerifyResponse`).
 
 ```bash
-go get github.com/vitalvas/kasper/httpsig
+go get go.vitalvas.com/kasper/httpsig
 ```
 
 ## Algorithms
@@ -418,8 +418,8 @@ import (
     "strings"
     "time"
 
-    "github.com/vitalvas/kasper/httpsig"
-    "github.com/vitalvas/kasper/mux"
+    "go.vitalvas.com/kasper/httpsig"
+    "go.vitalvas.com/kasper/mux"
 )
 
 func main() {

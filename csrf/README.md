@@ -20,7 +20,7 @@ The token cookie is signed with kasper/securecookie (AES-GCM). Submitted tokens 
 ## Installation
 
 ```bash
-go get github.com/vitalvas/kasper/csrf
+go get go.vitalvas.com/kasper/csrf
 ```
 
 ## Usage

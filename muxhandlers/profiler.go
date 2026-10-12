@@ -6,7 +6,7 @@ import (
 	"net/http/pprof"
 	"strings"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // RegisterProfiler registers the standard net/http/pprof and expvar

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // AccessLogEntry is the structured record produced for every request

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vitalvas/kasper/blindrsa"
+	"go.vitalvas.com/kasper/blindrsa"
 )
 
 // verifyVariant is the RSABSSA variant used by token type 0x0002.

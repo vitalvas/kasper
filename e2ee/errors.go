@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/vitalvas/kasper/muxhandlers"
+	"go.vitalvas.com/kasper/muxhandlers"
 )
 
 // Sentinel errors. These map onto the protocol error codes registered in

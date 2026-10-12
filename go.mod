@@ -1,4 +1,4 @@
-module github.com/vitalvas/kasper
+module go.vitalvas.com/kasper
 
 go 1.27.0
 

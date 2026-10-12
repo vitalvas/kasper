@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/vitalvas/kasper/mux"
-	"github.com/vitalvas/kasper/securecookie"
+	"go.vitalvas.com/kasper/mux"
+	"go.vitalvas.com/kasper/securecookie"
 )
 
 func newTestKey(t *testing.T) []byte {

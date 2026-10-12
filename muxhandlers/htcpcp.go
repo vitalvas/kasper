@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // HTCPCP method tokens defined by RFC 2324 Section 2.1.1 and extended

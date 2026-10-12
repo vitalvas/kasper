@@ -3,7 +3,7 @@ package muxhandlers
 import (
 	"net/http"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // RecoveryConfig configures the Recovery middleware behaviour.

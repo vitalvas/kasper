@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/vitalvas/kasper/mux"
-	"github.com/vitalvas/kasper/sfv"
+	"go.vitalvas.com/kasper/mux"
+	"go.vitalvas.com/kasper/sfv"
 )
 
 // DigestAlgorithm identifies a Content-Digest hash algorithm per RFC 9530.

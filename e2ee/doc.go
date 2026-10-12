@@ -86,7 +86,7 @@
 // status, non-body headers) or defend against traffic analysis. HTTP request
 // and response semantics are intentionally not bound into the AEAD; deployments
 // needing end-to-end binding of method, target, or status should layer HTTP
-// Message Signatures (see github.com/vitalvas/kasper/httpsig) over the
+// Message Signatures (see go.vitalvas.com/kasper/httpsig) over the
 // E2EE-Session field and a Content-Digest of the ciphertext body. Forward
 // secrecy applies to client-side compromise only; compromise of a server
 // private key decrypts all past sessions that used it, so rotate keys

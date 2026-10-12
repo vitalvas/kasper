@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ErrInvalidCompressionLevel is returned when CompressionConfig.Level is

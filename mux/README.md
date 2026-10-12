@@ -21,7 +21,7 @@ HTTP request multiplexer with URL pattern matching.
 ## Installation
 
 ```bash
-go get github.com/vitalvas/kasper/mux
+go get go.vitalvas.com/kasper/mux
 ```
 
 ## Router

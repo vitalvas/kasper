@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/vitalvas/kasper/blindrsa"
+	"go.vitalvas.com/kasper/blindrsa"
 )
 
 // issueToken runs the full RFC 9578 issuance flow using the real blindrsa

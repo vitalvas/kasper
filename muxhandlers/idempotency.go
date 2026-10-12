@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ErrNoIdempotencyStore is returned when IdempotencyConfig.Store is nil.

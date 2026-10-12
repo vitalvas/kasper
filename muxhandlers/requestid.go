@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"uuid"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 type requestIDKey struct{}

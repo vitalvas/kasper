@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/vitalvas/kasper/muxhandlers"
+	"go.vitalvas.com/kasper/muxhandlers"
 )
 
 // DigestAlgorithm identifies the hash algorithm for Content-Digest per

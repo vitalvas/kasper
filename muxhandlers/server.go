@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/vitalvas/kasper/mux"
+	"go.vitalvas.com/kasper/mux"
 )
 
 // ServerConfig configures the Server middleware behaviour.
