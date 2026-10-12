@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.27.0](https://github.com/vitalvas/kasper/compare/v0.26.0...v0.27.0) (2026-10-12)
+
+
+### Features
+
+* move module path to go.vitalvas.com/kasper ([1d59fe5](https://github.com/vitalvas/kasper/commit/1d59fe52a0d29d2f220ff448e2ba4056bfce3c5c))
+
+
+### Bug Fixes
+
+* update benchmarks module to go.vitalvas.com/kasper path ([6cdbbbc](https://github.com/vitalvas/kasper/commit/6cdbbbcba10cd0b5aa33cda681b322d6e4e16cb6))
+
 ## [0.26.0](https://github.com/vitalvas/kasper/compare/v0.25.1...v0.26.0) (2026-10-09)
 
 
