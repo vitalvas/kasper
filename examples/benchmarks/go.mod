@@ -1,10 +1,10 @@
-module github.com/vitalvas/kasper/examples/benchmarks
+module go.vitalvas.com/kasper/examples/benchmarks
 
-go 1.25
+go 1.27.0
 
 require (
 	github.com/gorilla/mux v1.8.1
-	github.com/vitalvas/kasper v0.0.0
+	go.vitalvas.com/kasper v0.0.0
 )
 
-replace github.com/vitalvas/kasper => ../..
+replace go.vitalvas.com/kasper => ../..
