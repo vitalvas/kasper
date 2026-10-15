@@ -305,6 +305,20 @@ func TestAccessLogMiddleware(t *testing.T) {
 		assert.Equal(t, "abc-123", entry["request_id"])
 	})
 
+	t.Run("conn ID propagates into the log entry", func(t *testing.T) {
+		logger, buf := newSlogCapture()
+		mw := AccessLogMiddleware(mux.NewRouter(), AccessLogConfig{Logger: logger})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		ctx := context.WithValue(req.Context(), connIDKey{}, "conn-abc")
+		req = req.WithContext(ctx)
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		entry := decodeLogLine(t, buf)
+		assert.Equal(t, "conn-abc", entry["conn_id"])
+	})
+
 	t.Run("default logger is slog.Default when nothing is configured", func(t *testing.T) {
 		// Replace slog.Default for the test, ensuring the middleware
 		// reaches it when both Logger and LogFunc are nil.

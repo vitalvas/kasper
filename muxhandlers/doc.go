@@ -102,7 +102,8 @@
 // By default it generates UUID v4 values using the standard library uuid package.
 // Use GenerateUUIDv7 for time-ordered IDs (RFC 9562). The GenerateFunc
 // receives the current request, allowing ID generation based on request
-// context.
+// context. Set HideHeader to keep the ID on the request and context (and the
+// access log) without leaking it back to the client on the response header.
 //
 //	r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
 //	    TrustIncoming: true,
@@ -113,6 +114,25 @@
 //	r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
 //	    GenerateFunc: muxhandlers.GenerateUUIDv7,
 //	}))
+//
+// # Connection ID Middleware
+//
+// ConnContext stamps every accepted TCP connection with a unique ID, so all
+// requests served over the same keep-alive connection share one ID. Wire it
+// into http.Server.ConnContext and surface the ID on responses with
+// ConnIDMiddleware. Downstream handlers read it with ConnIDFromContext. Unlike
+// the request ID, which changes per request, the connection ID is stable for
+// the life of the connection. By default it generates UUID v4 values. The ID
+// is always available via the context and access log; set ExposeHeader to also
+// write it to the response header.
+//
+//	cfg := muxhandlers.ConnIDConfig{ExposeHeader: true}
+//	r.Use(muxhandlers.ConnIDMiddleware(cfg))
+//
+//	srv := &http.Server{
+//	    Handler:     r,
+//	    ConnContext: muxhandlers.ConnContext(cfg),
+//	}
 //
 // # Request Size Limit Middleware
 //

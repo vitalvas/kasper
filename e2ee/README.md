@@ -232,7 +232,7 @@ with short validity windows.
 Cryptography uses only the Go standard library
 (`crypto/ecdh`, `crypto/hkdf`, `crypto/aes`, `crypto/cipher`, `crypto/sha256`);
 no third-party cryptographic dependencies are introduced. The package uses
-`github.com/google/uuid` for replay-identifier generation and reuses the
+the standard library `uuid` package for replay-identifier generation and reuses the
 sibling kasper packages `mux` (router middleware, JSON responses, content-type
 constants) and `muxhandlers` (RFC 9457 Problem Details) rather than
 reimplementing them.

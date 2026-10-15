@@ -133,6 +133,7 @@ HTTP middleware for the mux router.
 | `ProxyHeadersMiddleware` | RFC 7239 | X-Forwarded-For/Proto/Host, Forwarded header, trusted proxy validation |
 | `RecoveryMiddleware` | -- | Panic recovery, 500 response, optional log callback |
 | `RequestIDMiddleware` | RFC 9562 | UUID v4/v7 generation/propagation via X-Request-ID header |
+| `ConnIDMiddleware` | RFC 9562 | Per-connection UUID stamped via `http.Server.ConnContext`, stable across keep-alive requests, optional X-Connection-ID header |
 | `RequestSizeLimitMiddleware` | -- | Body size enforcement via `http.MaxBytesReader`, 413 on excess |
 | `TimeoutMiddleware` | -- | Handler execution time limit via `http.TimeoutHandler`, 503 on timeout |
 | `CompressionMiddleware` | -- | Gzip/deflate response compression with `sync.Pool`, quality-based encoding selection, min-length threshold |

@@ -89,6 +89,11 @@ type AccessLogEntry struct {
 	// request flowed through RequestIDMiddleware. Empty otherwise.
 	RequestID string
 
+	// ConnID is the value returned by ConnIDFromContext, when the server
+	// was wired with ConnContext. Stable across requests on the same
+	// keep-alive connection. Empty otherwise.
+	ConnID string
+
 	// Headers contains the request headers selected by IncludeHeaders,
 	// with values for headers in RedactHeaders replaced by "[REDACTED]".
 	// Nil when no headers are captured.
@@ -249,6 +254,7 @@ func buildAccessLogEntry(r *http.Request, args accessLogBuildArgs) *AccessLogEnt
 		UserAgent:  r.UserAgent(),
 		Referer:    r.Referer(),
 		RequestID:  RequestIDFromContext(r.Context()),
+		ConnID:     ConnIDFromContext(r.Context()),
 		Hijacked:   args.recorder.hijacked,
 	}
 	if !args.recorder.hijacked {
@@ -332,6 +338,9 @@ func emitSlog(logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Dur
 	}
 	if entry.RequestID != "" {
 		attrs = append(attrs, slog.String("request_id", entry.RequestID))
+	}
+	if entry.ConnID != "" {
+		attrs = append(attrs, slog.String("conn_id", entry.ConnID))
 	}
 	if len(entry.Headers) > 0 {
 		headerAttrs := make([]any, 0, len(entry.Headers))

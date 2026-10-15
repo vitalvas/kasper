@@ -244,7 +244,7 @@ r.Use(muxhandlers.RecoveryMiddleware(muxhandlers.RecoveryConfig{
 identifier. The ID is set on the request header, the response header,
 and the request context. Downstream handlers can retrieve it with
 `RequestIDFromContext`. By default it generates UUID v4 values using
-`github.com/google/uuid`. Use `GenerateUUIDv7` for time-ordered IDs
+the standard library `uuid` package. Use `GenerateUUIDv7` for time-ordered IDs
 ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562#section-5.7)).
 The `GenerateFunc` receives the current request, allowing ID
 generation based on request context.
@@ -256,6 +256,7 @@ generation based on request context.
 | `HeaderName` | `string` | Header name; defaults to `"X-Request-ID"` |
 | `GenerateFunc` | `func(*http.Request) string` | Custom ID generator; defaults to UUID v4 |
 | `TrustIncoming` | `bool` | Reuse existing header from the incoming request |
+| `HideHeader` | `bool` | Suppress the response header; the ID still rides the request header, context, and access log |
 
 ### Built-in Generators
 
@@ -290,6 +291,48 @@ r.Use(muxhandlers.RequestIDMiddleware(muxhandlers.RequestIDConfig{
 func handler(w http.ResponseWriter, r *http.Request) {
     id := muxhandlers.RequestIDFromContext(r.Context())
     log.Printf("request %s", id)
+}
+```
+
+## Connection ID Middleware
+
+`ConnContext` stamps every accepted TCP connection with a unique ID, so
+all requests served over the same keep-alive connection share one ID.
+Wire it into `http.Server.ConnContext` and surface the ID with
+`ConnIDMiddleware`; downstream handlers read it with `ConnIDFromContext`.
+Unlike the request ID (which changes per request), the connection ID is
+stable for the life of the connection. The ID is always available via the
+context and the access log; set `ExposeHeader` to also write it to the
+response header. Defaults to UUID v4.
+
+### ConnIDConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `HeaderName` | `string` | Response header name; defaults to `"X-Connection-ID"` |
+| `ExposeHeader` | `bool` | Write the ID to the response header; off by default (context/log only) |
+| `GenerateFunc` | `func() string` | Custom ID generator; invoked once per connection; defaults to UUID v4 |
+
+### ConnID Usage
+
+```go
+cfg := muxhandlers.ConnIDConfig{ExposeHeader: true}
+
+r := mux.NewRouter()
+r.Use(muxhandlers.ConnIDMiddleware(cfg))
+
+srv := &http.Server{
+    Handler:     r,
+    ConnContext: muxhandlers.ConnContext(cfg),
+}
+```
+
+### Reading the connection ID from context
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    id := muxhandlers.ConnIDFromContext(r.Context())
+    log.Printf("connection %s", id)
 }
 ```
 
@@ -1304,6 +1347,7 @@ always redacted when captured.
 | `Referer` | `string` | `Referer` header |
 | `RouteName` | `string` | Name from `mux.Route.Name`, if any |
 | `RequestID` | `string` | Result of `RequestIDFromContext`, if any |
+| `ConnID` | `string` | Result of `ConnIDFromContext`, if any (stable per keep-alive connection) |
 | `Headers` | `map[string]string` | Captured headers with redaction applied |
 
 ### AccessLog Usage

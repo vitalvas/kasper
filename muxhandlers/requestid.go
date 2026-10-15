@@ -34,6 +34,13 @@ type RequestIDConfig struct {
 	// TrustIncoming, when true, reuses an existing request ID from the
 	// incoming request header instead of generating a new one.
 	TrustIncoming bool
+
+	// HideHeader, when true, suppresses the request ID on the response
+	// header. The ID is still set on the request header and context so
+	// downstream handlers (and the access log) see it, but it is not
+	// leaked back to the client. Defaults to false (the response header
+	// is exposed).
+	HideHeader bool
 }
 
 // RequestIDMiddleware returns a middleware that generates or propagates a
@@ -51,6 +58,7 @@ func RequestIDMiddleware(cfg RequestIDConfig) mux.MiddlewareFunc {
 	}
 
 	trustIncoming := cfg.TrustIncoming
+	hideHeader := cfg.HideHeader
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +73,9 @@ func RequestIDMiddleware(cfg RequestIDConfig) mux.MiddlewareFunc {
 
 			if id != "" {
 				r.Header.Set(headerName, id)
-				w.Header().Set(headerName, id)
+				if !hideHeader {
+					w.Header().Set(headerName, id)
+				}
 				r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, id))
 			}
 

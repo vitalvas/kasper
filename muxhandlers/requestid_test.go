@@ -171,6 +171,27 @@ func TestRequestIDMiddleware(t *testing.T) {
 		assert.Equal(t, w.Header().Get("X-Request-ID"), capturedCtxID)
 	})
 
+	t.Run("hide header suppresses response but keeps request and context", func(t *testing.T) {
+		var capturedRequestHeader, capturedCtxID string
+
+		r := mux.NewRouter()
+		r.HandleFunc("/test", func(_ http.ResponseWriter, req *http.Request) {
+			capturedRequestHeader = req.Header.Get("X-Request-ID")
+			capturedCtxID = RequestIDFromContext(req.Context())
+		}).Methods(http.MethodGet)
+		r.Use(RequestIDMiddleware(RequestIDConfig{
+			HideHeader:   true,
+			GenerateFunc: func(_ *http.Request) string { return "hidden-id" },
+		}))
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/test", nil))
+
+		assert.Equal(t, "hidden-id", capturedRequestHeader)
+		assert.Equal(t, "hidden-id", capturedCtxID)
+		assert.Empty(t, w.Header().Get("X-Request-ID"), "response header is suppressed")
+	})
+
 	t.Run("empty id not in context", func(t *testing.T) {
 		var capturedCtxID string
 
