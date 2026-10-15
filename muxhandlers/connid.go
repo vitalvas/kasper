@@ -34,9 +34,12 @@ type ConnIDConfig struct {
 	ExposeHeader bool
 
 	// GenerateFunc is an optional callback returning a new unique ID for a
-	// connection. Defaults to a UUID v4. Unlike the request ID, it is
-	// invoked once per TCP connection, not once per request.
-	GenerateFunc func() string
+	// connection. It receives the connection's base context and the
+	// accepted net.Conn, allowing ID generation based on either (e.g. the
+	// remote address or a value on the base context). Defaults to a UUID
+	// v4. Unlike the request ID, it is invoked once per TCP connection,
+	// not once per request.
+	GenerateFunc func(context.Context, net.Conn) string
 }
 
 // ConnContext returns a function suitable for http.Server.ConnContext. It
@@ -53,11 +56,11 @@ type ConnIDConfig struct {
 func ConnContext(cfg ConnIDConfig) func(ctx context.Context, _ net.Conn) context.Context {
 	generate := cfg.GenerateFunc
 	if generate == nil {
-		generate = func() string { return uuid.New().String() }
+		generate = func(context.Context, net.Conn) string { return uuid.New().String() }
 	}
 
-	return func(ctx context.Context, _ net.Conn) context.Context {
-		return context.WithValue(ctx, connIDKey{}, generate())
+	return func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(ctx, connIDKey{}, generate(ctx, c))
 	}
 }
 

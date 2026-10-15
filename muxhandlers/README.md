@@ -311,7 +311,7 @@ response header. Defaults to UUID v4.
 |-------|------|-------------|
 | `HeaderName` | `string` | Response header name; defaults to `"X-Connection-ID"` |
 | `ExposeHeader` | `bool` | Write the ID to the response header; off by default (context/log only) |
-| `GenerateFunc` | `func() string` | Custom ID generator; invoked once per connection; defaults to UUID v4 |
+| `GenerateFunc` | `func(context.Context, net.Conn) string` | Custom ID generator receiving the base context and accepted connection; invoked once per connection; defaults to UUID v4 |
 
 ### ConnID Usage
 

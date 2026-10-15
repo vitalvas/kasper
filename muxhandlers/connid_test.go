@@ -3,6 +3,7 @@ package muxhandlers
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,7 +35,7 @@ func TestConnContext(t *testing.T) {
 	})
 
 	t.Run("custom generate func", func(t *testing.T) {
-		fn := ConnContext(ConnIDConfig{GenerateFunc: func() string { return "fixed" }})
+		fn := ConnContext(ConnIDConfig{GenerateFunc: func(context.Context, net.Conn) string { return "fixed" }})
 		assert.Equal(t, "fixed", ConnIDFromContext(fn(context.Background(), nil)))
 	})
 }
