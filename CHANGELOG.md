@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.0](https://github.com/vitalvas/kasper/compare/v0.27.0...v0.28.0) (2026-10-15)
+
+
+### Features
+
+* **muxhandlers:** add connection ID middleware and tracking ([67b1b49](https://github.com/vitalvas/kasper/commit/67b1b49c3025156a75f6598150e299e685ac77cd))
+* **muxhandlers:** pass context and conn to ConnID GenerateFunc ([c7167ff](https://github.com/vitalvas/kasper/commit/c7167ff74d1be3159b0f9c97f8cb2fa2cc5afa78))
+
 ## [0.27.0](https://github.com/vitalvas/kasper/compare/v0.26.0...v0.27.0) (2026-10-12)
 
 
