@@ -109,7 +109,7 @@ func (u *Upgrader) applyPingPolicy(conn *Conn) {
 			if err != nil {
 				return err
 			}
-			return conn.WriteControl(PongMessage, pong, time.Now().Add(5*time.Second))
+			return conn.WriteControl(PongMessage, pong, conn.controlDeadline())
 		})
 		return
 	}
@@ -133,7 +133,7 @@ func (u *Upgrader) applyPingPolicy(conn *Conn) {
 		if !emptyPong {
 			payload = []byte(appData)
 		}
-		return conn.WriteControl(PongMessage, payload, time.Now().Add(5*time.Second))
+		return conn.WriteControl(PongMessage, payload, conn.controlDeadline())
 	})
 }
 

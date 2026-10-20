@@ -3532,8 +3532,199 @@ func TestReadMessageReadAllError(t *testing.T) {
 
 		msgType, p, err := conn.ReadMessage()
 		assert.Error(t, err)
-		assert.Equal(t, TextMessage, msgType)
-		assert.Equal(t, []byte("hello"), p)
+		// A truncated message must not surface partial data as if complete.
+		assert.Zero(t, msgType)
+		assert.Nil(t, p)
+	})
+}
+
+func TestPing(t *testing.T) {
+	t.Run("resolves on matching pong", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
+		defer client.Close()
+
+		cConn := newConn(client, false, 0, 0) // client: masks writes
+		sConn := newConn(server, true, 0, 0)  // server: peer
+
+		// Server side: read the ping, echo its payload back as a pong.
+		go func() {
+			ft, payload, _, _, err := sConn.readFrame()
+			if err != nil || ft != PingMessage {
+				return
+			}
+			_ = sConn.WriteControl(PongMessage, payload, time.Now().Add(time.Second))
+		}()
+
+		// A concurrent reader must pump the pong on the client side.
+		go func() { _, _, _ = cConn.ReadMessage() }()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		require.NoError(t, cConn.Ping(ctx))
+	})
+
+	t.Run("honors context cancellation without pong", func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
+		defer client.Close()
+
+		cConn := newConn(client, false, 0, 0)
+
+		// Server drains the ping but never pongs.
+		go func() { _, _, _, _, _ = newConn(server, true, 0, 0).readFrame() }()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+		defer cancel()
+		err := cConn.Ping(ctx)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+func TestCloseNow(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+
+	conn := newConn(client, false, 0, 0)
+	require.NoError(t, conn.CloseNow())
+	assert.True(t, conn.IsClosed())
+	// Idempotent and safe after repeated calls.
+	require.NoError(t, conn.CloseNow())
+
+	// Underlying conn is actually closed: a write must fail.
+	_, err := client.Write([]byte("x"))
+	assert.Error(t, err)
+}
+
+func TestSetControlWriteTimeout(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	conn := newConn(client, false, 0, 0)
+	assert.Equal(t, defaultControlWriteTimeout, conn.controlWriteTimeout)
+
+	conn.SetControlWriteTimeout(20 * time.Second)
+	assert.Equal(t, 20*time.Second, conn.controlWriteTimeout)
+
+	// Zero and negative reset to the default.
+	conn.SetControlWriteTimeout(0)
+	assert.Equal(t, defaultControlWriteTimeout, conn.controlWriteTimeout)
+	conn.SetControlWriteTimeout(-time.Second)
+	assert.Equal(t, defaultControlWriteTimeout, conn.controlWriteTimeout)
+}
+
+// TestReadTruncatedFragmentedMessage verifies that a fragmented message whose
+// connection closes before the final fragment arrives is reported as an error,
+// not silently returned as a complete message.
+func TestReadTruncatedFragmentedMessage(t *testing.T) {
+	t.Run("ReadMessage on mid-message EOF", func(t *testing.T) {
+		mock := newMockConn()
+		// Non-final text fragment, then the buffer is empty -> EOF.
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hel"), false))
+
+		conn := newConn(mock, true, 0, 0)
+
+		_, data, err := conn.ReadMessage()
+		require.Error(t, err, "truncated fragmented message must not read as complete")
+		assert.NotEqual(t, []byte("hel"), data, "must not return the partial fragment as the whole message")
+	})
+
+	t.Run("NextReader io.ReadAll on mid-message EOF", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hel"), false))
+
+		conn := newConn(mock, true, 0, 0)
+
+		_, r, err := conn.NextReader()
+		require.NoError(t, err) // first frame reads fine; truncation is seen on continuation
+		_, err = io.ReadAll(r)
+		require.Error(t, err, "io.ReadAll must surface the truncation, not return io.EOF")
+	})
+}
+
+// serverCloseCode parses the close code from a server-side (unmasked) write
+// buffer. Returns -1 if no close frame was written.
+func serverCloseCode(buf *bytes.Buffer) int {
+	b := buf.Bytes()
+	if len(b) < 4 || b[0]&opcodeMask != CloseMessage {
+		return -1
+	}
+	// b[1] is the payload length (unmasked server frame), b[2:4] the code.
+	return int(b[2])<<8 | int(b[3])
+}
+
+func TestConformanceCloseOnViolation(t *testing.T) {
+	t.Run("invalid UTF-8 text sends 1007", func(t *testing.T) {
+		mock := newMockConn()
+		// 0xff is never valid UTF-8.
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte{0xff, 0xfe}, true))
+
+		conn := newConn(mock, true, 0, 0)
+		_, _, err := conn.ReadMessage()
+		require.ErrorIs(t, err, ErrInvalidUTF8)
+		assert.Equal(t, CloseInvalidFramePayloadData, serverCloseCode(mock.writeBuf))
+	})
+
+	t.Run("invalid UTF-8 in close reason sends 1007", func(t *testing.T) {
+		mock := newMockConn()
+		payload := append([]byte{byte(CloseNormalClosure >> 8), byte(CloseNormalClosure & 0xff)}, 0xff)
+		mock.readBuf.Write(buildMaskedFrame(byte(CloseMessage), payload, true))
+
+		conn := newConn(mock, true, 0, 0)
+		_, _, err := conn.NextReader()
+		require.ErrorIs(t, err, ErrInvalidUTF8)
+		assert.Equal(t, CloseInvalidFramePayloadData, serverCloseCode(mock.writeBuf))
+	})
+
+	t.Run("unexpected continuation sends 1002", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), []byte("x"), true))
+
+		conn := newConn(mock, true, 0, 0)
+		_, _, err := conn.NextReader()
+		require.ErrorIs(t, err, ErrUnexpectedContinuation)
+		assert.Equal(t, CloseProtocolError, serverCloseCode(mock.writeBuf))
+	})
+
+	t.Run("read limit sends 1009", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("hello world"), true))
+
+		conn := newConn(mock, true, 0, 0)
+		conn.SetReadLimit(3)
+		_, _, err := conn.NextReader()
+		require.ErrorIs(t, err, ErrReadLimit)
+		assert.Equal(t, CloseMessageTooBig, serverCloseCode(mock.writeBuf))
+	})
+}
+
+func TestUTF8RuneSplitAcrossFragments(t *testing.T) {
+	// A 3-byte rune split across two fragments must validate as one unit.
+	euro := []byte("€")
+	require.Len(t, euro, 3)
+
+	t.Run("valid split rune is accepted", func(t *testing.T) {
+		mock := newMockConn()
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), euro[:1], false))
+		mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), euro[1:], true))
+
+		conn := newConn(mock, true, 0, 0)
+		mt, p, err := conn.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, TextMessage, mt)
+		assert.Equal(t, euro, p)
+	})
+
+	t.Run("incomplete rune at final frame is rejected with 1007", func(t *testing.T) {
+		mock := newMockConn()
+		// Only the first 2 bytes of the 3-byte rune, marked final.
+		mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), euro[:2], true))
+
+		conn := newConn(mock, true, 0, 0)
+		_, _, err := conn.ReadMessage()
+		require.ErrorIs(t, err, ErrInvalidUTF8)
+		assert.Equal(t, CloseInvalidFramePayloadData, serverCloseCode(mock.writeBuf))
 	})
 }
 

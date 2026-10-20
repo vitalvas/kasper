@@ -142,6 +142,11 @@ const (
 	defaultWriteBufferSize     = 4096
 	defaultReadBufferSize      = 4096
 
+	// defaultControlWriteTimeout bounds how long the automatic pong, close,
+	// and ping writes wait on an unresponsive peer. Configurable via
+	// SetControlWriteTimeout.
+	defaultControlWriteTimeout = 5 * time.Second
+
 	// First byte bits (RFC 6455, section 5.2).
 	finalBit = 1 << 7 // FIN bit indicates final fragment
 	rsv1Bit  = 1 << 6 // RSV1 bit used for permessage-deflate (RFC 7692)
@@ -213,6 +218,9 @@ type Conn struct {
 	readFinal    bool
 	readCompress bool
 
+	pingMu      sync.Mutex
+	pingWaiters map[string]chan struct{}
+
 	writeMu         sync.Mutex
 	writeErr        error
 	writeBuf        []byte
@@ -224,10 +232,27 @@ type Conn struct {
 	pongHandler     func(appData string) error
 	closeHandler    func(code int, text string) error
 
-	compressionEnabled bool
-	compressionLevel   int
-	msgTypePolicy      MessageTypePolicy
-	maxFrameSize       int64
+	compressionEnabled  bool
+	compressionLevel    int
+	msgTypePolicy       MessageTypePolicy
+	maxFrameSize        int64
+	controlWriteTimeout time.Duration
+}
+
+// controlDeadline returns the deadline for an automatic control-frame write.
+func (c *Conn) controlDeadline() time.Time {
+	return time.Now().Add(c.controlWriteTimeout)
+}
+
+// SetControlWriteTimeout sets how long the automatic pong, close, and ping
+// writes wait before the deadline expires on an unresponsive peer. Zero or
+// negative resets to the default (5s). It does not affect explicit WriteControl
+// calls, which carry their own deadline.
+func (c *Conn) SetControlWriteTimeout(d time.Duration) {
+	if d <= 0 {
+		d = defaultControlWriteTimeout
+	}
+	c.controlWriteTimeout = d
 }
 
 type connConfig struct {
@@ -293,24 +318,25 @@ func newConnFromRWC(cfg connConfig) *Conn {
 	}
 
 	c := &Conn{
-		rwc:              cfg.rwc,
-		netConn:          cfg.netConn,
-		br:               br,
-		isServer:         cfg.isServer,
-		readBuf:          make([]byte, readBufferSize),
-		writeBuf:         writeBuf,
-		writePos:         maxFrameHeaderSize,
-		writeBufferPool:  cfg.writeBufferPool,
-		compressionLevel: 1,
+		rwc:                 cfg.rwc,
+		netConn:             cfg.netConn,
+		br:                  br,
+		isServer:            cfg.isServer,
+		readBuf:             make([]byte, readBufferSize),
+		writeBuf:            writeBuf,
+		writePos:            maxFrameHeaderSize,
+		writeBufferPool:     cfg.writeBufferPool,
+		compressionLevel:    1,
+		controlWriteTimeout: defaultControlWriteTimeout,
 	}
 
 	c.pingHandler = func(appData string) error {
-		return c.WriteControl(PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+		return c.WriteControl(PongMessage, []byte(appData), c.controlDeadline())
 	}
 	c.pongHandler = func(_ string) error { return nil }
 	c.closeHandler = func(code int, text string) error {
 		msg := FormatCloseMessage(code, text)
-		_ = c.WriteControl(CloseMessage, msg, time.Now().Add(5*time.Second))
+		_ = c.WriteControl(CloseMessage, msg, c.controlDeadline())
 		return nil
 	}
 
@@ -337,7 +363,7 @@ func (c *Conn) CloseWithMessage(code int, text string) error {
 
 	// Best-effort send close frame.
 	msg := FormatCloseMessage(code, text)
-	_ = c.WriteControl(CloseMessage, msg, time.Now().Add(5*time.Second))
+	_ = c.WriteControl(CloseMessage, msg, c.controlDeadline())
 
 	// Return write buffer to pool under lock.
 	c.writeMu.Lock()
@@ -348,6 +374,26 @@ func (c *Conn) CloseWithMessage(code int, text string) error {
 	c.writeMu.Unlock()
 
 	atomic.StoreInt32(&c.state, stateClosed)
+	return c.rwc.Close()
+}
+
+// CloseNow closes the underlying connection without performing the WebSocket
+// close handshake. Unlike Close, it does not send a close frame, so it never
+// blocks on a write to an unresponsive peer. Use it on error paths and in
+// defer guards where a graceful handshake is unnecessary. It is safe to call
+// concurrently and after Close.
+func (c *Conn) CloseNow() error {
+	if atomic.SwapInt32(&c.state, stateClosed) == stateClosed {
+		return nil
+	}
+
+	c.writeMu.Lock()
+	if c.writeBufferPool != nil && c.writeBuf != nil {
+		c.writeBufferPool.Put(c.writeBuf)
+		c.writeBuf = nil
+	}
+	c.writeMu.Unlock()
+
 	return c.rwc.Close()
 }
 
@@ -484,7 +530,7 @@ func (c *Conn) SetMessageTypePolicy(policy MessageTypePolicy) {
 func (c *Conn) SetPingHandler(h func(appData string) error) {
 	if h == nil {
 		h = func(appData string) error {
-			return c.WriteControl(PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+			return c.WriteControl(PongMessage, []byte(appData), c.controlDeadline())
 		}
 	}
 	c.pingHandler = h
@@ -503,7 +549,7 @@ func (c *Conn) SetCloseHandler(h func(code int, text string) error) {
 	if h == nil {
 		h = func(code int, text string) error {
 			msg := FormatCloseMessage(code, text)
-			_ = c.WriteControl(CloseMessage, msg, time.Now().Add(5*time.Second))
+			_ = c.WriteControl(CloseMessage, msg, c.controlDeadline())
 			return nil
 		}
 	}
@@ -526,6 +572,63 @@ func (c *Conn) SetCompressionLevel(level int) error {
 	}
 	c.compressionLevel = level
 	return nil
+}
+
+// Ping sends a ping frame with a unique payload and blocks until the matching
+// pong is received, the context is cancelled, or the connection is closed. It
+// measures round-trip liveness.
+//
+// A concurrent reader (ReadMessage/NextReader) must be running for the pong to
+// be processed; without one, Ping blocks until the context expires. The
+// registered pong handler still runs on the matching pong.
+func (c *Conn) Ping(ctx context.Context) error {
+	var buf [8]byte
+	if _, err := io.ReadFull(randReader, buf[:]); err != nil {
+		return err
+	}
+	payload := buf[:]
+	key := string(payload)
+
+	wait := make(chan struct{})
+	c.pingMu.Lock()
+	if c.pingWaiters == nil {
+		c.pingWaiters = make(map[string]chan struct{})
+	}
+	c.pingWaiters[key] = wait
+	c.pingMu.Unlock()
+
+	defer func() {
+		c.pingMu.Lock()
+		delete(c.pingWaiters, key)
+		c.pingMu.Unlock()
+	}()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = c.controlDeadline()
+	}
+	if err := c.WriteControl(PingMessage, payload, deadline); err != nil {
+		return err
+	}
+
+	select {
+	case <-wait:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// handlePong signals any Ping waiter matching the pong payload, then invokes
+// the registered pong handler. Called from the read path for each pong frame.
+func (c *Conn) handlePong(payload []byte) error {
+	c.pingMu.Lock()
+	if wait, ok := c.pingWaiters[string(payload)]; ok {
+		close(wait)
+		delete(c.pingWaiters, string(payload))
+	}
+	c.pingMu.Unlock()
+	return c.pongHandler(string(payload))
 }
 
 // WriteControl writes a control message with the given deadline.
@@ -621,6 +724,45 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 	}, nil
 }
 
+// protocolCloseCode maps a read-path error to the close code an endpoint must
+// send on the wire per RFC 6455, section 7.4.1 before failing the connection.
+// It returns 0 for errors that should not trigger a close frame (e.g. plain
+// transport EOF, where there is no peer left to notify).
+func protocolCloseCode(err error) int {
+	switch {
+	case errors.Is(err, ErrInvalidUTF8):
+		return CloseInvalidFramePayloadData // 1007
+	case errors.Is(err, ErrReadLimit):
+		return CloseMessageTooBig // 1009
+	case errors.Is(err, ErrReservedBits),
+		errors.Is(err, ErrInvalidOpcode),
+		errors.Is(err, ErrMaskViolation),
+		errors.Is(err, ErrFragmentedControlFrame),
+		errors.Is(err, ErrControlFramePayloadTooBig),
+		errors.Is(err, ErrUnexpectedContinuation),
+		errors.Is(err, ErrExpectedContinuation),
+		errors.Is(err, ErrInvalidClosePayload),
+		errors.Is(err, ErrInvalidCloseCode),
+		errors.Is(err, ErrPayloadLengthOverflow),
+		errors.Is(err, ErrFrameSizeExceeded):
+		return CloseProtocolError // 1002
+	default:
+		return 0
+	}
+}
+
+// failRead records err as the permanent read error and, when the error maps to
+// a protocol close code, best-effort sends the corresponding close frame so the
+// peer learns why the connection is failing (RFC 6455, section 7.4.1). It
+// returns err for convenient `return c.failRead(err)` use.
+func (c *Conn) failRead(err error) error {
+	if code := protocolCloseCode(err); code != 0 {
+		_ = c.CloseWithMessage(code, "")
+	}
+	c.readErr = err
+	return err
+}
+
 // ReadMessage reads the next message from the connection.
 // For text messages, validates UTF-8 encoding per RFC 6455, section 5.6.
 func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
@@ -631,10 +773,11 @@ func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
 	}
 	p, err = io.ReadAll(r)
 	if err != nil {
-		return messageType, p, err
-	}
-	if messageType == TextMessage && !utf8.Valid(p) {
-		return 0, nil, ErrInvalidUTF8
+		// Discard partial payload on error: a truncated or otherwise failed
+		// message must not be surfaced as if it were complete data. Text UTF-8
+		// is validated during the read (NextReader path), so invalid UTF-8
+		// already surfaces here as ErrInvalidUTF8 with a 1007 close frame sent.
+		return 0, nil, err
 	}
 	return messageType, p, err
 }
@@ -681,11 +824,7 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 	for {
 		frameType, payload, final, compressed, err := c.readFrame()
 		if err != nil {
-			if errors.Is(err, ErrFrameSizeExceeded) {
-				_ = c.CloseWithMessage(CloseProtocolError, "frame payload exceeds size limit")
-			}
-			c.readErr = err
-			return 0, nil, err
+			return 0, nil, c.failRead(err)
 		}
 
 		switch frameType {
@@ -695,7 +834,7 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 			}
 			continue
 		case PongMessage:
-			if err := c.pongHandler(string(payload)); err != nil {
+			if err := c.handlePong(payload); err != nil {
 				return 0, nil, err
 			}
 			continue
@@ -706,8 +845,11 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 				code = int(payload[0])<<8 | int(payload[1])
 				text = string(payload[2:])
 				if !isValidCloseCode(code) {
-					c.readErr = ErrInvalidCloseCode
-					return 0, nil, ErrInvalidCloseCode
+					return 0, nil, c.failRead(ErrInvalidCloseCode)
+				}
+				// RFC 6455, section 5.5.1: the close reason must be valid UTF-8.
+				if !utf8.ValidString(text) {
+					return 0, nil, c.failRead(ErrInvalidUTF8)
 				}
 			}
 			if err := c.closeHandler(code, text); err != nil {
@@ -741,11 +883,7 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 				for !final {
 					ft, p, f, _, readErr := c.readFrame()
 					if readErr != nil {
-						if errors.Is(readErr, ErrFrameSizeExceeded) {
-							_ = c.CloseWithMessage(CloseProtocolError, "frame payload exceeds size limit")
-						}
-						c.readErr = readErr
-						return 0, nil, readErr
+						return 0, nil, c.failRead(readErr)
 					}
 					// Handle control frames inline per RFC 6455, section 5.4.
 					switch ft {
@@ -755,7 +893,7 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 						}
 						continue
 					case PongMessage:
-						if err := c.pongHandler(string(p)); err != nil {
+						if err := c.handlePong(p); err != nil {
 							return 0, nil, err
 						}
 						continue
@@ -766,8 +904,10 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 							code = int(p[0])<<8 | int(p[1])
 							text = string(p[2:])
 							if !isValidCloseCode(code) {
-								c.readErr = ErrInvalidCloseCode
-								return 0, nil, ErrInvalidCloseCode
+								return 0, nil, c.failRead(ErrInvalidCloseCode)
+							}
+							if !utf8.ValidString(text) {
+								return 0, nil, c.failRead(ErrInvalidUTF8)
 							}
 						}
 						if err := c.closeHandler(code, text); err != nil {
@@ -781,12 +921,11 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 					case continuationFrame:
 						// Expected continuation frame.
 					default:
-						return 0, nil, ErrExpectedContinuation
+						return 0, nil, c.failRead(ErrExpectedContinuation)
 					}
 					c.readMsgSize += int64(len(p))
 					if c.readLimit > 0 && c.readMsgSize > c.readLimit {
-						c.readErr = ErrReadLimit
-						return 0, nil, ErrReadLimit
+						return 0, nil, c.failRead(ErrReadLimit)
 					}
 					compressedData = append(compressedData, p...)
 					final = f
@@ -797,9 +936,13 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 				payload, decErr = decompressDataLimited(compressedData, c.readLimit)
 				if decErr != nil {
 					if decErr == ErrReadLimit {
-						c.readErr = ErrReadLimit
+						return 0, nil, c.failRead(ErrReadLimit)
 					}
 					return 0, nil, decErr
+				}
+				// Fully decompressed and reassembled: validate as one unit.
+				if frameType == TextMessage && !utf8.Valid(payload) {
+					return 0, nil, c.failRead(ErrInvalidUTF8)
 				}
 				c.reader = &messageReader{
 					c:          c,
@@ -814,9 +957,12 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 				payload, decErr = decompressDataLimited(payload, c.readLimit)
 				if decErr != nil {
 					if decErr == ErrReadLimit {
-						c.readErr = ErrReadLimit
+						return 0, nil, c.failRead(ErrReadLimit)
 					}
 					return 0, nil, decErr
+				}
+				if frameType == TextMessage && !utf8.Valid(payload) {
+					return 0, nil, c.failRead(ErrInvalidUTF8)
 				}
 				c.reader = &messageReader{
 					c:          c,
@@ -825,19 +971,27 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 					compressed: false,
 				}
 			default:
-				// Uncompressed message.
-				c.reader = &messageReader{
+				// Uncompressed message: validate UTF-8 incrementally across
+				// fragments (RFC 6455, section 8.1).
+				r := &messageReader{
 					c:          c,
 					buf:        payload,
 					final:      final,
 					compressed: false,
+					isText:     frameType == TextMessage,
 				}
+				if r.isText {
+					if err := r.validateUTF8Frame(payload, final); err != nil {
+						return 0, nil, c.failRead(err)
+					}
+				}
+				c.reader = r
 			}
 			return frameType, c.reader, nil
 		case continuationFrame:
-			return 0, nil, ErrUnexpectedContinuation
+			return 0, nil, c.failRead(ErrUnexpectedContinuation)
 		default:
-			return 0, nil, ErrInvalidOpcode
+			return 0, nil, c.failRead(ErrInvalidOpcode)
 		}
 	}
 }
@@ -1170,6 +1324,42 @@ type messageReader struct {
 	pos        int
 	final      bool
 	compressed bool
+	isText     bool   // validate payload as UTF-8 (RFC 6455, section 8.1)
+	utf8Tail   []byte // bytes of an incomplete trailing rune carried across frames
+}
+
+// validateUTF8Frame checks that the text payload is valid UTF-8, tolerating a
+// multi-byte rune split across frame boundaries. It carries any incomplete
+// trailing rune into r.utf8Tail for the next frame. When final is true, a
+// leftover partial rune is itself invalid. Returns ErrInvalidUTF8 on failure.
+func (r *messageReader) validateUTF8Frame(payload []byte, final bool) error {
+	data := payload
+	if len(r.utf8Tail) > 0 {
+		// Prepend the carried partial rune (<=3 bytes) to this frame's payload.
+		data = make([]byte, 0, len(r.utf8Tail)+len(payload))
+		data = append(data, r.utf8Tail...)
+		data = append(data, payload...)
+		r.utf8Tail = nil
+	}
+	for len(data) > 0 {
+		if data[0] < utf8.RuneSelf {
+			data = data[1:]
+			continue
+		}
+		rn, size := utf8.DecodeRune(data)
+		if rn == utf8.RuneError && size == 1 {
+			// Could be an invalid byte, or a valid rune cut off at the end of
+			// this frame. If a complete rune cannot fit in the remaining bytes
+			// and this is not the final frame, carry it to the next frame.
+			if !final && !utf8.FullRune(data) {
+				r.utf8Tail = append(r.utf8Tail[:0], data...)
+				return nil
+			}
+			return ErrInvalidUTF8
+		}
+		data = data[size:]
+	}
+	return nil
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
@@ -1181,11 +1371,15 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		// Compressed fragmented messages are fully read in NextReader.
 		frameType, payload, final, _, err := r.c.readFrame()
 		if err != nil {
-			if errors.Is(err, ErrFrameSizeExceeded) {
-				_ = r.c.CloseWithMessage(CloseProtocolError, "frame payload exceeds size limit")
+			// The message is not final, so EOF here means the peer closed the
+			// connection mid-message. Report it as an unexpected EOF so callers
+			// (e.g. io.ReadAll) surface the truncation instead of treating the
+			// partial message as complete. No close frame is sent: the peer is
+			// already gone (protocolCloseCode returns 0 for it).
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
 			}
-			r.c.readErr = err
-			return 0, err
+			return 0, r.c.failRead(err)
 		}
 		// Handle control frames inline per RFC 6455, section 5.4.
 		switch frameType {
@@ -1195,7 +1389,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 			}
 			continue
 		case PongMessage:
-			if err := r.c.pongHandler(string(payload)); err != nil {
+			if err := r.c.handlePong(payload); err != nil {
 				return 0, err
 			}
 			continue
@@ -1206,8 +1400,10 @@ func (r *messageReader) Read(p []byte) (int, error) {
 				code = int(payload[0])<<8 | int(payload[1])
 				text = string(payload[2:])
 				if !isValidCloseCode(code) {
-					r.c.readErr = ErrInvalidCloseCode
-					return 0, ErrInvalidCloseCode
+					return 0, r.c.failRead(ErrInvalidCloseCode)
+				}
+				if !utf8.ValidString(text) {
+					return 0, r.c.failRead(ErrInvalidUTF8)
 				}
 			}
 			if err := r.c.closeHandler(code, text); err != nil {
@@ -1222,12 +1418,16 @@ func (r *messageReader) Read(p []byte) (int, error) {
 		case continuationFrame:
 			// Expected continuation frame.
 		default:
-			return 0, ErrExpectedContinuation
+			return 0, r.c.failRead(ErrExpectedContinuation)
 		}
 		r.c.readMsgSize += int64(len(payload))
 		if r.c.readLimit > 0 && r.c.readMsgSize > r.c.readLimit {
-			r.c.readErr = ErrReadLimit
-			return 0, ErrReadLimit
+			return 0, r.c.failRead(ErrReadLimit)
+		}
+		if r.isText {
+			if err := r.validateUTF8Frame(payload, final); err != nil {
+				return 0, r.c.failRead(err)
+			}
 		}
 		r.buf = payload
 		r.pos = 0
