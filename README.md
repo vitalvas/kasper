@@ -40,6 +40,21 @@ RFC 6455 / RFC 8441 WebSocket implementation.
 
 ---
 
+## wsmux
+
+Stream multiplexing over a single `websocket` connection.
+
+| Feature | Details |
+|---------|---------|
+| Streams | Many concurrent logical streams over one connection, blocking `Read`/`Write` per stream |
+| Roles | `NewClient`/`NewServer`; symmetric — either side may `Open` or `Accept` |
+| Stream IDs | Collision-free parity (client odd, server even) |
+| Framing | 5-byte header (`type` + stream ID); no length field (the connection frames each message) |
+| Concurrency | Single read loop owns delivery, so stream teardown never races |
+| Backpressure | Non-blocking delivery; a slow stream is reset rather than head-of-line blocking the others |
+
+---
+
 ## openapi
 
 Automatic OpenAPI v3.1.0 spec generation from mux routes via reflection and struct tags.
