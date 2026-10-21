@@ -4,11 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"io"
 	"slices"
 )
 
-var randReader io.Reader = rand.Reader
+var randReader = rand.Reader
 
 // BufferPool represents a pool of buffers for reuse.
 type BufferPool interface {

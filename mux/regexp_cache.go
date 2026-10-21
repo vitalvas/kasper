@@ -8,7 +8,7 @@ import (
 // RegexpCompileFunc is the function used to compile regular expressions.
 // It defaults to regexp.Compile but can be replaced with a custom function
 // (e.g. regexp.CompilePOSIX) for alternative regexp behavior.
-var RegexpCompileFunc func(expr string) (*regexp.Regexp, error) = regexp.Compile
+var RegexpCompileFunc = regexp.Compile
 
 // regexpCache caches compiled regular expressions by pattern string.
 // The number of unique patterns is bounded by the number of registered

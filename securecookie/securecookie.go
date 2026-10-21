@@ -286,7 +286,7 @@ func (s *SecureCookie) Decode(value string, dst any) error {
 }
 
 // cryptoRand is the random reader used by GenerateKey. Tests may override it.
-var cryptoRand io.Reader = rand.Reader
+var cryptoRand = rand.Reader
 
 // GenerateKey returns a cryptographically random key suitable for use
 // with [New]. The size must be 16 (AES-128), 24 (AES-192), or 32 (AES-256).
