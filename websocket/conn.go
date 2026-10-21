@@ -199,6 +199,34 @@ type KeepaliveOptions struct {
 	OnPong func(payload []byte)
 }
 
+// writeMutex allows control writes to honor cancellation while waiting for a
+// message writer. It must be initialized with make(writeMutex, 1).
+type writeMutex chan struct{}
+
+func (m writeMutex) Lock() { m <- struct{}{} }
+
+func (m writeMutex) Unlock() { <-m }
+
+func (m writeMutex) TryLock() bool {
+	select {
+	case m <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m writeMutex) lockContext(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case m <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return ErrWriteToClosedConnection
+	}
+}
+
 // Conn represents a WebSocket connection.
 type Conn struct {
 	rwc         io.ReadWriteCloser // underlying connection
@@ -220,8 +248,10 @@ type Conn struct {
 
 	pingMu      sync.Mutex
 	pingWaiters map[string]chan struct{}
+	pingDone    chan struct{}
+	pingErr     error
 
-	writeMu         sync.Mutex
+	writeMu         writeMutex
 	writeErr        error
 	writeBuf        []byte
 	writePos        int
@@ -328,6 +358,8 @@ func newConnFromRWC(cfg connConfig) *Conn {
 		writeBufferPool:     cfg.writeBufferPool,
 		compressionLevel:    1,
 		controlWriteTimeout: defaultControlWriteTimeout,
+		writeMu:             make(writeMutex, 1),
+		pingDone:            make(chan struct{}),
 	}
 
 	c.pingHandler = func(appData string) error {
@@ -365,16 +397,7 @@ func (c *Conn) CloseWithMessage(code int, text string) error {
 	msg := FormatCloseMessage(code, text)
 	_ = c.WriteControl(CloseMessage, msg, c.controlDeadline())
 
-	// Return write buffer to pool under lock.
-	c.writeMu.Lock()
-	if c.writeBufferPool != nil && c.writeBuf != nil {
-		c.writeBufferPool.Put(c.writeBuf)
-		c.writeBuf = nil
-	}
-	c.writeMu.Unlock()
-
-	atomic.StoreInt32(&c.state, stateClosed)
-	return c.rwc.Close()
+	return c.CloseNow()
 }
 
 // CloseNow closes the underlying connection without performing the WebSocket
@@ -387,14 +410,34 @@ func (c *Conn) CloseNow() error {
 		return nil
 	}
 
-	c.writeMu.Lock()
+	c.stopPings(ErrWriteToClosedConnection)
+	// Close the transport first to interrupt blocked I/O. An open NextWriter
+	// retains writeMu until its Close, so buffer cleanup must not wait for it.
+	err := c.rwc.Close()
+	if c.writeMu.TryLock() {
+		c.unlockWrite()
+	}
+	return err
+}
+
+// releaseWriteBuffer is called with writeMu held after the connection closes.
+func (c *Conn) releaseWriteBuffer() {
 	if c.writeBufferPool != nil && c.writeBuf != nil {
 		c.writeBufferPool.Put(c.writeBuf)
 		c.writeBuf = nil
 	}
-	c.writeMu.Unlock()
+}
 
-	return c.rwc.Close()
+func (c *Conn) unlockWrite() {
+	if c.IsClosed() {
+		c.releaseWriteBuffer()
+	}
+	c.writeMu.Unlock()
+	// Cover CloseNow setting stateClosed between the check and unlock above.
+	if c.IsClosed() && c.writeMu.TryLock() {
+		c.releaseWriteBuffer()
+		c.writeMu.Unlock()
+	}
 }
 
 // IsClosed reports whether the connection has been closed.
@@ -582,6 +625,9 @@ func (c *Conn) SetCompressionLevel(level int) error {
 // be processed; without one, Ping blocks until the context expires. The
 // registered pong handler still runs on the matching pong.
 func (c *Conn) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var buf [8]byte
 	if _, err := io.ReadFull(randReader, buf[:]); err != nil {
 		return err
@@ -591,6 +637,11 @@ func (c *Conn) Ping(ctx context.Context) error {
 
 	wait := make(chan struct{})
 	c.pingMu.Lock()
+	if c.pingErr != nil {
+		err := c.pingErr
+		c.pingMu.Unlock()
+		return err
+	}
 	if c.pingWaiters == nil {
 		c.pingWaiters = make(map[string]chan struct{})
 	}
@@ -603,11 +654,9 @@ func (c *Conn) Ping(ctx context.Context) error {
 		c.pingMu.Unlock()
 	}()
 
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = c.controlDeadline()
-	}
-	if err := c.WriteControl(PingMessage, payload, deadline); err != nil {
+	writeCtx, cancel := context.WithDeadline(ctx, c.controlDeadline())
+	defer cancel()
+	if err := c.writeControl(writeCtx, PingMessage, payload); err != nil {
 		return err
 	}
 
@@ -616,6 +665,20 @@ func (c *Conn) Ping(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-c.pingDone:
+		c.pingMu.Lock()
+		err := c.pingErr
+		c.pingMu.Unlock()
+		return err
+	}
+}
+
+func (c *Conn) stopPings(err error) {
+	c.pingMu.Lock()
+	defer c.pingMu.Unlock()
+	if c.pingErr == nil {
+		c.pingErr = err
+		close(c.pingDone)
 	}
 }
 
@@ -633,6 +696,16 @@ func (c *Conn) handlePong(payload []byte) error {
 
 // WriteControl writes a control message with the given deadline.
 func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	ctx := context.Background()
+	if !deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+	return c.writeControl(ctx, messageType, data)
+}
+
+func (c *Conn) writeControl(ctx context.Context, messageType int, data []byte) error {
 	if messageType != CloseMessage && messageType != PingMessage && messageType != PongMessage {
 		return ErrInvalidControlFrame
 	}
@@ -646,16 +719,47 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 		return ErrFrameSizeExceeded
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	done := c.pingDone
+	if messageType == CloseMessage {
+		// A permanent read error still needs to notify the peer with a close.
+		done = nil
+	}
+	if err := c.writeMu.lockContext(ctx, done); err != nil {
+		return err
+	}
+	defer c.unlockWrite()
 
 	if c.writeErr != nil {
 		return c.writeErr
 	}
+	if c.IsClosed() {
+		return ErrWriteToClosedConnection
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
+	deadline, _ := ctx.Deadline()
 	if c.netConn != nil {
 		_ = c.netConn.SetWriteDeadline(deadline)
 	}
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		if c.netConn != nil {
+			_ = c.netConn.SetWriteDeadline(time.Now())
+		} else {
+			_ = c.CloseNow()
+		}
+		close(finished)
+	})
+	defer func() {
+		if !stop() {
+			<-finished
+		}
+		if c.netConn != nil {
+			_ = c.netConn.SetWriteDeadline(time.Time{})
+		}
+	}()
 	frame := make([]byte, 2+len(data))
 	frame[0] = byte(messageType) | finalBit
 	frame[1] = byte(len(data))
@@ -673,10 +777,14 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	}
 
 	_, err := c.rwc.Write(frame)
-
-	// Clear the deadline so subsequent data writes are not affected.
-	if c.netConn != nil {
-		_ = c.netConn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		c.writeErr = err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return context.DeadlineExceeded
+		}
 	}
 
 	if messageType == CloseMessage {
@@ -692,7 +800,7 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 	}
 
 	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	defer c.unlockWrite()
 
 	if c.writeErr != nil {
 		return c.writeErr
@@ -713,8 +821,12 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 	c.writeMu.Lock()
 
 	if c.writeErr != nil {
-		c.writeMu.Unlock()
+		c.unlockWrite()
 		return nil, c.writeErr
+	}
+	if c.IsClosed() {
+		c.unlockWrite()
+		return nil, ErrWriteToClosedConnection
 	}
 
 	c.writeFrameType = messageType
@@ -756,6 +868,7 @@ func protocolCloseCode(err error) int {
 // peer learns why the connection is failing (RFC 6455, section 7.4.1). It
 // returns err for convenient `return c.failRead(err)` use.
 func (c *Conn) failRead(err error) error {
+	c.stopPings(err)
 	if code := protocolCloseCode(err); code != 0 {
 		_ = c.CloseWithMessage(code, "")
 	}
@@ -855,11 +968,11 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 			if err := c.closeHandler(code, text); err != nil {
 				return 0, nil, err
 			}
-			c.readErr = &CloseError{
+			closeErr := &CloseError{
 				Code: code,
 				Text: text,
 			}
-			return 0, nil, c.readErr
+			return 0, nil, c.failRead(closeErr)
 		case TextMessage, BinaryMessage:
 			if (c.msgTypePolicy == MessageTypePolicyBinary && frameType == TextMessage) ||
 				(c.msgTypePolicy == MessageTypePolicyText && frameType == BinaryMessage) {
@@ -913,11 +1026,11 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 						if err := c.closeHandler(code, text); err != nil {
 							return 0, nil, err
 						}
-						c.readErr = &CloseError{
+						closeErr := &CloseError{
 							Code: code,
 							Text: text,
 						}
-						return 0, nil, c.readErr
+						return 0, nil, c.failRead(closeErr)
 					case continuationFrame:
 						// Expected continuation frame.
 					default:
@@ -1210,7 +1323,7 @@ func (w *messageWriter) Close() error {
 		_, err := w.c.writeFrameWithCompress(w.c.writeFrameType, w.buf, true, true)
 		w.buf = nil
 		w.c.writeFrameType = 0
-		w.c.writeMu.Unlock()
+		w.c.unlockWrite()
 		return err
 	}
 
@@ -1218,7 +1331,7 @@ func (w *messageWriter) Close() error {
 	// written) and the FIN bit set, completing the message in one frame.
 	err := w.flushPending(true)
 	w.c.writeFrameType = 0
-	w.c.writeMu.Unlock()
+	w.c.unlockWrite()
 	return err
 }
 
@@ -1228,6 +1341,9 @@ func (w *messageWriter) Close() error {
 func (c *Conn) writeFrameWithCompress(frameType int, data []byte, final bool, compress bool) (int, error) {
 	if c.writeErr != nil {
 		return 0, c.writeErr
+	}
+	if c.IsClosed() {
+		return 0, ErrWriteToClosedConnection
 	}
 
 	originalLen := len(data)
@@ -1363,6 +1479,9 @@ func (r *messageReader) validateUTF8Frame(payload []byte, final bool) error {
 }
 
 func (r *messageReader) Read(p []byte) (int, error) {
+	if r.c.readErr != nil {
+		return 0, r.c.readErr
+	}
 	for r.pos >= len(r.buf) {
 		if r.final {
 			return 0, io.EOF
@@ -1413,8 +1532,7 @@ func (r *messageReader) Read(p []byte) (int, error) {
 				Code: code,
 				Text: text,
 			}
-			r.c.readErr = closeErr
-			return 0, closeErr
+			return 0, r.c.failRead(closeErr)
 		case continuationFrame:
 			// Expected continuation frame.
 		default:

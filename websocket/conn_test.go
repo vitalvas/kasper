@@ -4139,3 +4139,211 @@ func TestDefaultPongHandler(t *testing.T) {
 		assert.Equal(t, []byte("msg"), data)
 	})
 }
+
+type writeStartedConn struct {
+	net.Conn
+	once    sync.Once
+	started chan struct{}
+}
+
+func (c *writeStartedConn) Write(p []byte) (int, error) {
+	c.once.Do(func() { close(c.started) })
+	return c.Conn.Write(p)
+}
+
+func TestCloseNowUnblocksWriter(t *testing.T) {
+	local, peer := net.Pipe()
+	defer local.Close()
+	defer peer.Close()
+
+	tracked := &writeStartedConn{Conn: local, started: make(chan struct{})}
+	conn := newConn(tracked, true, 0, 0)
+	written := make(chan error, 1)
+	go func() { written <- conn.WriteMessage(BinaryMessage, []byte("blocked")) }()
+	<-tracked.started
+
+	closed := make(chan error, 1)
+	go func() { closed <- conn.CloseNow() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("CloseNow waited on the blocked writer")
+	}
+	select {
+	case err := <-written:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("writer did not unblock")
+	}
+}
+
+func TestCloseWithOpenWriter(t *testing.T) {
+	for _, graceful := range []bool{false, true} {
+		name := "CloseNow"
+		if graceful {
+			name = "Close"
+		}
+		t.Run(name, func(t *testing.T) {
+			local, peer := net.Pipe()
+			defer local.Close()
+			defer peer.Close()
+
+			pool := &testBufferPool{}
+			conn := newConnWithPool(local, true, 0, 0, pool)
+			conn.SetControlWriteTimeout(20 * time.Millisecond)
+			w, err := conn.NextWriter(BinaryMessage)
+			require.NoError(t, err)
+			closed := make(chan error, 1)
+			go func() {
+				if graceful {
+					closed <- conn.Close()
+				} else {
+					closed <- conn.CloseNow()
+				}
+			}()
+			select {
+			case err := <-closed:
+				require.NoError(t, err)
+			case <-time.After(time.Second):
+				_ = local.Close()
+				_ = w.Close()
+				t.Fatal("close waited on an open message writer")
+			}
+			require.Error(t, w.Close())
+			assert.Len(t, pool.buffers, 1)
+			assert.Error(t, conn.WriteMessage(BinaryMessage, nil))
+		})
+	}
+}
+
+func TestPingUnblocksOnClose(t *testing.T) {
+	for _, peerClose := range []bool{false, true} {
+		name := "local close"
+		if peerClose {
+			name = "peer close"
+		}
+		t.Run(name, func(t *testing.T) {
+			local, peer := net.Pipe()
+			defer local.Close()
+			defer peer.Close()
+
+			conn := newConn(local, false, 0, 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			errCh := make(chan error, 1)
+			go func() { errCh <- conn.Ping(ctx) }()
+			_, _, _, _, err := newConn(peer, true, 0, 0).readFrame()
+			require.NoError(t, err)
+			if peerClose {
+				require.NoError(t, peer.Close())
+				_, _, err = conn.ReadMessage()
+				require.Error(t, err)
+			} else {
+				require.NoError(t, conn.CloseNow())
+			}
+			select {
+			case err := <-errCh:
+				require.Error(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("Ping did not unblock after connection closure")
+			}
+		})
+	}
+}
+
+func TestPingCancellationDuringWrite(t *testing.T) {
+	local, peer := net.Pipe()
+	defer local.Close()
+	defer peer.Close()
+
+	tracked := &writeStartedConn{Conn: local, started: make(chan struct{})}
+	conn := newConn(tracked, true, 0, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- conn.Ping(ctx) }()
+	<-tracked.started
+	cancel()
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("Ping ignored cancellation during its write")
+	}
+}
+
+func TestPingCancellationWaitingForWriter(t *testing.T) {
+	local, peer := net.Pipe()
+	defer local.Close()
+	defer peer.Close()
+
+	conn := newConn(local, true, 0, 0)
+	w, err := conn.NextWriter(BinaryMessage)
+	require.NoError(t, err)
+	defer func() {
+		_ = local.Close()
+		_ = w.Close()
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- conn.Ping(ctx) }()
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("Ping ignored its deadline while waiting for the writer")
+	}
+}
+
+func TestPingClosedWhileWaitingForWriter(t *testing.T) {
+	local, peer := net.Pipe()
+	defer local.Close()
+	defer peer.Close()
+
+	conn := newConn(local, true, 0, 0)
+	w, err := conn.NextWriter(BinaryMessage)
+	require.NoError(t, err)
+	defer func() { _ = w.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- conn.Ping(ctx) }()
+	require.NoError(t, conn.CloseNow())
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Ping waited for the writer after connection closure")
+	}
+}
+
+func TestPingWriteUsesControlTimeout(t *testing.T) {
+	local, peer := net.Pipe()
+	defer local.Close()
+	defer peer.Close()
+
+	conn := newConn(local, true, 0, 0)
+	conn.SetControlWriteTimeout(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := conn.Ping(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.NoError(t, ctx.Err(), "the control timeout should expire before the caller's context")
+}
+
+func TestMessageReaderKeepsUTF8Error(t *testing.T) {
+	mock := newMockConn()
+	mock.readBuf.Write(buildMaskedFrame(byte(TextMessage), []byte("ok"), false))
+	mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), []byte{0xff}, false))
+	mock.readBuf.Write(buildMaskedFrame(byte(continuationFrame), []byte("later"), true))
+	conn := newConn(mock, true, 0, 0)
+	_, r, err := conn.NextReader()
+	require.NoError(t, err)
+	_, err = io.ReadAll(r)
+	require.ErrorIs(t, err, ErrInvalidUTF8)
+	data, err := io.ReadAll(r)
+	require.ErrorIs(t, err, ErrInvalidUTF8)
+	assert.Empty(t, data)
+}

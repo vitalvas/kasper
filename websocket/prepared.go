@@ -121,10 +121,13 @@ func buildFrame(messageType int, data []byte, masked bool, compressed bool) ([]b
 // WritePreparedMessage writes pm to the connection.
 func (c *Conn) WritePreparedMessage(pm *PreparedMessage) error {
 	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	defer c.unlockWrite()
 
 	if c.writeErr != nil {
 		return c.writeErr
+	}
+	if c.IsClosed() {
+		return ErrWriteToClosedConnection
 	}
 
 	key := prepareKey{
