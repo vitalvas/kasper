@@ -7,14 +7,15 @@
 // reports its length, so the payload is everything after the header. Stream
 // ids are allocated with fixed parity per side: the client (Open-initiating)
 // side uses odd ids, the server side even, so the two ends never collide.
+// Closed peer IDs are retained in at most 1024 disjoint ranges. Sequential
+// stream churn uses one range; exceeding the range limit closes the tunnel.
 //
 // Concurrency:
 //
-// A single internal goroutine owns all reads and is the sole sender to, and
-// closer of, every stream's receive channel. Stream teardown therefore never
-// races a delivery. Delivery is non-blocking: a stream whose buffer is full is
-// reset rather than allowed to stall the shared read loop, so one slow
-// consumer cannot head-of-line block the other streams.
+// A single internal goroutine owns all reads and delivers stream payloads.
+// Stream locks serialize delivery with teardown. Delivery is non-blocking:
+// a stream whose buffer is full is reset rather than allowed to stall the
+// shared read loop, so one slow consumer cannot head-of-line block the others.
 //
 // Server example:
 //

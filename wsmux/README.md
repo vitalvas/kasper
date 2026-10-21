@@ -11,7 +11,7 @@ WebSocket.
 - Many concurrent streams over one connection
 - Client/server roles with collision-free stream IDs (odd client, even server)
 - Blocking per-stream `Read`/`Write` API
-- Single read loop owns all delivery, so stream teardown never races
+- A single read loop delivers payloads; stream locks serialize delivery with teardown
 - Non-blocking delivery: one slow stream never head-of-line blocks the others
 - No per-frame size cap (the underlying connection frames each message)
 
@@ -101,11 +101,14 @@ and a client may `Accept` server-initiated streams.
 
 When a stream's buffer fills, that stream is reset with a CLOSE frame rather
 than blocking the shared read loop, so a slow consumer cannot stall the others.
+Resets are sent through a bounded queue. If that queue fills because the peer
+is not reading, the tunnel closes and all streams are torn down. Streams rejected
+because the accept backlog is full also receive a CLOSE frame.
 
 ## Concurrency
 
-A single internal goroutine owns all reads and is the sole sender to, and
-closer of, every stream's receive channel. For each stream, `Read` and `Write`
+A single internal goroutine owns all reads and delivers stream payloads.
+Stream locks serialize delivery with teardown. For each stream, `Read` and `Write`
 may be called from one goroutine each, concurrently with the other — matching
 the one-reader/one-writer model of the underlying connection.
 
@@ -114,3 +117,12 @@ the one-reader/one-writer model of the underlying connection.
 This is single-connection multiplexing: all streams share one TCP pipe and its
 ordering. It suits logically independent request/response streams, not cases
 that need the isolation of separate connections.
+
+Stream IDs are never reused within a tunnel. `Open` returns
+`ErrStreamIDExhausted` after all IDs for that role have been allocated.
+
+Closed peer IDs are remembered as ranges, so sequential stream churn uses
+constant history space. At most 1024 disjoint ranges are retained. If closing
+another stream would exceed that limit, the tunnel closes and its history is
+released. This bounds memory while still rejecting late DATA for old streams
+and allowing streams to send their first DATA out of ID order.

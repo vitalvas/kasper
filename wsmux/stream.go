@@ -15,8 +15,9 @@ type Stream struct {
 
 	recv chan []byte // inbound payloads; the Mux read loop is the sole sender
 
-	mu     sync.Mutex
-	closed bool
+	writeMu sync.Mutex // orders outgoing DATA and CLOSE frames
+	mu      sync.Mutex
+	closed  bool
 }
 
 func newStream(id uint32, mux *Mux, bufSize int) *Stream {
@@ -43,6 +44,8 @@ func (s *Stream) Read() ([]byte, error) {
 
 // Write sends a payload to the peer as a DATA frame on this stream.
 func (s *Stream) Write(data []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
@@ -55,10 +58,14 @@ func (s *Stream) Write(data []byte) error {
 // Close sends a CLOSE frame to the peer and tears down the local stream.
 // It is idempotent.
 func (s *Stream) Close() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if !s.kill() {
+		return nil
+	}
 	s.mux.removeStream(s.id)
 	// Best-effort CLOSE notification; the tunnel may already be gone.
 	_ = s.mux.writeFrame(frameClose, s.id, nil)
-	s.kill()
 	return nil
 }
 
@@ -84,12 +91,13 @@ func (s *Stream) deliver(payload []byte) bool {
 // Read returns io.EOF. Holding s.mu makes close(recv) mutually exclusive with
 // deliver's send, so there is no send-on-closed-channel race. It is
 // idempotent.
-func (s *Stream) kill() {
+func (s *Stream) kill() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return
+		return false
 	}
 	s.closed = true
 	close(s.recv)
+	return true
 }

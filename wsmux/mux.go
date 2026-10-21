@@ -15,6 +15,9 @@ const defaultStreamBuffer = 64
 // ErrClosed is returned once the Mux (and its underlying connection) is closed.
 var ErrClosed = errors.New("wsmux: closed")
 
+// ErrStreamIDExhausted is returned when all local stream IDs have been used.
+var ErrStreamIDExhausted = errors.New("wsmux: stream IDs exhausted")
+
 // messageConn is the subset of *websocket.Conn the Mux depends on, so tests
 // can substitute an in-memory tunnel.
 type messageConn interface {
@@ -28,10 +31,9 @@ var _ messageConn = (*websocket.Conn)(nil)
 
 // Mux multiplexes many logical Streams over one WebSocket connection.
 //
-// A single internal goroutine owns all reads and is the sole sender to and
-// closer of every stream's receive channel, so stream teardown never races a
-// delivery. Writes from multiple streams are serialized on a mutex, matching
-// the one-writer rule of the underlying connection.
+// A single internal goroutine owns all reads and delivers stream payloads.
+// Stream locks serialize delivery with teardown. Writes from multiple streams
+// are serialized on a mutex, matching the one-writer rule of the connection.
 type Mux struct {
 	conn      messageConn
 	bufSize   int
@@ -41,10 +43,12 @@ type Mux struct {
 
 	mu      sync.Mutex
 	streams map[uint32]*Stream
+	retired retiredIDs // bounded history; closed peer IDs must never be reopened
 	nextID  uint32
 	closed  bool
 
 	accept chan *Stream
+	resets chan uint32
 	done   chan struct{}
 }
 
@@ -83,9 +87,11 @@ func newMux(conn messageConn, opts Options, clientOdd bool) *Mux {
 		streams:   make(map[uint32]*Stream),
 		nextID:    first,
 		accept:    make(chan *Stream, 16),
+		resets:    make(chan uint32, 16),
 		done:      make(chan struct{}),
 	}
 	go m.readLoop()
+	go m.resetLoop()
 	return m
 }
 
@@ -97,8 +103,14 @@ func (m *Mux) Open() (*Stream, error) {
 	if m.closed {
 		return nil, ErrClosed
 	}
+	if m.nextID == 0 {
+		return nil, ErrStreamIDExhausted
+	}
 	id := m.nextID
 	m.nextID += 2 // preserve odd/even parity for this side
+	if m.nextID < id {
+		m.nextID = 0 // exhausted; never reuse a live or retired ID
+	}
 	s := newStream(id, m, m.bufSize)
 	m.streams[id] = s
 	return s, nil
@@ -109,6 +121,12 @@ func (m *Mux) Open() (*Stream, error) {
 func (m *Mux) Accept() (*Stream, error) {
 	select {
 	case s := <-m.accept:
+		m.mu.Lock()
+		closed := m.closed
+		m.mu.Unlock()
+		if closed {
+			return nil, ErrClosed
+		}
 		return s, nil
 	case <-m.done:
 		return nil, ErrClosed
@@ -128,6 +146,7 @@ func (m *Mux) Close() error {
 		streams = append(streams, s)
 	}
 	m.streams = make(map[uint32]*Stream)
+	m.retired = retiredIDs{}
 	close(m.done)
 	m.mu.Unlock()
 
@@ -141,7 +160,14 @@ func (m *Mux) Close() error {
 func (m *Mux) writeFrame(typ uint8, id uint32, payload []byte) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return ErrClosed
+	}
 	if err := m.conn.WriteMessage(websocket.BinaryMessage, pack(typ, id, payload)); err != nil {
+		_ = m.Close()
 		return ErrClosed
 	}
 	return nil
@@ -152,7 +178,14 @@ func (m *Mux) writeFrame(typ uint8, id uint32, payload []byte) error {
 func (m *Mux) removeStream(id uint32) {
 	m.mu.Lock()
 	delete(m.streams, id)
+	withinLimit := true
+	if !m.closed && m.peerInitiated(id) {
+		withinLimit = m.retired.add(id)
+	}
 	m.mu.Unlock()
+	if !withinLimit {
+		_ = m.Close()
+	}
 }
 
 // peerInitiated reports whether an unseen id was opened by the peer, i.e. its
@@ -162,14 +195,16 @@ func (m *Mux) peerInitiated(id uint32) bool {
 	return idOdd != m.clientOdd
 }
 
-// readLoop is the sole reader of the connection and the sole deliverer to and
-// closer of stream channels.
+// readLoop is the sole reader of the connection and deliverer to stream channels.
 func (m *Mux) readLoop() {
 	for {
-		_, msg, err := m.conn.ReadMessage()
+		messageType, msg, err := m.conn.ReadMessage()
 		if err != nil {
-			m.teardown()
+			_ = m.Close()
 			return
+		}
+		if messageType != websocket.BinaryMessage {
+			continue
 		}
 		typ, id, payload, ok := parse(msg)
 		if !ok {
@@ -180,6 +215,9 @@ func (m *Mux) readLoop() {
 }
 
 func (m *Mux) dispatch(typ uint8, id uint32, payload []byte) {
+	if id == 0 || (typ != frameData && typ != frameClose) {
+		return
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -187,10 +225,22 @@ func (m *Mux) dispatch(typ uint8, id uint32, payload []byte) {
 	}
 	s, known := m.streams[id]
 	if !known {
-		if typ != frameData || !m.peerInitiated(id) {
-			// CLOSE for an unknown stream, or a frame with a local-parity id
-			// we never opened: nothing to do.
+		if m.retired.contains(id) {
 			m.mu.Unlock()
+			return
+		}
+		if !m.peerInitiated(id) {
+			// A local-parity ID we never opened cannot create a stream.
+			m.mu.Unlock()
+			return
+		}
+		if typ == frameClose {
+			// The peer may close a lazy stream before sending its first DATA.
+			withinLimit := m.retired.add(id)
+			m.mu.Unlock()
+			if !withinLimit {
+				_ = m.Close()
+			}
 			return
 		}
 		s = newStream(id, m, m.bufSize)
@@ -204,6 +254,7 @@ func (m *Mux) dispatch(typ uint8, id uint32, payload []byte) {
 		default:
 			m.removeStream(id)
 			s.kill()
+			m.queueReset(id)
 			return
 		}
 	} else {
@@ -225,27 +276,31 @@ func (m *Mux) dispatch(typ uint8, id uint32, payload []byte) {
 		// consumer never blocks the shared read loop.
 		m.removeStream(id)
 		s.kill()
-		_ = m.writeFrame(frameClose, id, nil)
+		m.queueReset(id)
 	}
 }
 
-// teardown closes every stream after the connection fails.
-func (m *Mux) teardown() {
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return
+// queueReset never waits for network I/O on the shared read loop. If the peer
+// stops reading enough resets to fill the queue, close the tunnel so every
+// stream is notified rather than leaving the peers with inconsistent state.
+func (m *Mux) queueReset(id uint32) {
+	select {
+	case <-m.done:
+	case m.resets <- id:
+	default:
+		_ = m.Close()
 	}
-	m.closed = true
-	streams := make([]*Stream, 0, len(m.streams))
-	for _, s := range m.streams {
-		streams = append(streams, s)
-	}
-	m.streams = make(map[uint32]*Stream)
-	close(m.done)
-	m.mu.Unlock()
+}
 
-	for _, s := range streams {
-		s.kill()
+func (m *Mux) resetLoop() {
+	for {
+		select {
+		case <-m.done:
+			return
+		case id := <-m.resets:
+			if err := m.writeFrame(frameClose, id, nil); err != nil {
+				return
+			}
+		}
 	}
 }

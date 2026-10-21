@@ -5,10 +5,10 @@ import "encoding/binary"
 // Frame types for the multiplexing protocol.
 const (
 	frameData  uint8 = 1 // stream payload
-	frameClose uint8 = 2 // stream half/full close
+	frameClose uint8 = 2 // full stream close
 )
 
-// headerSize is the fixed muxr frame header: 1 type byte + 4 stream-id bytes.
+// headerSize is the fixed wsmux frame header: 1 type byte + 4 stream-id bytes.
 // No length field is carried: the underlying websocket.Conn frames each
 // message and reports its exact length, so the payload is everything after
 // the header.
