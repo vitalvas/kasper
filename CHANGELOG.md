@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.29.0](https://github.com/vitalvas/kasper/compare/v0.28.0...v0.29.0) (2026-10-21)
+
+
+### Features
+
+* **websocket:** add CloseNow, Ping, timeout option and RFC fixes ([ac73adf](https://github.com/vitalvas/kasper/commit/ac73adf76aa60a34db2d18e1d302e131bcdf5980))
+* **wsmux:** add websocket stream multiplexing ([4765f54](https://github.com/vitalvas/kasper/commit/4765f5445efac19c34b3656ce2375b21cb9bfa38))
+
+
+### Bug Fixes
+
+* **lint:** drop redundant var type annotations ([10a9763](https://github.com/vitalvas/kasper/commit/10a97637d52222247d303322f07a2f908e39ccf7))
+* **websocket:** connection closing ([1b3b06a](https://github.com/vitalvas/kasper/commit/1b3b06a7813dff6eb3d0886138248168aa291c99))
+* **wsmux:** small fixes ([743f56e](https://github.com/vitalvas/kasper/commit/743f56e5979940fb8e25f348ae5aea16466a51c4))
+
 ## [0.28.0](https://github.com/vitalvas/kasper/compare/v0.27.0...v0.28.0) (2026-10-15)
 
 
