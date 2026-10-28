@@ -83,11 +83,11 @@ type fieldMeta struct {
 type fieldKind int
 
 const (
-	fieldKindBasic         fieldKind = iota // scalar, slice of scalars, pointer
-	fieldKindStruct                         // nested struct (not TextUnmarshaler)
-	fieldKindSliceOfStruct                  // []SomeStruct
-	fieldKindMap                            // map[string]T
-	fieldKindEmbedded                       // anonymous struct, flatten to parent
+	fieldKindBasic         fieldKind = 0 // scalar, slice of scalars, pointer
+	fieldKindStruct        fieldKind = 1 // nested struct (not TextUnmarshaler)
+	fieldKindSliceOfStruct fieldKind = 2 // []SomeStruct
+	fieldKindMap           fieldKind = 3 // map[string]T
+	fieldKindEmbedded      fieldKind = 4 // anonymous struct, flatten to parent
 )
 
 // cachedField holds pre-computed metadata for a single struct field.

@@ -70,7 +70,6 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 
 	var methodMismatch bool
 
-	// Check all matchers.
 	for _, m := range r.matchers {
 		if !m.Match(req, match) {
 			if _, ok := m.(methodMatcher); ok {
@@ -85,21 +84,18 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 		}
 	}
 
-	// Check host regexp.
 	if r.regexp.host != nil {
 		if !r.regexp.host.Match(req, match) {
 			return false
 		}
 	}
 
-	// Check path regexp.
 	if r.regexp.path != nil {
 		if !r.regexp.path.Match(req, match) {
 			return false
 		}
 	}
 
-	// Check query regexps.
 	for _, q := range r.regexp.queries {
 		if !q.Match(req, match) {
 			return false
@@ -152,7 +148,6 @@ func (r *Route) Match(req *http.Request, match *RouteMatch) bool {
 	match.Handler = r.handler
 	r.regexp.setMatch(req, match, r)
 
-	// Apply buildVarsFunc if set.
 	if r.buildVarsFunc != nil {
 		match.Vars = r.buildVarsFunc(match.Vars)
 	}

@@ -13,23 +13,23 @@ import (
 // HTCPCP method tokens defined by RFC 2324 Section 2.1.1 and extended
 // for tea by RFC 7168 Section 2.1.1.
 const (
-	MethodBrew = "BREW"
-	MethodWhen = "WHEN"
+	MethodBrew string = "BREW"
+	MethodWhen string = "WHEN"
 )
 
 // StatusImATeapot is the HTCPCP status code returned when a teapot is
 // asked to brew coffee (RFC 2324 Section 2.3.2, RFC 7168 Section 2.3.3).
 // Mirrors http.StatusTeapot from the standard library for callers that
 // prefer the protocol-native name.
-const StatusImATeapot = http.StatusTeapot
+const StatusImATeapot int = http.StatusTeapot
 
 // ContentTypeMessageCoffeePot is the message/coffeepot media type
 // returned by a coffee pot to a successful BREW (RFC 2324 Section 4).
-const ContentTypeMessageCoffeePot = "message/coffeepot"
+const ContentTypeMessageCoffeePot string = "message/coffeepot"
 
 // ContentTypeMessageTeapot is the message/teapot media type returned by
 // a teapot to a successful BREW (RFC 7168 Section 2.3.1).
-const ContentTypeMessageTeapot = "message/teapot"
+const ContentTypeMessageTeapot string = "message/teapot"
 
 // PotType identifies the kind of pot the middleware represents.
 type PotType int
@@ -37,11 +37,11 @@ type PotType int
 const (
 	// PotCoffee is a coffee pot. Brews coffee; refuses tea per RFC 7168
 	// Section 2.1.1 (only teapots brew tea).
-	PotCoffee PotType = iota
+	PotCoffee PotType = 0
 
 	// PotTeapot is a teapot. Brews tea; refuses coffee with 418 per
 	// RFC 2324 Section 2.3.2 and RFC 7168 Section 2.3.3.
-	PotTeapot
+	PotTeapot PotType = 1
 )
 
 // DefaultTeaVarieties is the tea variety registry from RFC 7168

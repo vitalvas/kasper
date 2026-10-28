@@ -37,24 +37,24 @@ const (
 const (
 	// keySize is the X25519 public/private key length in bytes
 	// (RFC 7748; draft-vasylenko-e2ee-http Section 6.2).
-	keySize = 32
+	keySize int = 32
 
 	// nonceSize is the AES-GCM nonce length in bytes
 	// (draft-vasylenko-e2ee-http Section 7.2).
-	nonceSize = 12
+	nonceSize int = 12
 
 	// tagSize is the AES-GCM authentication tag length in bytes
 	// (draft-vasylenko-e2ee-http Section 7.2).
-	tagSize = 16
+	tagSize int = 16
 
 	// minBodySize is the minimum protected body length: nonce + empty
 	// ciphertext + tag. Recipients reject shorter bodies
 	// (draft-vasylenko-e2ee-http Section 7.2).
-	minBodySize = nonceSize + tagSize
+	minBodySize int = nonceSize + tagSize
 
 	// fingerprintSize is the number of leading SHA-256 bytes used as a key
 	// fingerprint (draft-vasylenko-e2ee-http Section 4.2).
-	fingerprintSize = 16
+	fingerprintSize int = 16
 )
 
 // keyLength returns the AEAD key length in bytes, or ok=false for an unknown

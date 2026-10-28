@@ -11,7 +11,7 @@ import (
 )
 
 // Default NEL report-to group name used when NELConfig.ReportTo is empty.
-const DefaultNELGroup = "nel"
+const DefaultNELGroup string = "nel"
 
 // NEL middleware configuration errors.
 var (

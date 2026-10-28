@@ -36,15 +36,15 @@ func JWKThumbprintEd25519(pub ed25519.PublicKey) (string, error) {
 }
 
 // Minimum RSA key size in bits.
-const minRSAKeyBits = 2048
+const minRSAKeyBits int = 2048
 
-const maxRSAPublicExponent = 1<<31 - 1
+const maxRSAPublicExponent int = 1<<31 - 1
 
 // ECDSA signature element sizes in bytes per RFC 9421 Sections 3.3.3 and
 // 3.3.4: r and s are each zero-padded to the curve's field size.
 const (
-	ecdsaP256ElementBytes = 32
-	ecdsaP384ElementBytes = 48
+	ecdsaP256ElementBytes int = 32
+	ecdsaP384ElementBytes int = 48
 )
 
 // ecdsaRawSign signs digest and encodes the signature as the concatenation
@@ -427,7 +427,7 @@ func (v *rsaV15Verifier) KeyID() string        { return v.keyID }
 
 // --- HMAC SHA-256 ---
 
-const minHMACKeyBytes = 32
+const minHMACKeyBytes int = 32
 
 type hmacSHA256Signer struct {
 	key   []byte

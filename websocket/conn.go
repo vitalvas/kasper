@@ -181,11 +181,11 @@ type MessageTypePolicy int
 
 const (
 	// MessageTypePolicyAny allows both text and binary frames (default).
-	MessageTypePolicyAny MessageTypePolicy = iota
+	MessageTypePolicyAny MessageTypePolicy = 0
 	// MessageTypePolicyBinary rejects text frames with CloseProtocolError.
-	MessageTypePolicyBinary
+	MessageTypePolicyBinary MessageTypePolicy = 1
 	// MessageTypePolicyText rejects binary frames with CloseProtocolError.
-	MessageTypePolicyText
+	MessageTypePolicyText MessageTypePolicy = 2
 )
 
 // KeepaliveOptions configures the behaviour of StartKeepalive.
@@ -1265,7 +1265,6 @@ func (c *Conn) readFrame() (frameType int, payload []byte, final bool, compresse
 // maskBytes applies XOR masking to data per RFC 6455, section 5.3.
 // Client-to-server frames must be masked; server-to-client frames must not.
 // The mask is a 4-byte value, applied cyclically to each byte of the payload.
-// maskBytes applies the XOR mask to data per RFC 6455, section 5.3.
 // Uses word-at-a-time XOR for performance on larger payloads.
 func maskBytes(mask []byte, pos int, data []byte) int {
 	n := len(data)

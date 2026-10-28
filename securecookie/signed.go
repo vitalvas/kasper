@@ -29,8 +29,9 @@ const hmacSize = sha256.Size
 // can give smaller cookies for some payloads after compression.
 type SignedCookie struct {
 	hashKey    []byte
-	maxAge     int
-	minAge     int
+	maxAge     int64
+	minAge     int64
+	futureSkew int64
 	maxLength  int
 	serializer Serializer
 	now        func() time.Time
@@ -51,6 +52,7 @@ func NewSigned(key []byte) (*SignedCookie, error) {
 	return &SignedCookie{
 		hashKey:    dup,
 		maxAge:     DefaultMaxAge,
+		futureSkew: DefaultFutureSkew,
 		maxLength:  DefaultMaxLength,
 		serializer: JSONSerializer{},
 		now:        time.Now,
@@ -60,7 +62,7 @@ func NewSigned(key []byte) (*SignedCookie, error) {
 // MaxAge sets the maximum age in seconds. Cookies older than this are
 // rejected during decode. Set to 0 to disable age checking.
 // Negative values are treated as 0.
-func (s *SignedCookie) MaxAge(seconds int) *SignedCookie {
+func (s *SignedCookie) MaxAge(seconds int64) *SignedCookie {
 	if s == nil {
 		return s
 	}
@@ -77,7 +79,7 @@ func (s *SignedCookie) MaxAge(seconds int) *SignedCookie {
 // MinAge sets the minimum age in seconds. Cookies newer than this are
 // rejected during decode. Default: 0 (no minimum).
 // Negative values are treated as 0.
-func (s *SignedCookie) MinAge(seconds int) *SignedCookie {
+func (s *SignedCookie) MinAge(seconds int64) *SignedCookie {
 	if s == nil {
 		return s
 	}
@@ -87,6 +89,24 @@ func (s *SignedCookie) MinAge(seconds int) *SignedCookie {
 	}
 
 	s.minAge = seconds
+
+	return s
+}
+
+// FutureSkew sets the clock-skew tolerance in seconds for future timestamps.
+// Cookies timestamped more than this far ahead of now are rejected. Set to 0
+// to reject any future timestamp. Default: [DefaultFutureSkew].
+// Negative values are treated as 0.
+func (s *SignedCookie) FutureSkew(seconds int64) *SignedCookie {
+	if s == nil {
+		return s
+	}
+
+	if seconds < 0 {
+		seconds = 0
+	}
+
+	s.futureSkew = seconds
 
 	return s
 }
@@ -214,20 +234,20 @@ func (s *SignedCookie) Decode(value string, dst any) error {
 	ts := int64(binary.BigEndian.Uint64(body[:timestampSize]))
 	now := s.now().Unix()
 
-	if ts > now+defaultFutureSkew {
+	if ts > now+s.futureSkew {
 		return ErrTimestampFuture
 	}
 
 	if s.maxAge > 0 {
 		age := now - ts
-		if age > int64(s.maxAge) {
+		if age > s.maxAge {
 			return ErrTimestampExpired
 		}
 	}
 
 	if s.minAge > 0 {
 		age := now - ts
-		if age < int64(s.minAge) {
+		if age < s.minAge {
 			return ErrTimestampTooNew
 		}
 	}
@@ -288,6 +308,3 @@ func SignedCodecsFromKeys(keys ...[]byte) ([]Codec, error) {
 
 	return codecs, nil
 }
-
-// Compile-time check that SignedCookie satisfies the Codec interface.
-var _ Codec = (*SignedCookie)(nil)

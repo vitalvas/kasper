@@ -17,7 +17,7 @@ const (
 	// per RFC 9111 Section 5.2.2.5, which instructs shared and private
 	// caches not to store any part of the response. Sufficient for any
 	// client and intermediary that respects RFC 9111.
-	NoCachePresetModern NoCachePreset = iota
+	NoCachePresetModern NoCachePreset = 0
 
 	// NoCachePresetStrict emits the legacy "no-cache combo" expected by
 	// caches and clients predating RFC 7234 / RFC 9111:
@@ -30,7 +30,7 @@ const (
 	// Pragma comes from RFC 1945; Expires: 0 is the HTTP/1.0 convention
 	// for "already expired". Use when downstream caches may be ancient
 	// or non-conformant.
-	NoCachePresetStrict
+	NoCachePresetStrict NoCachePreset = 1
 )
 
 // NoCacheConfig configures the NoCache middleware.
@@ -51,15 +51,15 @@ type NoCacheConfig struct {
 // tests can assert exact values and callers can read what the
 // middleware actually writes.
 const (
-	noCacheModernValue    = "no-store"
-	noCacheStrictValue    = "no-store, no-cache, must-revalidate, max-age=0, private"
-	noCachePragmaValue    = "no-cache"
-	noCacheExpiresEpoch   = "0"
-	noCacheHeaderControl  = "Cache-Control"
-	noCacheHeaderPragma   = "Pragma"
-	noCacheHeaderExpires  = "Expires"
-	noCacheHeaderETag     = "Etag"
-	noCacheHeaderModified = "Last-Modified"
+	noCacheModernValue    string = "no-store"
+	noCacheStrictValue    string = "no-store, no-cache, must-revalidate, max-age=0, private"
+	noCachePragmaValue    string = "no-cache"
+	noCacheExpiresEpoch   string = "0"
+	noCacheHeaderControl  string = "Cache-Control"
+	noCacheHeaderPragma   string = "Pragma"
+	noCacheHeaderExpires  string = "Expires"
+	noCacheHeaderETag     string = "Etag"
+	noCacheHeaderModified string = "Last-Modified"
 )
 
 // NoCacheMiddleware forces responses to be uncacheable. It rewrites

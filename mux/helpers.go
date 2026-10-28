@@ -114,7 +114,6 @@ func matchInArray(arr []string, value string) bool {
 // RFC 9110 Section 5.1 (header field names are case-insensitive).
 func matchMapWithString(toCheck map[string]string, toMatch map[string][]string, canonicalKey bool) bool {
 	for k, v := range toCheck {
-		// Check if key exists.
 		if canonicalKey {
 			k = http.CanonicalHeaderKey(k)
 		}

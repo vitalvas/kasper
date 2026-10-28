@@ -52,28 +52,14 @@ var randRead = rand.Read
 
 // Sentinel errors for use with ErrorHandler and errors.Is.
 var (
-	// ErrNoCookie is returned when the CSRF cookie is missing or unreadable.
-	ErrNoCookie = errors.New("csrf: cookie not present")
-	// ErrNoToken is returned when no token was submitted via the configured
-	// header or form field.
-	ErrNoToken = errors.New("csrf: token not submitted")
-	// ErrTokenMismatch is returned when the submitted token does not match
-	// the cookie token after constant-time comparison.
-	ErrTokenMismatch = errors.New("csrf: token mismatch")
-	// ErrOriginRejected is returned when the Origin header is not in the
-	// trusted origin list and does not match the request host.
-	ErrOriginRejected = errors.New("csrf: origin not trusted")
-	// ErrRefererRejected is returned when the Referer header (used as
-	// fallback when Origin is missing) is not trusted.
+	ErrNoCookie        = errors.New("csrf: cookie not present")
+	ErrNoToken         = errors.New("csrf: token not submitted")
+	ErrTokenMismatch   = errors.New("csrf: token mismatch")
+	ErrOriginRejected  = errors.New("csrf: origin not trusted")
 	ErrRefererRejected = errors.New("csrf: referer not trusted")
-	// ErrRefererMissing is returned for HTTPS requests where both Origin
-	// and Referer headers are absent. It is also returned on any scheme
-	// when Config.RequireOriginOrReferer is set and both headers are
-	// absent.
-	ErrRefererMissing = errors.New("csrf: referer missing on https request")
-	// ErrSessionMismatch is returned when Config.SessionID is set and the
-	// session bound to the CSRF cookie does not match the session of the
-	// current request.
+	// ErrRefererMissing is also returned on any scheme when
+	// Config.RequireOriginOrReferer is set and both Origin and Referer are absent.
+	ErrRefererMissing  = errors.New("csrf: referer missing on https request")
 	ErrSessionMismatch = errors.New("csrf: session mismatch")
 	// Cookie-prefix constraints (RFC 6265bis Section 4.1.3), checked at
 	// Middleware construction.

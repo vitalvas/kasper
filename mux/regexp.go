@@ -12,10 +12,10 @@ import (
 type regexpType int
 
 const (
-	regexpTypePath regexpType = iota
-	regexpTypeHost
-	regexpTypePrefix
-	regexpTypeQuery
+	regexpTypePath   regexpType = 0
+	regexpTypeHost   regexpType = 1
+	regexpTypePrefix regexpType = 2
+	regexpTypeQuery  regexpType = 3
 )
 
 // routeRegexp stores a compiled regexp and metadata about the template.
@@ -260,7 +260,7 @@ func (r *routeRegexp) matchAndValidate(input string) bool {
 // For query-type regexps, variable values are percent-encoded per
 // RFC 3986 Section 3.4.
 func (r *routeRegexp) url(values map[string]string) (string, error) {
-	urlValues := make([]interface{}, len(r.varsN))
+	urlValues := make([]any, len(r.varsN))
 	for i, name := range r.varsN {
 		v, ok := values[name]
 		if !ok {

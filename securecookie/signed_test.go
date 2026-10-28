@@ -207,7 +207,7 @@ func TestSignedMaxAge(t *testing.T) {
 	t.Run("negative clamped to 0", func(t *testing.T) {
 		s3, _ := NewSigned(testSignedKey())
 		s3.MaxAge(-1)
-		assert.Equal(t, 0, s3.maxAge)
+		assert.Equal(t, int64(0), s3.maxAge)
 	})
 }
 
@@ -236,7 +236,7 @@ func TestSignedMinAge(t *testing.T) {
 	t.Run("negative clamped", func(t *testing.T) {
 		s2, _ := NewSigned(testSignedKey())
 		s2.MinAge(-5)
-		assert.Equal(t, 0, s2.minAge)
+		assert.Equal(t, int64(0), s2.minAge)
 	})
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 // authScheme is the RFC 9577 HTTP authentication scheme name.
-const authScheme = "PrivateToken"
+const authScheme string = "PrivateToken"
 
 // HTTP header errors.
 var (

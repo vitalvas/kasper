@@ -186,73 +186,73 @@ type Header struct {
 // OpenAPIVersion is the OpenAPI specification version used by this package.
 //
 // See: https://spec.openapis.org/oas/v3.1.0
-const OpenAPIVersion = "3.1.0"
+const OpenAPIVersion string = "3.1.0"
 
 // Parameter location constants for the Parameter.In field.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#parameter-object
 const (
-	ParameterInQuery  = "query"
-	ParameterInPath   = "path"
-	ParameterInHeader = "header"
-	ParameterInCookie = "cookie"
+	ParameterInQuery  string = "query"
+	ParameterInPath   string = "path"
+	ParameterInHeader string = "header"
+	ParameterInCookie string = "cookie"
 )
 
 // Security scheme type constants for the SecurityScheme.Type field.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#security-scheme-object
 const (
-	SecurityTypeHTTP          = "http"
-	SecurityTypeAPIKey        = "apiKey"
-	SecurityTypeMutualTLS     = "mutualTLS"
-	SecurityTypeOAuth2        = "oauth2"
-	SecurityTypeOpenIDConnect = "openIdConnect"
+	SecurityTypeHTTP          string = "http"
+	SecurityTypeAPIKey        string = "apiKey"
+	SecurityTypeMutualTLS     string = "mutualTLS"
+	SecurityTypeOAuth2        string = "oauth2"
+	SecurityTypeOpenIDConnect string = "openIdConnect"
 )
 
 // Security scheme location constants for the SecurityScheme.In field.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#security-scheme-object
 const (
-	SecurityInHeader = "header"
-	SecurityInQuery  = "query"
-	SecurityInCookie = "cookie"
+	SecurityInHeader string = "header"
+	SecurityInQuery  string = "query"
+	SecurityInCookie string = "cookie"
 )
 
 // HTTP authentication scheme constants for the SecurityScheme.Scheme field.
 //
 // See: https://www.iana.org/assignments/http-authschemes
 const (
-	SchemeBearer = "bearer"
-	SchemeBasic  = "basic"
+	SchemeBearer string = "bearer"
+	SchemeBasic  string = "basic"
 )
 
 // ResponseDefault is the key used for default/catch-all responses in OpenAPI.
 //
 // See: https://spec.openapis.org/oas/v3.1.0#responses-object
-const ResponseDefault = "default"
+const ResponseDefault string = "default"
 
 // Common Format constants for JSON Schema / OpenAPI 3.1 format values.
 //
 // See: https://json-schema.org/draft/2020-12/json-schema-validation#section-7.3
 // See: https://spec.openapis.org/oas/v3.1.0#data-types
 const (
-	FormatDateTime = "date-time"
-	FormatDate     = "date"
-	FormatTime     = "time"
-	FormatDuration = "duration"
-	FormatEmail    = "email"
-	FormatHostname = "hostname"
-	FormatIPv4     = "ipv4"
-	FormatIPv6     = "ipv6"
-	FormatURI      = "uri"
-	FormatUUID     = "uuid"
-	FormatByte     = "byte"
-	FormatBinary   = "binary"
-	FormatInt32    = "int32"
-	FormatInt64    = "int64"
-	FormatFloat    = "float"
-	FormatDouble   = "double"
-	FormatPassword = "password"
+	FormatDateTime string = "date-time"
+	FormatDate     string = "date"
+	FormatTime     string = "time"
+	FormatDuration string = "duration"
+	FormatEmail    string = "email"
+	FormatHostname string = "hostname"
+	FormatIPv4     string = "ipv4"
+	FormatIPv6     string = "ipv6"
+	FormatURI      string = "uri"
+	FormatUUID     string = "uuid"
+	FormatByte     string = "byte"
+	FormatBinary   string = "binary"
+	FormatInt32    string = "int32"
+	FormatInt64    string = "int64"
+	FormatFloat    string = "float"
+	FormatDouble   string = "double"
+	FormatPassword string = "password"
 )
 
 // SchemaType represents a JSON Schema type that can be a single string

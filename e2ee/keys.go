@@ -28,15 +28,15 @@ var (
 // WellKnownPath is the well-known URI suffix where servers publish their
 // encryption key set (draft-vasylenko-e2ee-http Section 4.1; IANA registration
 // Section 10.1).
-const WellKnownPath = "/.well-known/encryption-keys"
+const WellKnownPath string = "/.well-known/encryption-keys"
 
 // maxFetchedKeySetSize bounds metadata fetched from an untrusted issuer.
 // Application payload sizes remain entirely under caller control.
-const maxFetchedKeySetSize = 1 << 20
+const maxFetchedKeySetSize int = 1 << 20
 
 // algX25519 is the only key agreement algorithm defined by this version
 // (draft-vasylenko-e2ee-http Section 4.2).
-const algX25519 = "X25519"
+const algX25519 string = "X25519"
 
 // kidPattern constrains key identifiers to 1-128 characters of the unreserved
 // set (draft-vasylenko-e2ee-http Section 4.2).
@@ -44,7 +44,7 @@ var kidPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,128}$`)
 
 // DefaultMaxSkew is the recommended maximum clock skew in seconds
 // (draft-vasylenko-e2ee-http Section 11.5).
-const DefaultMaxSkew = 300
+const DefaultMaxSkew int = 300
 
 // PublicKey is a single published key entry in a key set document, per the
 // per-key members of draft-vasylenko-e2ee-http Section 4.2. Byte fields are
@@ -484,7 +484,7 @@ func FetchKeySet(client *http.Client, issuer string) (*ClientKeySet, error) {
 		return nil, fmt.Errorf("%w: key set fetch status %d", ErrMalformed, resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchedKeySetSize+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxFetchedKeySetSize)+1))
 	if err != nil {
 		return nil, err
 	}

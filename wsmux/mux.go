@@ -26,9 +26,6 @@ type messageConn interface {
 	CloseNow() error
 }
 
-// *websocket.Conn must satisfy messageConn.
-var _ messageConn = (*websocket.Conn)(nil)
-
 // Mux multiplexes many logical Streams over one WebSocket connection.
 //
 // A single internal goroutine owns all reads and delivers stream payloads.

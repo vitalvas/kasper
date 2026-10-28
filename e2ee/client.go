@@ -34,11 +34,11 @@ func NewSession() (*Session, error) {
 
 // SessionHeader is the HTTP field carrying E2EE control metadata
 // (draft-vasylenko-e2ee-http Section 8; IANA registration Section 10.3).
-const SessionHeader = "E2EE-Session"
+const SessionHeader string = "E2EE-Session"
 
 // MediaType is the media type of a protected (ciphertext) payload
 // (draft-vasylenko-e2ee-http Section 7.1; IANA registration Section 10.2).
-const MediaType = "application/e2ee"
+const MediaType string = "application/e2ee"
 
 // ClientConfig configures request encryption and response decryption.
 type ClientConfig struct {

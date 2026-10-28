@@ -15,7 +15,7 @@ import (
 
 // SchemaDisabled is the sentinel value for JSONFilename or YAMLFilename
 // that disables the corresponding spec endpoint.
-const SchemaDisabled = "-"
+const SchemaDisabled string = "-"
 
 // DocsUI selects which interactive documentation UI to serve.
 // The UI renders the OpenAPI Document as interactive HTML documentation.
@@ -25,11 +25,11 @@ type DocsUI int
 
 const (
 	// DocsSwaggerUI serves the Swagger UI documentation renderer (default).
-	DocsSwaggerUI DocsUI = iota
+	DocsSwaggerUI DocsUI = 0
 	// DocsRapiDoc serves the RapiDoc documentation renderer.
-	DocsRapiDoc
+	DocsRapiDoc DocsUI = 1
 	// DocsRedoc serves the Redoc documentation renderer.
-	DocsRedoc
+	DocsRedoc DocsUI = 2
 )
 
 // HandleConfig configures the endpoints registered by Handle.

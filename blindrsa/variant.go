@@ -24,7 +24,7 @@ const (
 )
 
 // sha384Size is the output size of SHA-384 in bytes.
-const sha384Size = 48
+const sha384Size int = 48
 
 // String returns the variant name as defined in RFC 9474.
 func (v Variant) String() string {

@@ -22,7 +22,7 @@ var ErrNoIdempotencyStore = errors.New("idempotency: Store must be set")
 // in route metadata to bypass the middleware.
 //
 //	r.HandleFunc("/health", handler).Metadata(muxhandlers.IdempotencySkipMetadataKey, true)
-const IdempotencySkipMetadataKey = "idempotency:skip"
+const IdempotencySkipMetadataKey string = "idempotency:skip"
 
 // IdempotencyLocker is an optional interface for distributed locking of
 // in-flight requests. When a lock cannot be acquired (another request
@@ -188,7 +188,7 @@ type idempotencyResponse struct {
 	Fingerprint string      `json:"fingerprint,omitempty"`
 }
 
-const defaultKeyMaxLength = 64
+const defaultKeyMaxLength int = 64
 
 // idempotencyWriteError writes an error response using the custom ErrorHandler
 // if set, otherwise falls back to http.Error.

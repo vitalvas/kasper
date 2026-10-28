@@ -205,7 +205,6 @@ func (g *SchemaGenerator) generateType(t reflect.Type) *Schema {
 	if t.Kind() == reflect.Struct && t != reflect.TypeFor[time.Time]() && g.fieldTag == "" {
 		name := g.schemaName(t)
 		if name != "" {
-			// Generate the schema if not already visited.
 			if !g.visited[t] {
 				g.visited[t] = true
 				schema := g.generateStructSchema(t)
@@ -387,7 +386,6 @@ func (g *SchemaGenerator) collectFields(t reflect.Type, schema *Schema, allOptio
 	for i := range t.NumField() {
 		field := t.Field(i)
 
-		// Skip unexported fields.
 		if !field.IsExported() {
 			continue
 		}

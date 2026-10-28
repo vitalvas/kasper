@@ -9,20 +9,20 @@ import (
 
 // Derived component identifiers per RFC 9421 Section 2.2.
 const (
-	ComponentMethod        = "@method"
-	ComponentAuthority     = "@authority"
-	ComponentPath          = "@path"
-	ComponentQuery         = "@query"
-	ComponentTargetURI     = "@target-uri"
-	ComponentScheme        = "@scheme"
-	ComponentRequestTarget = "@request-target"
-	ComponentStatus        = "@status"
+	ComponentMethod        string = "@method"
+	ComponentAuthority     string = "@authority"
+	ComponentPath          string = "@path"
+	ComponentQuery         string = "@query"
+	ComponentTargetURI     string = "@target-uri"
+	ComponentScheme        string = "@scheme"
+	ComponentRequestTarget string = "@request-target"
+	ComponentStatus        string = "@status"
 )
 
 // reqSuffix marks a covered component that resolves against the originating
 // request when signing or verifying a response (RFC 9421 Section 2.4), for
 // example "@authority;req" or "content-digest;req".
-const reqSuffix = ";req"
+const reqSuffix string = ";req"
 
 // sigMessage is the HTTP message whose components are signed or verified: a
 // request alone, or a response paired with its originating request.

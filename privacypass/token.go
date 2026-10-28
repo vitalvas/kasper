@@ -11,13 +11,13 @@ const TokenType uint16 = 0x0002
 
 // Fixed field sizes per RFC 9578.
 const (
-	nonceSize    = 32  // Token.nonce
-	digestSize   = 32  // challenge_digest (SHA-256)
-	keyIDSize    = 32  // token_key_id (SHA-256)
-	authSize     = 256 // authenticator / blinded_msg / blind_sig (Nk, RSA-2048)
-	tokenInputSz = 2 + nonceSize + digestSize + keyIDSize
-	tokenSize    = 2 + nonceSize + digestSize + keyIDSize + authSize // 354
-	requestSize  = 2 + 1 + authSize                                  // 259
+	nonceSize    int = 32  // Token.nonce
+	digestSize   int = 32  // challenge_digest (SHA-256)
+	keyIDSize    int = 32  // token_key_id (SHA-256)
+	authSize     int = 256 // authenticator / blinded_msg / blind_sig (Nk, RSA-2048)
+	tokenInputSz int = 2 + nonceSize + digestSize + keyIDSize
+	tokenSize    int = 2 + nonceSize + digestSize + keyIDSize + authSize // 354
+	requestSize  int = 2 + 1 + authSize                                  // 259
 )
 
 // Sentinel errors for malformed wire data.

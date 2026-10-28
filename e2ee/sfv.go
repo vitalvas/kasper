@@ -12,11 +12,11 @@ import (
 // AAD must serialize parameters in a fixed, well-known order. Both peers
 // serialize in this order regardless of receive order.
 const (
-	paramAEAD = "aead" // String, required (request and response)
-	paramEPK  = "epk"  // Byte Sequence, required in request, prohibited in response
-	paramTS   = "ts"   // Integer, required (Unix timestamp)
-	paramNID  = "nid"  // String, required (per-message replay identifier)
-	paramCTY  = "cty"  // String, optional (inner plaintext media type)
+	paramAEAD string = "aead" // String, required (request and response)
+	paramEPK  string = "epk"  // Byte Sequence, required in request, prohibited in response
+	paramTS   string = "ts"   // Integer, required (Unix timestamp)
+	paramNID  string = "nid"  // String, required (per-message replay identifier)
+	paramCTY  string = "cty"  // String, optional (inner plaintext media type)
 )
 
 // canonicalParamOrder is the fixed ordering used when serializing the

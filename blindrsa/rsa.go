@@ -12,11 +12,11 @@ import (
 
 const (
 	// minRSAKeyBits is the minimum allowed RSA key size.
-	minRSAKeyBits = 2048
+	minRSAKeyBits int = 2048
 
 	// minRSAPublicExponent is the minimum allowed RSA public exponent
 	// per FIPS 186-5 as referenced by RFC 9474 Section 6.2.
-	minRSAPublicExponent = 65537
+	minRSAPublicExponent int = 65537
 )
 
 var bigOne = big.NewInt(1)

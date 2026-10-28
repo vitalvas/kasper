@@ -9,7 +9,7 @@ import (
 	"go.vitalvas.com/kasper/mux"
 )
 
-const defaultHeaderName = "Blind-Signature"
+const defaultHeaderName string = "Blind-Signature"
 
 // MiddlewareConfig configures the blind signature verification middleware.
 type MiddlewareConfig struct {

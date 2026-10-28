@@ -181,10 +181,8 @@ func CORSMiddleware(r *mux.Router, cfg CORSConfig) (mux.MiddlewareFunc, error) {
 	hasSpecificOrigins := !cfg.hasWildcardOrigin() &&
 		(len(exactOrigins) > 0 || len(wildcardPatterns) > 0 || cfg.AllowOriginFunc != nil)
 
-	// Feature 6: Check for AllowedHeaders wildcard.
 	headersWildcard := slices.Contains(cfg.AllowedHeaders, "*")
 
-	// Feature 4: Resolve preflight status code.
 	preflightStatus := cfg.OptionsStatusCode
 	if preflightStatus == 0 {
 		preflightStatus = http.StatusNoContent
@@ -223,7 +221,7 @@ func CORSMiddleware(r *mux.Router, cfg CORSConfig) (mux.MiddlewareFunc, error) {
 			rawOrigin := req.Header.Get("Origin")
 
 			if rawOrigin == "" {
-				// Feature 7: Vary on non-CORS requests with specific origins.
+				// Vary on non-CORS requests with specific origins.
 				if hasSpecificOrigins {
 					w.Header().Add("Vary", "Origin")
 				}
@@ -250,7 +248,6 @@ func CORSMiddleware(r *mux.Router, cfg CORSConfig) (mux.MiddlewareFunc, error) {
 					writeStatus:     !cfg.OptionsPassthrough,
 				})
 
-				// Feature 5: OptionsPassthrough forwards to next handler.
 				if cfg.OptionsPassthrough {
 					next.ServeHTTP(w, req)
 				}

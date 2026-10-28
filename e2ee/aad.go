@@ -6,8 +6,8 @@ package e2ee
 // re-serialized E2EE-Session field(s) (RFC 9651), binding kid, aead, epk, ts,
 // and nid to the ciphertext.
 const (
-	aadReqPrefix = "e2ee/v1:req "
-	aadResPrefix = "e2ee/v1:res "
+	aadReqPrefix string = "e2ee/v1:req "
+	aadResPrefix string = "e2ee/v1:res "
 )
 
 // requestAAD builds the request AAD per draft-vasylenko-e2ee-http Section 7.4:

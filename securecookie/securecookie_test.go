@@ -433,6 +433,45 @@ func TestFutureTimestamp(t *testing.T) {
 		err = sc.Decode(encoded, &dst)
 		assert.ErrorIs(t, err, ErrTimestampFuture)
 	})
+
+	t.Run("custom tighter skew rejects within-default timestamp", func(t *testing.T) {
+		sc.FutureSkew(30) // 30s tolerance, tighter than the 5m default
+
+		// Encode at now+1m (accepted by default, rejected by 30s skew).
+		sc.now = func() time.Time { return now.Add(time.Minute) }
+		encoded, err := sc.Encode("data")
+		require.NoError(t, err)
+
+		sc.now = func() time.Time { return now }
+		var dst string
+		err = sc.Decode(encoded, &dst)
+		assert.ErrorIs(t, err, ErrTimestampFuture)
+
+		sc.FutureSkew(DefaultFutureSkew) // restore
+	})
+
+	t.Run("custom wider skew accepts beyond-default timestamp", func(t *testing.T) {
+		sc.FutureSkew(30 * 60) // 30m tolerance, wider than the 5m default
+
+		// Encode at now+10m (rejected by default, accepted by 30m skew).
+		sc.now = func() time.Time { return now.Add(10 * time.Minute) }
+		encoded, err := sc.Encode("data")
+		require.NoError(t, err)
+
+		sc.now = func() time.Time { return now }
+		var dst string
+		err = sc.Decode(encoded, &dst)
+		require.NoError(t, err)
+		assert.Equal(t, "data", dst)
+
+		sc.FutureSkew(DefaultFutureSkew) // restore
+	})
+
+	t.Run("negative skew treated as zero", func(t *testing.T) {
+		sc.FutureSkew(-1)
+		assert.Equal(t, int64(0), sc.futureSkew)
+		sc.FutureSkew(DefaultFutureSkew) // restore
+	})
 }
 
 func TestMinAge(t *testing.T) {
@@ -822,8 +861,8 @@ func TestBuilderChaining(t *testing.T) {
 
 	result := sc.MaxAge(3600).MinAge(10).MaxLength(8192).SetSerializer(JSONSerializer{})
 	assert.Same(t, sc, result)
-	assert.Equal(t, 3600, sc.maxAge)
-	assert.Equal(t, 10, sc.minAge)
+	assert.Equal(t, int64(3600), sc.maxAge)
+	assert.Equal(t, int64(10), sc.minAge)
 	assert.Equal(t, 8192, sc.maxLength)
 }
 
@@ -833,12 +872,12 @@ func TestNegativeValues(t *testing.T) {
 
 	t.Run("negative MaxAge treated as 0", func(t *testing.T) {
 		sc.MaxAge(-5)
-		assert.Equal(t, 0, sc.maxAge)
+		assert.Equal(t, int64(0), sc.maxAge)
 	})
 
 	t.Run("negative MinAge treated as 0", func(t *testing.T) {
 		sc.MinAge(-10)
-		assert.Equal(t, 0, sc.minAge)
+		assert.Equal(t, int64(0), sc.minAge)
 	})
 
 	t.Run("negative MaxLength treated as 0", func(t *testing.T) {

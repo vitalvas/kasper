@@ -20,22 +20,22 @@ type Kind int
 
 // Bare item kinds per RFC 9651 Section 3.3.
 const (
-	KindInteger Kind = iota
-	KindDecimal
-	KindString
-	KindToken
-	KindByteSequence
-	KindBoolean
-	KindDate
-	KindDisplayString
+	KindInteger       Kind = 0
+	KindDecimal       Kind = 1
+	KindString        Kind = 2
+	KindToken         Kind = 3
+	KindByteSequence  Kind = 4
+	KindBoolean       Kind = 5
+	KindDate          Kind = 6
+	KindDisplayString Kind = 7
 )
 
 // Limits from RFC 9651 Section 3.3.1 and 3.3.2.
 const (
-	maxIntegerDigits = 15
-	maxDecimalIntDig = 12
-	minInteger       = -999999999999999
-	maxInteger       = 999999999999999
+	maxIntegerDigits int   = 15
+	maxDecimalIntDig int   = 12
+	minInteger       int64 = -999999999999999
+	maxInteger       int64 = 999999999999999
 )
 
 // BareItem is a single typed value: Integer, Decimal, String, Token, Byte

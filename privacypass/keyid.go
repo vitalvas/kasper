@@ -20,7 +20,7 @@ var (
 var ErrInvalidPublicKey = errors.New("privacypass: invalid RSA-2048 public key")
 
 // saltLength is the PSS salt length in bytes for token type 0x0002.
-const saltLength = 48
+const saltLength int = 48
 
 // pssParams is the DER structure of RSASSA-PSS-params (RFC 4055 Section 3.1)
 // with explicit hash, mask generation, and salt-length fields.

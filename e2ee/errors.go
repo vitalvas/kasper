@@ -14,26 +14,15 @@ import (
 // Server-side they are translated into RFC 9457 Problem Details responses by
 // ProblemFromError.
 var (
-	// ErrKeyUnknown is returned when the requested kid is not recognized.
 	ErrKeyUnknown = errors.New("e2ee: key unknown")
-
-	// ErrKeyExpired is returned when the key is outside its validity window.
 	ErrKeyExpired = errors.New("e2ee: key expired")
-
 	// ErrAEADUnsupported is returned when the requested AEAD is not advertised
 	// for the resolved kid.
 	ErrAEADUnsupported = errors.New("e2ee: aead unsupported")
-
 	// ErrDecryptFailed is returned when AES-GCM authentication fails.
-	ErrDecryptFailed = errors.New("e2ee: decrypt failed")
-
-	// ErrTimestampSkew is returned when the message timestamp is outside the
-	// acceptable window.
-	ErrTimestampSkew = errors.New("e2ee: timestamp skew")
-
-	// ErrReplayDetected is returned when the nid was already processed.
+	ErrDecryptFailed  = errors.New("e2ee: decrypt failed")
+	ErrTimestampSkew  = errors.New("e2ee: timestamp skew")
 	ErrReplayDetected = errors.New("e2ee: replay detected")
-
 	// ErrMalformed is returned when the E2EE-Session field or message body
 	// fails parsing or structural validation.
 	ErrMalformed = errors.New("e2ee: malformed")
@@ -45,21 +34,14 @@ var (
 	// ErrInvalidKey is returned when key material is invalid (wrong length,
 	// nil, or not on the expected curve).
 	ErrInvalidKey = errors.New("e2ee: invalid key material")
-
-	// ErrNoKeys is returned when a key set contains no usable keys.
-	ErrNoKeys = errors.New("e2ee: no keys")
-
-	// ErrNoKeySet is returned when a client is configured without a key set
-	// source.
-	ErrNoKeySet = errors.New("e2ee: no key set")
-
+	ErrNoKeys     = errors.New("e2ee: no keys")
+	ErrNoKeySet   = errors.New("e2ee: no key set")
 	// ErrNoReplayCache is returned by request decryption when the server is
 	// configured without a replay cache. It signals a server misconfiguration
 	// (like ErrNoKeySet) rather than a client protocol error; Middleware
 	// installs a cache automatically, so it only affects direct DecryptRequest
 	// callers that did not set ServerConfig.Replay.
 	ErrNoReplayCache = errors.New("e2ee: no replay cache")
-
 	// ErrInvalidState is returned when a response encryptor or decryptor was
 	// not created by a successful request operation.
 	ErrInvalidState = errors.New("e2ee: invalid response state")

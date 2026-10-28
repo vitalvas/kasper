@@ -10,7 +10,7 @@ import (
 )
 
 // nonceSize is the number of random bytes used to generate a nonce.
-const nonceSize = 16
+const nonceSize int = 16
 
 // defaultCoveredComponents are the default components signed when
 // SignConfig.CoveredComponents is empty.

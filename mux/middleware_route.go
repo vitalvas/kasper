@@ -16,78 +16,74 @@ type MiddlewareRoute struct {
 	middlewares []MiddlewareFunc
 }
 
-// newRoute creates a new route on the parent router and applies stored middleware.
-func (mr *MiddlewareRoute) newRoute() *Route {
+// NewRoute creates an empty route on the parent router with the stored
+// middleware applied.
+func (mr *MiddlewareRoute) NewRoute() *Route {
 	route := mr.router.NewRoute()
 	route.Use(mr.middlewares...)
 	return route
 }
 
-// NewRoute creates an empty route with the stored middleware applied.
-func (mr *MiddlewareRoute) NewRoute() *Route {
-	return mr.newRoute()
-}
-
 // Handle registers a new route with a matcher for the URL path and handler.
 func (mr *MiddlewareRoute) Handle(path string, handler http.Handler) *Route {
-	return mr.newRoute().Path(path).Handler(handler)
+	return mr.NewRoute().Path(path).Handler(handler)
 }
 
 // HandleFunc registers a new route with a matcher for the URL path and
 // handler function.
 func (mr *MiddlewareRoute) HandleFunc(path string, f func(http.ResponseWriter, *http.Request)) *Route {
-	return mr.newRoute().Path(path).HandlerFunc(f)
+	return mr.NewRoute().Path(path).HandlerFunc(f)
 }
 
 // Path registers a new route with a matcher for the URL path.
 func (mr *MiddlewareRoute) Path(tpl string) *Route {
-	return mr.newRoute().Path(tpl)
+	return mr.NewRoute().Path(tpl)
 }
 
 // PathPrefix registers a new route with a matcher for the URL path prefix.
 func (mr *MiddlewareRoute) PathPrefix(tpl string) *Route {
-	return mr.newRoute().PathPrefix(tpl)
+	return mr.NewRoute().PathPrefix(tpl)
 }
 
 // Host registers a new route with a matcher for the URL host.
 func (mr *MiddlewareRoute) Host(tpl string) *Route {
-	return mr.newRoute().Host(tpl)
+	return mr.NewRoute().Host(tpl)
 }
 
 // Methods registers a new route with a matcher for HTTP methods.
 func (mr *MiddlewareRoute) Methods(methods ...string) *Route {
-	return mr.newRoute().Methods(methods...)
+	return mr.NewRoute().Methods(methods...)
 }
 
 // Headers registers a new route with a matcher for request header values.
 func (mr *MiddlewareRoute) Headers(pairs ...string) *Route {
-	return mr.newRoute().Headers(pairs...)
+	return mr.NewRoute().Headers(pairs...)
 }
 
 // HeadersRegexp registers a new route with a matcher for request header
 // values using regexps.
 func (mr *MiddlewareRoute) HeadersRegexp(pairs ...string) *Route {
-	return mr.newRoute().HeadersRegexp(pairs...)
+	return mr.NewRoute().HeadersRegexp(pairs...)
 }
 
 // Queries registers a new route with a matcher for URL query values.
 func (mr *MiddlewareRoute) Queries(pairs ...string) *Route {
-	return mr.newRoute().Queries(pairs...)
+	return mr.NewRoute().Queries(pairs...)
 }
 
 // Schemes registers a new route with a matcher for URL schemes.
 func (mr *MiddlewareRoute) Schemes(schemes ...string) *Route {
-	return mr.newRoute().Schemes(schemes...)
+	return mr.NewRoute().Schemes(schemes...)
 }
 
 // MatcherFunc registers a new route with a custom matcher function.
 func (mr *MiddlewareRoute) MatcherFunc(f MatcherFunc) *Route {
-	return mr.newRoute().MatcherFunc(f)
+	return mr.NewRoute().MatcherFunc(f)
 }
 
 // Name registers a new route with the given name.
 func (mr *MiddlewareRoute) Name(name string) *Route {
-	return mr.newRoute().Name(name)
+	return mr.NewRoute().Name(name)
 }
 
 // Route creates a subrouter with the given path prefix, applies the stored

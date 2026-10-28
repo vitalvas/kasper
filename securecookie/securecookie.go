@@ -19,6 +19,11 @@ const (
 	// DefaultMaxLength is the default maximum encoded cookie length in bytes.
 	DefaultMaxLength = 4096
 
+	// DefaultFutureSkew is the default clock-skew tolerance in seconds for
+	// future timestamps. Cookies timestamped more than this far ahead of now
+	// are rejected.
+	DefaultFutureSkew int64 = 5 * 60
+
 	// maxDecompressSize is the maximum allowed decompressed payload size.
 	// This prevents a small compressed cookie from expanding into an
 	// arbitrarily large plaintext (zip-bomb defense).
@@ -26,11 +31,6 @@ const (
 
 	// timestampSize is the size of the Unix timestamp prefix in bytes.
 	timestampSize = 8
-
-	// defaultFutureSkew is the maximum allowed clock skew for future
-	// timestamps, in seconds. Cookies with timestamps more than this
-	// far in the future are rejected.
-	defaultFutureSkew = 5 * 60
 
 	// Payload compression prefix bytes.
 	prefixRaw      = 0x00
@@ -47,8 +47,9 @@ type Codec interface {
 // using AES-GCM (AES-128, AES-192, or AES-256 depending on key size).
 type SecureCookie struct {
 	gcm        cipher.AEAD
-	maxAge     int
-	minAge     int
+	maxAge     int64
+	minAge     int64
+	futureSkew int64
 	maxLength  int
 	serializer Serializer
 	now        func() time.Time
@@ -81,6 +82,7 @@ func New(key []byte) (*SecureCookie, error) {
 	return &SecureCookie{
 		gcm:        gcm,
 		maxAge:     DefaultMaxAge,
+		futureSkew: DefaultFutureSkew,
 		maxLength:  DefaultMaxLength,
 		serializer: JSONSerializer{},
 		now:        time.Now,
@@ -91,7 +93,7 @@ func New(key []byte) (*SecureCookie, error) {
 // MaxAge sets the maximum age in seconds. Cookies older than this are
 // rejected during decode. Set to 0 to disable age checking.
 // Negative values are treated as 0.
-func (s *SecureCookie) MaxAge(seconds int) *SecureCookie {
+func (s *SecureCookie) MaxAge(seconds int64) *SecureCookie {
 	if s == nil {
 		return s
 	}
@@ -108,7 +110,7 @@ func (s *SecureCookie) MaxAge(seconds int) *SecureCookie {
 // MinAge sets the minimum age in seconds. Cookies newer than this are
 // rejected during decode. Default: 0 (no minimum).
 // Negative values are treated as 0.
-func (s *SecureCookie) MinAge(seconds int) *SecureCookie {
+func (s *SecureCookie) MinAge(seconds int64) *SecureCookie {
 	if s == nil {
 		return s
 	}
@@ -118,6 +120,24 @@ func (s *SecureCookie) MinAge(seconds int) *SecureCookie {
 	}
 
 	s.minAge = seconds
+
+	return s
+}
+
+// FutureSkew sets the clock-skew tolerance in seconds for future timestamps.
+// Cookies timestamped more than this far ahead of now are rejected. Set to 0
+// to reject any future timestamp. Default: [DefaultFutureSkew].
+// Negative values are treated as 0.
+func (s *SecureCookie) FutureSkew(seconds int64) *SecureCookie {
+	if s == nil {
+		return s
+	}
+
+	if seconds < 0 {
+		seconds = 0
+	}
+
+	s.futureSkew = seconds
 
 	return s
 }
@@ -255,20 +275,20 @@ func (s *SecureCookie) Decode(value string, dst any) error {
 	now := s.now().Unix()
 
 	// Reject cookies with timestamps in the future (beyond clock skew tolerance).
-	if ts > now+defaultFutureSkew {
+	if ts > now+s.futureSkew {
 		return ErrTimestampFuture
 	}
 
 	if s.maxAge > 0 {
 		age := now - ts
-		if age > int64(s.maxAge) {
+		if age > s.maxAge {
 			return ErrTimestampExpired
 		}
 	}
 
 	if s.minAge > 0 {
 		age := now - ts
-		if age < int64(s.minAge) {
+		if age < s.minAge {
 			return ErrTimestampTooNew
 		}
 	}

@@ -9,7 +9,7 @@ import (
 	"go.vitalvas.com/kasper/mux"
 )
 
-const defaultMaxBodySize = 4096
+const defaultMaxBodySize int = 4096
 
 // IssuerConfig configures the server-side blind signature issuance handler.
 type IssuerConfig struct {
