@@ -550,6 +550,10 @@ func TestNilReceiver(t *testing.T) {
 		assert.Nil(t, sc.MinAge(10))
 	})
 
+	t.Run("FutureSkew", func(t *testing.T) {
+		assert.Nil(t, sc.FutureSkew(10))
+	})
+
 	t.Run("MaxLength", func(t *testing.T) {
 		assert.Nil(t, sc.MaxLength(100))
 	})

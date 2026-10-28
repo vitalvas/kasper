@@ -255,6 +255,49 @@ func TestSignedFutureTimestamp(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTimestampFuture)
 }
 
+func TestSignedFutureSkew(t *testing.T) {
+	s, _ := NewSigned(testSignedKey())
+	now := time.Now()
+	s.MaxAge(0) // disable max age to isolate future check
+
+	t.Run("custom tighter skew rejects within-default timestamp", func(t *testing.T) {
+		s.FutureSkew(30) // 30s tolerance, tighter than the 5m default
+
+		s.now = func() time.Time { return now.Add(time.Minute) }
+		encoded, err := s.Encode("v")
+		require.NoError(t, err)
+
+		s.now = func() time.Time { return now }
+		var got string
+		err = s.Decode(encoded, &got)
+		assert.ErrorIs(t, err, ErrTimestampFuture)
+
+		s.FutureSkew(DefaultFutureSkew) // restore
+	})
+
+	t.Run("custom wider skew accepts beyond-default timestamp", func(t *testing.T) {
+		s.FutureSkew(30 * 60) // 30m tolerance, wider than the 5m default
+
+		s.now = func() time.Time { return now.Add(10 * time.Minute) }
+		encoded, err := s.Encode("v")
+		require.NoError(t, err)
+
+		s.now = func() time.Time { return now }
+		var got string
+		err = s.Decode(encoded, &got)
+		require.NoError(t, err)
+		assert.Equal(t, "v", got)
+
+		s.FutureSkew(DefaultFutureSkew) // restore
+	})
+
+	t.Run("negative skew treated as zero", func(t *testing.T) {
+		s.FutureSkew(-1)
+		assert.Equal(t, int64(0), s.futureSkew)
+		s.FutureSkew(DefaultFutureSkew) // restore
+	})
+}
+
 func TestSignedMaxLength(t *testing.T) {
 	s, _ := NewSigned(testSignedKey())
 	s.MaxLength(50)
@@ -306,6 +349,10 @@ func TestSignedNilReceiver(t *testing.T) {
 
 	t.Run("MinAge no-op", func(t *testing.T) {
 		assert.Nil(t, s.MinAge(60))
+	})
+
+	t.Run("FutureSkew no-op", func(t *testing.T) {
+		assert.Nil(t, s.FutureSkew(60))
 	})
 
 	t.Run("MaxLength no-op", func(t *testing.T) {
