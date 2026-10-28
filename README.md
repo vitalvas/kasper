@@ -1,5 +1,7 @@
 # Kasper
 
+[![codecov](https://codecov.io/gh/vitalvas/kasper/graph/badge.svg?token=mYe3zUR3Tf)](https://codecov.io/gh/vitalvas/kasper)
+
 HTTP toolkit for Go. Drop-in gorilla/mux replacement with WebSocket, OpenAPI, and middleware support.
 
 ```bash
