@@ -74,14 +74,37 @@ func TestServerKeySetDocumentRoundTrip(t *testing.T) {
 func TestServerKeySetValidation(t *testing.T) {
 	k, _ := GenerateServerKey("k", time.Hour, 0)
 
-	_, err := NewServerKeySet("", k)
-	require.Error(t, err)
+	for _, issuer := range []string{"", "http://example.com", "https://example.com/path", "https://user@example.com", "https://example.com?query=1"} {
+		_, err := NewServerKeySet(issuer, k)
+		require.ErrorIs(t, err, ErrInvalidKey)
+	}
 
-	_, err = NewServerKeySet("https://x")
+	_, err := NewServerKeySet("https://x")
 	require.ErrorIs(t, err, ErrNoKeys)
 
 	_, err = NewServerKeySet("https://x", k, k)
 	require.Error(t, err, "duplicate kid rejected")
+}
+
+func TestServerKeySetCopiesKeyMetadata(t *testing.T) {
+	notBefore := time.Now().Add(-time.Hour)
+	k, err := GenerateServerKey("k", time.Hour, 0, AEADAES128GCM)
+	require.NoError(t, err)
+	k.NotBefore = &notBefore
+	set, err := NewServerKeySet("https://example.com", k)
+	require.NoError(t, err)
+
+	k.AEADs[0] = AEAD("mutated")
+	*k.NotBefore = time.Time{}
+	doc := set.Document()
+	assert.Equal(t, []AEAD{AEADAES128GCM}, doc.Keys[0].AEADs)
+	assert.False(t, doc.Keys[0].NotBefore.IsZero())
+
+	doc.Keys[0].AEADs[0] = AEAD("also-mutated")
+	*doc.Keys[0].NotBefore = time.Time{}
+	doc = set.Document()
+	assert.Equal(t, []AEAD{AEADAES128GCM}, doc.Keys[0].AEADs)
+	assert.False(t, doc.Keys[0].NotBefore.IsZero())
 }
 
 func TestHandlerMethodNotAllowed(t *testing.T) {
@@ -130,6 +153,47 @@ func TestParseKeySetErrors(t *testing.T) {
 	}
 }
 
+func TestParseKeySetRejectsTrailingJSON(t *testing.T) {
+	k, err := GenerateServerKey("k", time.Hour, 0)
+	require.NoError(t, err)
+	set, err := NewServerKeySet("https://example.com", k)
+	require.NoError(t, err)
+	body := append(mustJSON(t, set.Document()), []byte(` {}`)...)
+
+	_, err = ParseKeySet(bytes.NewReader(body))
+	require.ErrorIs(t, err, ErrMalformed)
+}
+
+func FuzzParseKeySet(f *testing.F) {
+	f.Add([]byte(`{"issuer":"https://example.com","keys":[{"kid":"key-1","alg":"X25519","aeads":["AES-128-GCM"],"public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","not_after":"2100-01-01T00:00:00Z","max_skew":300}]}`))
+	f.Add([]byte(`{"issuer":"https://example.com","keys":[]}`))
+	f.Add([]byte(`{"issuer":"https://example.com","keys":[]} {}`))
+	f.Add([]byte(`{`))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, document []byte) {
+		// FetchKeySet limits network documents to maxFetchedKeySetSize. Match that
+		// public boundary so fuzzing remains representative and bounded.
+		if len(document) > maxFetchedKeySetSize {
+			t.Skip()
+		}
+
+		set, err := ParseKeySet(bytes.NewReader(document))
+		if err != nil {
+			return
+		}
+		if set.issuer == "" || len(set.keys) == 0 || len(set.byKID) != len(set.keys) {
+			t.Fatalf("successful parse returned inconsistent key set: %#v", set)
+		}
+		for i := range set.keys {
+			key := &set.keys[i]
+			if key.pub == nil || set.byKID[key.KID] != key {
+				t.Fatalf("successful parse returned inconsistent key %q", key.KID)
+			}
+		}
+	})
+}
+
 func TestPublicKeyValidAt(t *testing.T) {
 	nb := time.Unix(1000, 0)
 	k := PublicKey{
@@ -171,7 +235,7 @@ func TestFetchKeySet(t *testing.T) {
 	k, _ := GenerateServerKey("k", time.Hour, DefaultMaxSkew)
 
 	var issuer string
-	srv := httptest.NewServer(nil)
+	srv := httptest.NewTLSServer(nil)
 	defer srv.Close()
 
 	issuer = srv.URL
@@ -187,7 +251,7 @@ func TestFetchKeySetIssuerMismatch(t *testing.T) {
 	k, _ := GenerateServerKey("k", time.Hour, DefaultMaxSkew)
 	set, _ := NewServerKeySet("https://wrong.example", k)
 
-	srv := httptest.NewServer(set.Handler())
+	srv := httptest.NewTLSServer(set.Handler())
 	defer srv.Close()
 
 	_, err := FetchKeySet(srv.Client(), srv.URL)
@@ -224,7 +288,7 @@ func base64Std(b []byte) string {
 func newStatusServer(t *testing.T, status int) *httptest.Server {
 	t.Helper()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 	}))
 
@@ -237,7 +301,7 @@ func newStatusServer(t *testing.T, status int) *httptest.Server {
 func newBodyServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
@@ -340,8 +404,13 @@ func TestFetchKeySetTransportError(t *testing.T) {
 	// A client pointing at an unroutable address surfaces a transport error.
 	client := &http.Client{Timeout: 100 * time.Millisecond}
 
-	_, err := FetchKeySet(client, "http://127.0.0.1:1")
+	_, err := FetchKeySet(client, "https://127.0.0.1:1")
 	require.Error(t, err)
+}
+
+func TestFetchKeySetNilClient(t *testing.T) {
+	_, err := FetchKeySet(nil, "https://example.com")
+	require.ErrorIs(t, err, ErrMalformed)
 }
 
 func TestFetchKeySetNon200(t *testing.T) {
@@ -353,6 +422,13 @@ func TestFetchKeySetNon200(t *testing.T) {
 
 func TestFetchKeySetMalformedBody(t *testing.T) {
 	srv := newBodyServer(t, http.StatusOK, "{not valid json")
+
+	_, err := FetchKeySet(srv.Client(), srv.URL)
+	require.ErrorIs(t, err, ErrMalformed)
+}
+
+func TestFetchKeySetRejectsOversizedMetadata(t *testing.T) {
+	srv := newBodyServer(t, http.StatusOK, strings.Repeat(" ", maxFetchedKeySetSize+1))
 
 	_, err := FetchKeySet(srv.Client(), srv.URL)
 	require.ErrorIs(t, err, ErrMalformed)

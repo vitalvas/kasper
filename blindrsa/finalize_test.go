@@ -56,6 +56,13 @@ func TestFinalize(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidInput)
 	})
 
+	t.Run("zero state", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			_, err := Finalize(VariantSHA384PSSDeterministic, pub, make([]byte, keyLen(pub)), &State{})
+			assert.ErrorIs(t, err, ErrInvalidInput)
+		})
+	})
+
 	t.Run("nil public key", func(t *testing.T) {
 		prepared, err := Prepare(VariantSHA384PSSDeterministic, rand.Reader, msg)
 		require.NoError(t, err)

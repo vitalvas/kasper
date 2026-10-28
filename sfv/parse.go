@@ -90,6 +90,7 @@ func (p *parser) parseList() (List, error) {
 
 func (p *parser) parseDictionary() (Dictionary, error) {
 	var d Dictionary
+	positions := make(map[string]int)
 	for !p.eof() {
 		key, err := p.parseKey()
 		if err != nil {
@@ -109,7 +110,12 @@ func (p *parser) parseDictionary() (Dictionary, error) {
 			}
 			m = Member{Item: Item{Value: Boolean(true), Params: params}}
 		}
-		d = d.set(key, m)
+		if position, exists := positions[key]; exists {
+			d[position].Member = m
+		} else {
+			positions[key] = len(d)
+			d = append(d, DictEntry{Key: key, Member: m})
+		}
 		p.skipOWS()
 		if p.eof() {
 			break
@@ -124,28 +130,6 @@ func (p *parser) parseDictionary() (Dictionary, error) {
 		}
 	}
 	return d, nil
-}
-
-// set applies last-wins semantics while preserving the earliest position.
-func (d Dictionary) set(key string, m Member) Dictionary {
-	for i := range d {
-		if d[i].Key == key {
-			d[i].Member = m
-			return d
-		}
-	}
-	return append(d, DictEntry{Key: key, Member: m})
-}
-
-// set applies last-wins semantics for parameters, preserving position.
-func (p Parameters) set(key string, v BareItem) Parameters {
-	for i := range p {
-		if p[i].Key == key {
-			p[i].Value = v
-			return p
-		}
-	}
-	return append(p, Parameter{Key: key, Value: v})
 }
 
 func (p *parser) parseMember() (Member, error) {
@@ -209,6 +193,7 @@ func (p *parser) parseItem() (Item, error) {
 
 func (p *parser) parseParams() (Parameters, error) {
 	var params Parameters
+	positions := make(map[string]int)
 	for !p.eof() && p.peek() == ';' {
 		p.pos++
 		p.skipSP()
@@ -224,7 +209,12 @@ func (p *parser) parseParams() (Parameters, error) {
 				return nil, err
 			}
 		}
-		params = params.set(key, val)
+		if position, exists := positions[key]; exists {
+			params[position].Value = val
+		} else {
+			positions[key] = len(params)
+			params = append(params, Parameter{Key: key, Value: val})
+		}
 	}
 	return params, nil
 }

@@ -70,13 +70,13 @@ type SignConfig struct {
 // SignRequest signs an HTTP request in-place by adding Signature and
 // Signature-Input headers per RFC 9421.
 func SignRequest(r *http.Request, cfg SignConfig) error {
-	if cfg.Signer == nil {
+	if isNilInterface(cfg.Signer) {
 		return ErrNoSigner
 	}
 
-	components := cfg.CoveredComponents
+	components := slices.Clone(cfg.CoveredComponents)
 	if len(components) == 0 {
-		components = defaultCoveredComponents
+		components = slices.Clone(defaultCoveredComponents)
 	}
 
 	// Optionally set Content-Digest.
@@ -104,13 +104,13 @@ func SignRequest(r *http.Request, cfg SignConfig) error {
 // response body (which is read and restored) and "content-digest" is added
 // to the covered components.
 func SignResponse(resp *http.Response, req *http.Request, cfg SignConfig) error {
-	if cfg.Signer == nil {
+	if isNilInterface(cfg.Signer) {
 		return ErrNoSigner
 	}
 
-	components := cfg.CoveredComponents
+	components := slices.Clone(cfg.CoveredComponents)
 	if len(components) == 0 {
-		components = defaultResponseComponents
+		components = slices.Clone(defaultResponseComponents)
 	}
 
 	// Optionally set Content-Digest.

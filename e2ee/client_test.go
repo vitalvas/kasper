@@ -39,6 +39,23 @@ func TestEncryptRequestNoKeySet(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoKeySet)
 }
 
+func TestEncryptRequestRejectsZeroSessionWithoutPanic(t *testing.T) {
+	req, _ := http.NewRequest(http.MethodPost, "https://x/api", strings.NewReader("x"))
+	cfg := ClientConfig{KeySet: clientKeySetFor(t), Session: &Session{}}
+
+	assert.NotPanics(t, func() {
+		_, err := EncryptRequest(req, cfg)
+		require.ErrorIs(t, err, ErrInvalidKey)
+	})
+}
+
+func TestResponseDecryptorInvalidState(t *testing.T) {
+	resp := &http.Response{Header: make(http.Header)}
+	assert.ErrorIs(t, (&ResponseDecryptor{}).Decrypt(resp), ErrInvalidState)
+	var decryptor *ResponseDecryptor
+	assert.ErrorIs(t, decryptor.Decrypt(resp), ErrInvalidState)
+}
+
 func TestEncryptRequestNoUsableKey(t *testing.T) {
 	// A key set with only an expired key yields ErrNoKeys at selection.
 	expired, _ := GenerateServerKey("old", -time.Hour, 0)

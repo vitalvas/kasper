@@ -254,3 +254,24 @@ func TestDecryptRequestWithoutReplayCacheFailsClosed(t *testing.T) {
 	_, _, err = sc.decryptRequest(st.reqField, body)
 	require.ErrorIs(t, err, ErrNoReplayCache)
 }
+
+func TestDecryptRequestTypedNilReplayCacheFailsClosed(t *testing.T) {
+	key := serverKeyForKID(t, "kid")
+	set, err := NewServerKeySet("https://api.example.com", key)
+	require.NoError(t, err)
+	var replay *MemoryReplayCache
+
+	sc := ServerConfig{KeySet: set, Replay: replay}
+	assert.NotPanics(t, func() {
+		_, _, err = sc.decryptRequest("", nil)
+	})
+	require.ErrorIs(t, err, ErrNoReplayCache)
+}
+
+func TestResponseEncryptorInvalidState(t *testing.T) {
+	_, _, err := (&ResponseEncryptor{}).Encrypt(nil)
+	assert.ErrorIs(t, err, ErrInvalidState)
+	var encryptor *ResponseEncryptor
+	_, _, err = encryptor.Encrypt(nil)
+	assert.ErrorIs(t, err, ErrInvalidState)
+}

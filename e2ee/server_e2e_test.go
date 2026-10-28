@@ -36,7 +36,7 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *e2eFixture {
 	// Build the key set against the eventual server URL; httptest assigns the
 	// URL only after Start, so build the set lazily inside Start below.
 	srv := httptest.NewUnstartedServer(router)
-	srv.Start()
+	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
 	set, err := NewServerKeySet(srv.URL, key)

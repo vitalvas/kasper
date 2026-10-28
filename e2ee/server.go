@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"time"
 )
 
@@ -54,7 +55,7 @@ func (c *ServerConfig) decryptRequest(reqField string, body []byte) (plaintext [
 	// A nil replay cache is a static server misconfiguration; fail closed up
 	// front rather than performing key derivation and decryption only to
 	// reject at the replay step. Middleware installs a cache automatically.
-	if c.Replay == nil {
+	if isNilReplayCache(c.Replay) {
 		return nil, nil, ErrNoReplayCache
 	}
 
@@ -268,5 +269,21 @@ type ResponseEncryptor struct {
 // E2EE-Session and Content-Type headers to w along with status. It is the
 // low-level primitive used by the middleware's buffering ResponseWriter.
 func (e *ResponseEncryptor) Encrypt(plaintext []byte) (resField string, body []byte, err error) {
+	if e == nil || e.state == nil {
+		return "", nil, ErrInvalidState
+	}
 	return e.cfg.encryptResponse(plaintext, e.state)
+}
+
+func isNilReplayCache(cache ReplayCache) bool {
+	if cache == nil {
+		return true
+	}
+	value := reflect.ValueOf(cache)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -58,6 +59,21 @@ func TestEd25519(t *testing.T) {
 	t.Run("invalid public key size", func(t *testing.T) {
 		_, err := NewEd25519Verifier("k", ed25519.PublicKey(make([]byte, 10)))
 		assert.ErrorIs(t, err, ErrInvalidKey)
+	})
+
+	t.Run("key material is copied", func(t *testing.T) {
+		privateCopy := append(ed25519.PrivateKey(nil), priv...)
+		publicCopy := append(ed25519.PublicKey(nil), pub...)
+		signer, err := NewEd25519Signer("k", privateCopy)
+		require.NoError(t, err)
+		verifier, err := NewEd25519Verifier("k", publicCopy)
+		require.NoError(t, err)
+		privateCopy[0] ^= 0xff
+		publicCopy[0] ^= 0xff
+
+		sig, err := signer.Sign([]byte("message"))
+		require.NoError(t, err)
+		assert.NoError(t, verifier.Verify([]byte("message"), sig))
 	})
 }
 
@@ -210,6 +226,17 @@ func TestECDSA(t *testing.T) {
 				_, err = f.newVerif("k", nil)
 				assert.ErrorIs(t, err, ErrInvalidKey)
 			})
+
+			t.Run("zero value keys rejected without panic", func(t *testing.T) {
+				assert.NotPanics(t, func() {
+					_, err := f.newSigner("k", &ecdsa.PrivateKey{})
+					assert.ErrorIs(t, err, ErrInvalidKey)
+				})
+				assert.NotPanics(t, func() {
+					_, err := f.newVerif("k", &ecdsa.PublicKey{})
+					assert.ErrorIs(t, err, ErrInvalidKey)
+				})
+			})
 		})
 	}
 }
@@ -278,6 +305,42 @@ func TestRSA(t *testing.T) {
 				assert.ErrorIs(t, err, ErrInvalidKey)
 
 				_, err = f.newVerif("k", nil)
+				assert.ErrorIs(t, err, ErrInvalidKey)
+			})
+
+			t.Run("zero value keys rejected without panic", func(t *testing.T) {
+				assert.NotPanics(t, func() {
+					_, err := f.newSigner("k", &rsa.PrivateKey{})
+					assert.ErrorIs(t, err, ErrInvalidKey)
+				})
+				assert.NotPanics(t, func() {
+					_, err := f.newVerif("k", &rsa.PublicKey{})
+					assert.ErrorIs(t, err, ErrInvalidKey)
+				})
+			})
+
+			t.Run("incomplete private key rejected", func(t *testing.T) {
+				broken := *key
+				broken.Primes = nil
+				_, err := f.newSigner("k", &broken)
+				assert.ErrorIs(t, err, ErrInvalidKey)
+			})
+
+			t.Run("invalid public exponent rejected", func(t *testing.T) {
+				broken := key.PublicKey
+				broken.E = 2
+				_, err := f.newVerif("k", &broken)
+				assert.ErrorIs(t, err, ErrInvalidKey)
+
+				broken.E = maxRSAPublicExponent + 2
+				_, err = f.newVerif("k", &broken)
+				assert.ErrorIs(t, err, ErrInvalidKey)
+			})
+
+			t.Run("even modulus rejected", func(t *testing.T) {
+				broken := key.PublicKey
+				broken.N = new(big.Int).SetBit(new(big.Int).Set(broken.N), 0, 0)
+				_, err := f.newVerif("k", &broken)
 				assert.ErrorIs(t, err, ErrInvalidKey)
 			})
 

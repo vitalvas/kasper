@@ -4347,3 +4347,12 @@ func TestMessageReaderKeepsUTF8Error(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidUTF8)
 	assert.Empty(t, data)
 }
+
+func TestStartKeepaliveZeroIntervalDoesNotPanic(t *testing.T) {
+	local, peer := net.Pipe()
+	defer local.Close()
+	defer peer.Close()
+
+	conn := newConn(local, true, 0, 0)
+	require.NotPanics(t, func() { conn.StartKeepalive(KeepaliveOptions{}) })
+}

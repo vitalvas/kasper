@@ -16,9 +16,35 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+type testDefaultTransport struct{}
+
+func (*testDefaultTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("unused")
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
 func TestTransportNilBaseUsesDefault(t *testing.T) {
 	tr := NewTransport(nil, ClientConfig{})
 	assert.NotNil(t, tr.base)
+}
+
+func TestTransportNilBaseSupportsCustomDefault(t *testing.T) {
+	original := http.DefaultTransport
+	custom := &testDefaultTransport{}
+	http.DefaultTransport = custom
+	t.Cleanup(func() { http.DefaultTransport = original })
+
+	tr := NewTransport(nil, ClientConfig{})
+	assert.Same(t, custom, tr.base)
 }
 
 func TestTransportEncryptError(t *testing.T) {
@@ -54,6 +80,35 @@ func TestTransportBaseError(t *testing.T) {
 
 	_, err := tr.RoundTrip(req)
 	require.Error(t, err)
+}
+
+func TestTransportBaseErrorClosesReturnedResponse(t *testing.T) {
+	cs := clientKeySetFor(t)
+	body := &trackingReadCloser{Reader: strings.NewReader("error body")}
+	baseErr := errors.New("base transport failed")
+	tr := NewTransport(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{Body: body}, baseErr
+	}), ClientConfig{KeySet: cs})
+	req, _ := http.NewRequest(http.MethodPost, "https://x/api", strings.NewReader("body"))
+
+	resp, err := tr.RoundTrip(req)
+	assert.Nil(t, resp)
+	assert.ErrorIs(t, err, baseErr)
+	assert.True(t, body.closed)
+}
+
+func TestTransportRejectsNilResponseWithoutPanic(t *testing.T) {
+	cs := clientKeySetFor(t)
+	tr := NewTransport(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, nil
+	}), ClientConfig{KeySet: cs})
+	req, _ := http.NewRequest(http.MethodPost, "https://x/api", strings.NewReader("body"))
+
+	assert.NotPanics(t, func() {
+		resp, err := tr.RoundTrip(req)
+		assert.Nil(t, resp)
+		assert.ErrorIs(t, err, ErrMalformed)
+	})
 }
 
 func TestTransportDecryptError(t *testing.T) {

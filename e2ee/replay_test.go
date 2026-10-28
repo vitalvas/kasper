@@ -1,6 +1,7 @@
 package e2ee
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,15 @@ func TestMemoryReplayCacheStoreUnique(t *testing.T) {
 	assert.True(t, c.StoreUnique("kid", epk, "nid2", time.Minute), "different nid is unique")
 	assert.True(t, c.StoreUnique("kid2", epk, "nid1", time.Minute), "different kid is unique")
 	assert.True(t, c.StoreUnique("kid", []byte{9}, "nid1", time.Minute), "different epk is unique")
+}
+
+func TestMemoryReplayCacheZeroValueAndNilReceiver(t *testing.T) {
+	var zero MemoryReplayCache
+	assert.True(t, zero.StoreUnique("kid", nil, "nid", time.Minute))
+	assert.False(t, zero.StoreUnique("kid", nil, "nid", time.Minute))
+
+	var cache *MemoryReplayCache
+	assert.False(t, cache.StoreUnique("kid", nil, "nid", time.Minute))
 }
 
 func TestMemoryReplayCacheExpiry(t *testing.T) {
@@ -79,4 +89,58 @@ func TestReplayPruneRemovesExpired(t *testing.T) {
 
 	// The old entry was pruned; it can be inserted again as unique.
 	assert.True(t, c.StoreUnique("k", nil, "old", time.Minute))
+}
+
+func TestMemoryReplayCacheNonPositiveTTLRetainsEntry(t *testing.T) {
+	c := NewMemoryReplayCache()
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+
+	assert.True(t, c.StoreUnique("k", nil, "zero", 0))
+	now = now.Add(100 * 365 * 24 * time.Hour)
+	assert.False(t, c.StoreUnique("k", nil, "zero", -time.Second))
+}
+
+func TestMemoryReplayCachePrunesThroughExpiryHeap(t *testing.T) {
+	c := NewMemoryReplayCache()
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+
+	for i := range 1000 {
+		assert.True(t, c.StoreUnique("k", nil, string(rune(i)), time.Second))
+	}
+	assert.Len(t, c.entries, 1000)
+	assert.Len(t, c.expiries, 1000)
+
+	now = now.Add(2 * time.Second)
+	assert.True(t, c.StoreUnique("k", nil, "fresh", time.Minute))
+	assert.Len(t, c.entries, 1)
+	assert.Len(t, c.expiries, 1)
+}
+
+func BenchmarkMemoryReplayCachePruning(b *testing.B) {
+	for _, count := range []int{1024, 16384} {
+		b.Run(fmt.Sprintf("expired=%d", count), func(b *testing.B) {
+			now := time.Unix(1000, 0)
+			for b.Loop() {
+				b.StopTimer()
+				cache := NewMemoryReplayCache()
+				cache.now = func() time.Time { return now }
+				for i := range count {
+					cache.StoreUnique("kid", nil, fmt.Sprintf("nid-%d", i), time.Second)
+				}
+				now = now.Add(2 * time.Second)
+				b.StartTimer()
+
+				if !cache.StoreUnique("kid", nil, "fresh", time.Minute) {
+					b.Fatal("fresh replay identifier was rejected")
+				}
+
+				b.StopTimer()
+				now = now.Add(-2 * time.Second)
+				b.StartTimer()
+			}
+			b.ReportMetric(float64(count), "expired/op")
+		})
+	}
 }

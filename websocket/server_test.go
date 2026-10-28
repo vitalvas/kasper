@@ -299,6 +299,27 @@ type mockHijacker struct {
 	writer *bufio.Writer
 }
 
+type deadlineErrorConn struct {
+	net.Conn
+	err       error
+	failAt    int
+	calls     int
+	wasClosed bool
+}
+
+func (c *deadlineErrorConn) SetWriteDeadline(t time.Time) error {
+	c.calls++
+	if c.calls == c.failAt {
+		return c.err
+	}
+	return c.Conn.SetWriteDeadline(t)
+}
+
+func (c *deadlineErrorConn) Close() error {
+	c.wasClosed = true
+	return c.Conn.Close()
+}
+
 func (m *mockHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return m.conn, bufio.NewReadWriter(m.reader, m.writer), nil
 }
@@ -381,6 +402,40 @@ func TestUpgraderUpgrade(t *testing.T) {
 		conn, err := u.Upgrade(w, r, nil)
 		assert.Nil(t, conn)
 		assert.ErrorIs(t, err, ErrBadHandshake)
+	})
+
+	for _, key := range []string{"not-base64", "dG9vLXNob3J0"} {
+		t.Run(fmt.Sprintf("Invalid Sec-WebSocket-Key %s", key), func(t *testing.T) {
+			u := &Upgrader{}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Connection", "upgrade")
+			r.Header.Set("Upgrade", "websocket")
+			r.Header.Set("Sec-WebSocket-Version", "13")
+			r.Header.Set("Sec-WebSocket-Key", key)
+
+			conn, err := u.Upgrade(w, r, nil)
+			assert.Nil(t, conn)
+			assert.ErrorIs(t, err, ErrBadHandshake)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
+
+	t.Run("Invalid selected subprotocol is rejected before hijacking", func(t *testing.T) {
+		invalid := "chat\r\nInjected: true"
+		u := &Upgrader{Subprotocols: []string{invalid}}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Connection", "upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		r.Header.Set("Sec-WebSocket-Version", "13")
+		r.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+		r.Header["Sec-Websocket-Protocol"] = []string{invalid}
+
+		conn, err := u.Upgrade(w, r, nil)
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrInvalidResponseHeader)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
 	t.Run("Origin check fails", func(t *testing.T) {
@@ -514,6 +569,47 @@ func TestUpgraderUpgrade(t *testing.T) {
 		conn.Close()
 	})
 
+	t.Run("Rejects response header injection before hijacking", func(t *testing.T) {
+		u := &Upgrader{}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Connection", "upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		r.Header.Set("Sec-WebSocket-Version", "13")
+		r.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+		responseHeader := http.Header{"X-User-Value": {"safe\r\nInjected: true"}}
+		conn, err := u.Upgrade(w, r, responseHeader)
+
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrInvalidResponseHeader)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("Rejects reserved response headers", func(t *testing.T) {
+		u := &Upgrader{}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		responseHeader := http.Header{"Sec-WebSocket-Accept": {"attacker-controlled"}}
+
+		conn, err := u.Upgrade(w, r, responseHeader)
+
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrInvalidResponseHeader)
+	})
+
+	t.Run("Rejects response Content-Length", func(t *testing.T) {
+		u := &Upgrader{}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		responseHeader := http.Header{"Content-Length": {"1"}}
+
+		conn, err := u.Upgrade(w, r, responseHeader)
+
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrInvalidResponseHeader)
+	})
+
 	t.Run("Hijack returns error", func(t *testing.T) {
 		hijackErr := errors.New("hijack failed")
 		u := &Upgrader{}
@@ -563,6 +659,41 @@ func TestUpgraderUpgrade(t *testing.T) {
 		client.Close()
 		conn.Close()
 	})
+
+	for _, tt := range []struct {
+		name   string
+		failAt int
+	}{
+		{name: "setting handshake deadline", failAt: 1},
+		{name: "clearing handshake deadline", failAt: 2},
+	} {
+		t.Run(fmt.Sprintf("HandshakeTimeout fails when %s fails", tt.name), func(t *testing.T) {
+			deadlineErr := errors.New("deadline failed")
+			u := &Upgrader{HandshakeTimeout: time.Second}
+
+			server, client := net.Pipe()
+			wrapped := &deadlineErrorConn{Conn: server, err: deadlineErr, failAt: tt.failAt}
+			hijacker := &mockHijacker{
+				ResponseWriter: httptest.NewRecorder(),
+				conn:           wrapped,
+				reader:         bufio.NewReader(strings.NewReader("")),
+				writer:         bufio.NewWriter(new(bytes.Buffer)),
+			}
+
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Connection", "upgrade")
+			r.Header.Set("Upgrade", "websocket")
+			r.Header.Set("Sec-WebSocket-Version", "13")
+			r.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+			conn, err := u.Upgrade(hijacker, r, nil)
+			assert.Nil(t, conn)
+			assert.ErrorIs(t, err, deadlineErr)
+			assert.True(t, wrapped.wasClosed)
+
+			client.Close()
+		})
+	}
 
 	t.Run("Flush error closes connection", func(t *testing.T) {
 		flushErr := errors.New("flush failed")
@@ -976,6 +1107,27 @@ func FuzzSubprotocols(f *testing.F) {
 			if proto == "" {
 				t.Errorf("empty protocol in result")
 			}
+		}
+	})
+}
+
+func FuzzValidateResponseHeader(f *testing.F) {
+	f.Add("X-Trace-ID", "abc-123")
+	f.Add("Connection", "close")
+	f.Add("Bad Header", "value")
+	f.Add("X-Test", "value\r\nInjected: true")
+	f.Add("", "")
+
+	f.Fuzz(func(t *testing.T, name, value string) {
+		header := http.Header{name: []string{value}}
+		err := validateResponseHeader(header)
+		_, reserved := reservedResponseHeaders[strings.ToLower(name)]
+		wantValid := validHeaderFieldName(name) && validHeaderFieldValue(value) && !reserved
+		if wantValid && err != nil {
+			t.Fatalf("valid response header rejected: %v", err)
+		}
+		if !wantValid && err == nil {
+			t.Fatalf("invalid response header accepted: name=%q value=%q", name, value)
 		}
 	})
 }

@@ -96,12 +96,12 @@ func ProxyHeadersMiddleware(cfg ProxyHeadersConfig) (mux.MiddlewareFunc, error) 
 			// Optionally pre-parse RFC 7239 Forwarded header for fallback.
 			var fwd forwardedParams
 			if enableFwd {
-				fwd = parseForwarded(r.Header.Get("Forwarded"))
+				fwd = parseForwarded(r.Header.Get("Forwarded"), ts)
 			}
 
 			// Client IP: X-Forwarded-For > X-Real-IP > Forwarded for=.
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				if ip := parseXForwardedFor(xff); ip != "" {
+				if ip := clientIPFromXForwardedFor(xff, ts); ip != "" {
 					r.RemoteAddr = ip
 				}
 			} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
@@ -214,13 +214,22 @@ func isTrustedPeer(remoteAddr string, ts *proxyTrustSet) bool {
 	return false
 }
 
-// parseXForwardedFor returns the leftmost valid IP from a comma-separated
-// X-Forwarded-For header value. Returns an empty string if no valid IP is
-// found.
-func parseXForwardedFor(xff string) string {
-	for part := range strings.SplitSeq(xff, ",") {
-		candidate := strings.TrimSpace(part)
-		if ip := net.ParseIP(candidate); ip != nil {
+// clientIPFromXForwardedFor walks the forwarding chain from the trusted
+// edge inward and returns the first untrusted address. This prevents a client
+// supplied leftmost entry from overriding the address appended by a trusted
+// proxy. A malformed chain is rejected as a whole.
+func clientIPFromXForwardedFor(xff string, trusted *proxyTrustSet) string {
+	parts := strings.Split(xff, ",")
+	addresses := make([]net.IP, len(parts))
+	for i, part := range parts {
+		addresses[i] = net.ParseIP(strings.TrimSpace(part))
+		if addresses[i] == nil {
+			return ""
+		}
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(parts[i])
+		if !isTrustedIP(addresses[i], trusted) {
 			return candidate
 		}
 	}
@@ -228,8 +237,22 @@ func parseXForwardedFor(xff string) string {
 	return ""
 }
 
-// forwardedParams holds the extracted directives from the first element of an
-// RFC 7239 Forwarded header value.
+func isTrustedIP(ip net.IP, trusted *proxyTrustSet) bool {
+	for _, candidate := range trusted.ips {
+		if candidate.Equal(ip) {
+			return true
+		}
+	}
+	for _, network := range trusted.nets {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedParams holds the extracted directives from the first untrusted
+// element found while walking an RFC 7239 Forwarded chain from right to left.
 type forwardedParams struct {
 	forIP string // validated IP from "for=" directive
 	by    string // raw value from "by=" directive (proxy interface identifier)
@@ -237,56 +260,47 @@ type forwardedParams struct {
 	host  string // raw value from "host=" directive
 }
 
-// parseForwarded extracts for=, proto=, and host= from the first element of
-// an RFC 7239 Forwarded header. Multiple elements are comma-separated; only the
-// first is used (the client-facing proxy).
+// parseForwarded walks an RFC 7239 Forwarded chain from the trusted edge and
+// returns the first untrusted hop. This prevents a client-supplied leftmost
+// element from overriding information appended by trusted proxies. Every
+// element must contain a valid IP-valued for= parameter; otherwise the entire
+// chain is rejected because its trust boundary cannot be established.
 //
 // Spec reference: https://www.rfc-editor.org/rfc/rfc7239
-func parseForwarded(header string) forwardedParams {
+func parseForwarded(header string, trusted *proxyTrustSet) forwardedParams {
 	if header == "" {
 		return forwardedParams{}
 	}
 
-	// Take only the first element (before the first comma).
-	if idx := strings.IndexByte(header, ','); idx != -1 {
-		header = header[:idx]
+	elements := ParseForwarded(header)
+	addresses := make([]net.IP, len(elements))
+	for i, element := range elements {
+		forIP := parseForwardedIP(element.For)
+		addresses[i] = net.ParseIP(forIP)
+		if addresses[i] == nil {
+			return forwardedParams{}
+		}
 	}
 
-	var result forwardedParams
-
-	for param := range strings.SplitSeq(header, ";") {
-		param = strings.TrimSpace(param)
-
-		eqIdx := strings.IndexByte(param, '=')
-		if eqIdx == -1 {
+	for i := len(elements) - 1; i >= 0; i-- {
+		if isTrustedIP(addresses[i], trusted) {
 			continue
 		}
 
-		key := strings.ToLower(strings.TrimSpace(param[:eqIdx]))
-		val := strings.TrimSpace(param[eqIdx+1:])
-
-		switch key {
-		case "for":
-			result.forIP = parseForwardedIP(val)
-		case "proto":
-			val = strings.ToLower(strings.Trim(val, `"`))
-			if val == "http" || val == "https" {
-				result.proto = val
-			}
-		case "by":
-			val = strings.Trim(val, `"`)
-			if val != "" {
-				result.by = val
-			}
-		case "host":
-			val = strings.Trim(val, `"`)
-			if val != "" {
-				result.host = val
-			}
+		element := elements[i]
+		result := forwardedParams{
+			forIP: addresses[i].String(),
+			by:    element.By,
+			host:  element.Host,
 		}
+		proto := strings.ToLower(element.Proto)
+		if proto == "http" || proto == "https" {
+			result.proto = proto
+		}
+		return result
 	}
 
-	return result
+	return forwardedParams{}
 }
 
 // parseForwardedIP extracts and validates an IP from a Forwarded for= value.

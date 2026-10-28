@@ -95,6 +95,7 @@ func CompressionMiddleware(cfg CompressionConfig) (mux.MiddlewareFunc, error) {
 				pool:           pool,
 				minLength:      minLength,
 				encoding:       encoding,
+				head:           r.Method == http.MethodHead,
 			}
 			defer cw.close()
 
@@ -156,7 +157,7 @@ func parseQuality(s string) float64 {
 	}
 
 	q, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil || q < 0 || q > 1 {
 		return 0
 	}
 
@@ -169,15 +170,17 @@ func parseQuality(s string) float64 {
 func parseEncoding(s string) (encoding, quality string) {
 	encoding, params, ok := strings.Cut(s, ";")
 	if !ok {
-		return strings.TrimSpace(encoding), ""
+		return strings.ToLower(strings.TrimSpace(encoding)), ""
 	}
 
-	params = strings.TrimSpace(params)
-	if key, val, found := strings.Cut(params, "="); found && strings.TrimSpace(key) == "q" {
-		return strings.TrimSpace(encoding), strings.TrimSpace(val)
+	for param := range strings.SplitSeq(params, ";") {
+		key, val, found := strings.Cut(strings.TrimSpace(param), "=")
+		if found && strings.EqualFold(strings.TrimSpace(key), "q") {
+			return strings.ToLower(strings.TrimSpace(encoding)), strings.TrimSpace(val)
+		}
 	}
 
-	return strings.TrimSpace(encoding), ""
+	return strings.ToLower(strings.TrimSpace(encoding)), ""
 }
 
 // compressedContentTypes contains content type prefixes and exact types that
@@ -225,9 +228,14 @@ type compressedResponseWriter struct {
 	decided     bool
 	compressed  bool
 	statusCode  int
+	head        bool
 }
 
 func (cw *compressedResponseWriter) WriteHeader(statusCode int) {
+	if statusCode >= 100 && statusCode < 200 {
+		cw.ResponseWriter.WriteHeader(statusCode)
+		return
+	}
 	if cw.wroteHeader {
 		return
 	}
@@ -243,6 +251,9 @@ func (cw *compressedResponseWriter) WriteHeader(statusCode int) {
 func (cw *compressedResponseWriter) Write(b []byte) (int, error) {
 	if !cw.wroteHeader {
 		cw.WriteHeader(http.StatusOK)
+	}
+	if cw.statusCode == http.StatusNoContent || cw.statusCode == http.StatusNotModified {
+		return 0, http.ErrBodyNotAllowed
 	}
 
 	if cw.decided {
@@ -271,7 +282,9 @@ func (cw *compressedResponseWriter) finalize() {
 	if h.Get("Content-Encoding") != "" || isCompressedContentType(h.Get("Content-Type")) {
 		cw.compressed = false
 		cw.ResponseWriter.WriteHeader(cw.statusCode)
-		cw.ResponseWriter.Write(cw.buf)
+		if !cw.head {
+			_, _ = cw.ResponseWriter.Write(cw.buf)
+		}
 		cw.buf = nil
 
 		return
@@ -279,15 +292,33 @@ func (cw *compressedResponseWriter) finalize() {
 
 	cw.compressed = true
 	h.Set("Content-Encoding", cw.encoding)
-	h.Set("Vary", "Accept-Encoding")
+	addVaryHeader(h, "Accept-Encoding")
 	h.Del("Content-Length")
 
+	if cw.head {
+		cw.ResponseWriter.WriteHeader(cw.statusCode)
+		cw.buf = nil
+		return
+	}
 	cw.writer = cw.pool.Get().(compressor)
 	cw.writer.Reset(cw.ResponseWriter)
 
 	cw.ResponseWriter.WriteHeader(cw.statusCode)
 	cw.writer.Write(cw.buf)
 	cw.buf = nil
+}
+
+// addVaryHeader adds name without discarding values installed by downstream
+// handlers or other middleware, and avoids emitting duplicate field names.
+func addVaryHeader(h http.Header, name string) {
+	for _, line := range h.Values("Vary") {
+		for value := range strings.SplitSeq(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(value), name) {
+				return
+			}
+		}
+	}
+	h.Add("Vary", name)
 }
 
 // close finalizes outstanding writes. If compression was not yet decided
@@ -299,7 +330,9 @@ func (cw *compressedResponseWriter) close() {
 		if len(cw.buf) > 0 && len(cw.buf) < cw.minLength {
 			// Buffer is below MinLength threshold; flush uncompressed.
 			cw.ResponseWriter.WriteHeader(cw.statusCode)
-			cw.ResponseWriter.Write(cw.buf)
+			if !cw.head {
+				_, _ = cw.ResponseWriter.Write(cw.buf)
+			}
 			cw.buf = nil
 
 			return

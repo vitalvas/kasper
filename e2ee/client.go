@@ -188,6 +188,9 @@ func (c *ClientConfig) decryptResponse(resField string, body []byte, st *clientS
 // session key when a Session is configured, otherwise a fresh pair.
 func (c *ClientConfig) ephemeralKey() (*ecdh.PrivateKey, error) {
 	if c.Session != nil {
+		if c.Session.priv == nil {
+			return nil, ErrInvalidKey
+		}
 		return c.Session.priv, nil
 	}
 
@@ -258,6 +261,10 @@ type ResponseDecryptor struct {
 // body with the recovered plaintext and removing the E2EE Content-Type. It
 // validates the E2EE-Session response field against the original request.
 func (d *ResponseDecryptor) Decrypt(resp *http.Response) error {
+	if d == nil || d.state == nil {
+		return ErrInvalidState
+	}
+
 	resField := resp.Header.Get(SessionHeader)
 	if resField == "" {
 		return fmt.Errorf("%w: missing %s response header", ErrMalformed, SessionHeader)

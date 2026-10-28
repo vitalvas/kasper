@@ -72,6 +72,7 @@ var (
 	ErrMessageTypeForbidden      = errors.New("websocket: message type forbidden by policy")
 	ErrFrameSizeExceeded         = errors.New("websocket: frame payload exceeds size limit")
 	ErrNonEmptyPingPayload       = errors.New("websocket: non-empty ping payload not allowed")
+	ErrInvalidResponseHeader     = errors.New("websocket: invalid response header")
 )
 
 // CloseError represents a WebSocket close error.
@@ -512,7 +513,15 @@ func (c *Conn) SetMaxFrameSize(limit int64) {
 // other signalling.
 //
 // The goroutine stops when the connection is closed or a ping write fails.
+// A non-positive Interval disables keepalive.
 func (c *Conn) StartKeepalive(opts KeepaliveOptions) {
+	// time.NewTicker panics for non-positive durations. A library helper must
+	// not take down its host process because an optional keepalive setting was
+	// left at its zero value.
+	if opts.Interval <= 0 {
+		return
+	}
+
 	if opts.PongTimeout > 0 {
 		wait := opts.Interval + opts.PongTimeout
 		// Set the initial read deadline before the first ping is sent.

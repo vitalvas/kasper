@@ -1,10 +1,12 @@
 package muxhandlers
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,11 +101,18 @@ func TestProxyHeadersMiddleware(t *testing.T) {
 			wantAddr:   "198.51.100.10",
 		},
 		{
-			name:       "XFF multiple IPs uses leftmost",
+			name:       "XFF chain uses first untrusted address from right",
 			config:     ProxyHeadersConfig{TrustedProxies: []string{"10.0.0.1"}},
 			remoteAddr: "10.0.0.1:8080",
 			headers:    map[string]string{"X-Forwarded-For": "203.0.113.50, 198.51.100.10, 10.0.0.1"},
-			wantAddr:   "203.0.113.50",
+			wantAddr:   "198.51.100.10",
+		},
+		{
+			name:       "XFF ignores attacker supplied leftmost address",
+			config:     ProxyHeadersConfig{TrustedProxies: []string{"10.0.0.0/8"}},
+			remoteAddr: "10.0.0.2:8080",
+			headers:    map[string]string{"X-Forwarded-For": "192.0.2.123, 198.51.100.10, 10.0.0.1"},
+			wantAddr:   "198.51.100.10",
 		},
 		{
 			name:       "XFF invalid IP ignored",
@@ -353,6 +362,22 @@ func TestProxyHeadersMiddleware(t *testing.T) {
 			headers:    map[string]string{"Forwarded": `for="[2001:db8::1]"`},
 			wantAddr:   "2001:db8::1",
 		},
+		{
+			name:       "Forwarded chain ignores attacker supplied leftmost element",
+			config:     ProxyHeadersConfig{TrustedProxies: []string{"10.0.0.0/8"}, EnableForwarded: true},
+			remoteAddr: "10.0.0.2:8080",
+			headers:    map[string]string{"Forwarded": "for=192.0.2.123;proto=http;host=evil.example, for=198.51.100.10;proto=https;host=good.example, for=10.0.0.1"},
+			wantAddr:   "198.51.100.10",
+			wantScheme: "https",
+			wantHost:   "good.example",
+		},
+		{
+			name:       "Forwarded malformed chain is rejected",
+			config:     ProxyHeadersConfig{TrustedProxies: []string{"10.0.0.0/8"}, EnableForwarded: true},
+			remoteAddr: "10.0.0.2:8080",
+			headers:    map[string]string{"Forwarded": "for=_hidden, for=198.51.100.10, for=10.0.0.1"},
+			wantAddr:   "10.0.0.2:8080",
+		},
 
 		// IPv6 edge cases
 		{
@@ -467,29 +492,36 @@ func TestIsTrustedPeer(t *testing.T) {
 	}
 }
 
-func TestParseXForwardedFor(t *testing.T) {
+func TestClientIPFromXForwardedFor(t *testing.T) {
+	trusted, err := parseTrustedProxies([]string{"10.0.0.0/8"})
+	require.NoError(t, err)
+
 	tests := []struct {
 		name  string
 		input string
 		want  string
 	}{
 		{"single valid IP", "203.0.113.50", "203.0.113.50"},
-		{"multiple IPs returns leftmost", "203.0.113.50, 198.51.100.10", "203.0.113.50"},
-		{"leading invalid IP skipped", "garbage, 198.51.100.10", "198.51.100.10"},
+		{"multiple untrusted IPs returns rightmost", "203.0.113.50, 198.51.100.10", "198.51.100.10"},
+		{"trusted hops are skipped", "203.0.113.50, 10.0.0.1, 10.0.0.2", "203.0.113.50"},
+		{"malformed chain is rejected", "garbage, 198.51.100.10", ""},
 		{"all invalid returns empty", "not-valid, also-bad", ""},
 		{"IPv6 address", "2001:db8::1", "2001:db8::1"},
 		{"empty string", "", ""},
-		{"whitespace handling", "  203.0.113.50  ,  198.51.100.10  ", "203.0.113.50"},
+		{"whitespace handling", "  203.0.113.50  ,  198.51.100.10  ", "198.51.100.10"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, parseXForwardedFor(tt.input))
+			assert.Equal(t, tt.want, clientIPFromXForwardedFor(tt.input, trusted))
 		})
 	}
 }
 
 func TestParseForwarded(t *testing.T) {
+	trusted, err := parseTrustedProxies([]string{"10.0.0.0/8"})
+	require.NoError(t, err)
+
 	tests := []struct {
 		name      string
 		input     string
@@ -500,19 +532,21 @@ func TestParseForwarded(t *testing.T) {
 	}{
 		{"empty string", "", "", "", "", ""},
 		{"all directives", "for=192.0.2.60;proto=https;by=203.0.113.43;host=example.com", "192.0.2.60", "203.0.113.43", "https", "example.com"},
-		{"only by directive", "by=203.0.113.43", "", "203.0.113.43", "", ""},
-		{"by obfuscated identifier", "by=_proxy01", "", "_proxy01", "", ""},
-		{"by quoted value", `by="203.0.113.43"`, "", "203.0.113.43", "", ""},
+		{"only by directive is rejected without for", "by=203.0.113.43", "", "", "", ""},
+		{"by obfuscated identifier is rejected without for", "by=_proxy01", "", "", "", ""},
+		{"by quoted value is rejected without for", `by="203.0.113.43"`, "", "", "", ""},
 		{"only for directive", "for=192.0.2.60", "192.0.2.60", "", "", ""},
-		{"only proto directive", "proto=http", "", "", "http", ""},
-		{"only host directive", "host=example.com", "", "", "", "example.com"},
-		{"multiple elements uses first", "for=192.0.2.43, for=198.51.100.17", "192.0.2.43", "", "", ""},
+		{"only proto directive is rejected without for", "proto=http", "", "", "", ""},
+		{"only host directive is rejected without for", "host=example.com", "", "", "", ""},
+		{"multiple untrusted elements uses rightmost", "for=192.0.2.43, for=198.51.100.17", "198.51.100.17", "", "", ""},
+		{"trusted elements are skipped", "for=192.0.2.43;proto=https, for=10.0.0.1", "192.0.2.43", "", "https", ""},
+		{"all trusted elements return empty", "for=10.0.0.1, for=10.0.0.2", "", "", "", ""},
 		{"IPv6 for quoted with brackets", `for="[2001:db8::1]"`, "2001:db8::1", "", "", ""},
 		{"IPv6 for with port", `for="[2001:db8::1]:4711"`, "2001:db8::1", "", "", ""},
 		{"invalid for value", `for="_gazonk"`, "", "", "", ""},
-		{"invalid proto value", "proto=ftp", "", "", "", ""},
-		{"proto case insensitive", "proto=HTTPS", "", "", "https", ""},
-		{"quoted host", `host="example.com:443"`, "", "", "", "example.com:443"},
+		{"invalid proto value", "for=192.0.2.60;proto=ftp", "192.0.2.60", "", "", ""},
+		{"proto case insensitive", "for=192.0.2.60;proto=HTTPS", "192.0.2.60", "", "https", ""},
+		{"quoted host", `for=192.0.2.60;host="example.com:443"`, "192.0.2.60", "", "", "example.com:443"},
 		{"spacing around semicolons", "for=192.0.2.60 ; proto=https ; host=example.com", "192.0.2.60", "", "https", "example.com"},
 		{"case insensitive keys", "For=192.0.2.60;Proto=HTTPS;Host=example.com", "192.0.2.60", "", "https", "example.com"},
 		{"no equals sign in param", "garbage;for=192.0.2.60", "192.0.2.60", "", "", ""},
@@ -520,7 +554,7 @@ func TestParseForwarded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseForwarded(tt.input)
+			result := parseForwarded(tt.input, trusted)
 			assert.Equal(t, tt.wantForIP, result.forIP, "forIP")
 			assert.Equal(t, tt.wantBy, result.by, "by")
 			assert.Equal(t, tt.wantProto, result.proto, "proto")
@@ -548,6 +582,38 @@ func TestParseForwardedIP(t *testing.T) {
 			assert.Equal(t, tt.want, parseForwardedIP(tt.input))
 		})
 	}
+}
+
+func FuzzProxyHeaderChains(f *testing.F) {
+	f.Add("203.0.113.10, 10.0.0.2", "for=203.0.113.10, for=10.0.0.2;proto=https")
+	f.Add("2001:db8::1, fd00::2", `for="[2001:db8::1]", for="[fd00::2]"`)
+	f.Add("invalid, 10.0.0.2", "for=_hidden, for=10.0.0.2")
+	f.Add("", "")
+
+	trusted, err := parseTrustedProxies([]string{"10.0.0.0/8", "fd00::/8"})
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	f.Fuzz(func(t *testing.T, xForwardedFor, forwarded string) {
+		if clientIP := clientIPFromXForwardedFor(xForwardedFor, trusted); clientIP != "" {
+			ip := net.ParseIP(clientIP)
+			if ip == nil || isTrustedIP(ip, trusted) {
+				t.Fatalf("invalid X-Forwarded-For result %q", clientIP)
+			}
+		}
+
+		result := parseForwarded(forwarded, trusted)
+		if result.forIP != "" {
+			ip := net.ParseIP(result.forIP)
+			if ip == nil || isTrustedIP(ip, trusted) {
+				t.Fatalf("invalid Forwarded result %q", result.forIP)
+			}
+		}
+		if result.proto != "" && result.proto != "http" && result.proto != "https" {
+			t.Fatalf("invalid Forwarded protocol %q", result.proto)
+		}
+	})
 }
 
 func mustParseCIDR(s string) *net.IPNet {
@@ -633,4 +699,45 @@ func BenchmarkProxyHeaders(b *testing.B) {
 			r.ServeHTTP(httptest.NewRecorder(), req)
 		}
 	})
+}
+
+func BenchmarkProxyHeaderChainScaling(b *testing.B) {
+	trusted, err := parseTrustedProxies([]string{"10.0.0.0/8"})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for _, count := range []int{16, 256, 4096} {
+		b.Run(fmt.Sprintf("X-Forwarded-For/hops=%d", count), func(b *testing.B) {
+			parts := make([]string, count)
+			parts[0] = "203.0.113.10"
+			for i := 1; i < count; i++ {
+				parts[i] = fmt.Sprintf("10.%d.%d.%d", byte(i>>16), byte(i>>8), byte(i))
+			}
+			header := strings.Join(parts, ", ")
+			b.ReportAllocs()
+			b.SetBytes(int64(len(header)))
+			for b.Loop() {
+				if got := clientIPFromXForwardedFor(header, trusted); got != parts[0] {
+					b.Fatalf("got %q, want %q", got, parts[0])
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("Forwarded/hops=%d", count), func(b *testing.B) {
+			parts := make([]string, count)
+			parts[0] = "for=203.0.113.10;proto=https"
+			for i := 1; i < count; i++ {
+				parts[i] = fmt.Sprintf("for=10.%d.%d.%d", byte(i>>16), byte(i>>8), byte(i))
+			}
+			header := strings.Join(parts, ", ")
+			b.ReportAllocs()
+			b.SetBytes(int64(len(header)))
+			for b.Loop() {
+				if got := parseForwarded(header, trusted); got.forIP != "203.0.113.10" {
+					b.Fatalf("got %q, want %q", got.forIP, "203.0.113.10")
+				}
+			}
+		})
+	}
 }

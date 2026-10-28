@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/asn1"
 	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 
@@ -90,6 +91,17 @@ func TestVerifyTokenNilCacheFailsClosed(t *testing.T) {
 	require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, nil, time.Hour), ErrNoNonceCache)
 }
 
+func TestVerifyTokenTypedNilCacheFailsClosed(t *testing.T) {
+	priv := testRSAKey(t)
+	challenge := testChallenge()
+	tok := issueToken(t, priv, challenge)
+	var cache *MemoryNonceCache
+
+	assert.NotPanics(t, func() {
+		require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, cache, time.Hour), ErrNoNonceCache)
+	})
+}
+
 func TestVerifyTokenKeyIDMismatch(t *testing.T) {
 	priv := testRSAKey(t)
 	other := testRSAKey(t)
@@ -145,6 +157,15 @@ func TestMemoryNonceCacheExpiry(t *testing.T) {
 	assert.True(t, cache.StoreUnique(nonce, time.Minute))
 }
 
+func TestMemoryNonceCacheZeroValueAndNilReceiver(t *testing.T) {
+	var zero MemoryNonceCache
+	assert.True(t, zero.StoreUnique([]byte("nonce"), time.Minute))
+	assert.False(t, zero.StoreUnique([]byte("nonce"), time.Minute))
+
+	var cache *MemoryNonceCache
+	assert.False(t, cache.StoreUnique([]byte("nonce"), time.Minute))
+}
+
 func BenchmarkVerifyToken(b *testing.B) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -197,6 +218,51 @@ func TestNoncesWithoutExpirationRemainSpent(t *testing.T) {
 	require.True(t, cache.StoreUnique([]byte("nonce"), 0))
 	now = now.Add(24 * time.Hour)
 	require.False(t, cache.StoreUnique([]byte("nonce"), 0))
+}
+
+func TestMemoryNonceCachePrunesThroughExpiryHeap(t *testing.T) {
+	cache := NewMemoryNonceCache()
+	now := time.Unix(1000, 0)
+	cache.now = func() time.Time { return now }
+
+	for i := range 1000 {
+		nonce := []byte{byte(i >> 8), byte(i)}
+		require.True(t, cache.StoreUnique(nonce, time.Second))
+	}
+	require.Len(t, cache.entries, 1000)
+	require.Len(t, cache.expiries, 1000)
+
+	now = now.Add(2 * time.Second)
+	require.True(t, cache.StoreUnique([]byte("fresh"), time.Minute))
+	require.Len(t, cache.entries, 1)
+	require.Len(t, cache.expiries, 1)
+}
+
+func BenchmarkMemoryNonceCachePruning(b *testing.B) {
+	for _, count := range []int{1024, 16384} {
+		b.Run(fmt.Sprintf("expired=%d", count), func(b *testing.B) {
+			now := time.Unix(1000, 0)
+			for b.Loop() {
+				b.StopTimer()
+				cache := NewMemoryNonceCache()
+				cache.now = func() time.Time { return now }
+				for i := range count {
+					cache.StoreUnique([]byte(fmt.Sprintf("nonce-%d", i)), time.Second)
+				}
+				now = now.Add(2 * time.Second)
+				b.StartTimer()
+
+				if !cache.StoreUnique([]byte("fresh"), time.Minute) {
+					b.Fatal("fresh nonce was rejected")
+				}
+
+				b.StopTimer()
+				now = now.Add(-2 * time.Second)
+				b.StartTimer()
+			}
+			b.ReportMetric(float64(count), "expired/op")
+		})
+	}
 }
 
 // RFC 9578 Appendix A.2, test vector 1:

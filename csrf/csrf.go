@@ -525,6 +525,9 @@ func parseOriginPattern(s string) (*originPattern, error) {
 	if u.Scheme == "" || u.Host == "" {
 		return nil, errors.New("origin must include scheme and host")
 	}
+	if u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return nil, errors.New("origin must contain only scheme and authority")
+	}
 
 	host := strings.ToLower(u.Host)
 	wild := false
@@ -573,7 +576,7 @@ func verifyOrigin(r *http.Request, rc *resolvedConfig) error {
 		// HTTP "missing-origin" allowance.
 		return ErrOriginRejected
 	case origin != "":
-		if !originAllowed(origin, r, rc) {
+		if !originAllowed(origin, r, rc, true) {
 			return ErrOriginRejected
 		}
 		return nil
@@ -592,7 +595,7 @@ func verifyOrigin(r *http.Request, rc *resolvedConfig) error {
 		}
 		// A present Referer on an HTTP request is only enforced under the
 		// strict flag; the default preserves the legacy HTTP allowance.
-		if rc.requireOrRef && !originAllowed(referer, r, rc) {
+		if rc.requireOrRef && !originAllowed(referer, r, rc, false) {
 			return ErrRefererRejected
 		}
 		return nil
@@ -601,15 +604,21 @@ func verifyOrigin(r *http.Request, rc *resolvedConfig) error {
 	if referer == "" {
 		return ErrRefererMissing
 	}
-	if !originAllowed(referer, r, rc) {
+	if !originAllowed(referer, r, rc, false) {
 		return ErrRefererRejected
 	}
 	return nil
 }
 
-func originAllowed(raw string, r *http.Request, rc *resolvedConfig) bool {
+func originAllowed(raw string, r *http.Request, rc *resolvedConfig, serializedOrigin bool) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	if u.User != nil || u.Fragment != "" || u.Opaque != "" {
+		return false
+	}
+	if serializedOrigin && (u.Path != "" || u.RawQuery != "") {
 		return false
 	}
 
@@ -617,7 +626,7 @@ func originAllowed(raw string, r *http.Request, rc *resolvedConfig) bool {
 	if rc.trustedHost != "" {
 		targetHost = rc.trustedHost
 	}
-	if u.Scheme == requestScheme(r) && u.Host == targetHost {
+	if strings.EqualFold(u.Scheme, requestScheme(r)) && strings.EqualFold(u.Host, targetHost) {
 		return true
 	}
 

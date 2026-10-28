@@ -2,6 +2,7 @@ package sfv
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,6 +198,31 @@ func TestParseDictionary(t *testing.T) {
 	})
 }
 
+func TestParseLargeDictionaryAndParameters(t *testing.T) {
+	const count = 4096
+
+	var dictionary strings.Builder
+	var item strings.Builder
+	item.WriteString("1")
+	for i := range count {
+		if i > 0 {
+			dictionary.WriteString(",")
+		}
+		fmt.Fprintf(&dictionary, "k%d=%d", i, i)
+		fmt.Fprintf(&item, ";k%d=%d", i, i)
+	}
+
+	dict, err := ParseDictionary(dictionary.String())
+	require.NoError(t, err)
+	require.Len(t, dict, count)
+	assert.Equal(t, int64(count-1), dict[count-1].Member.Item.Value.Integer)
+
+	parsedItem, err := ParseItem(item.String())
+	require.NoError(t, err)
+	require.Len(t, parsedItem.Params, count)
+	assert.Equal(t, int64(count-1), parsedItem.Params[count-1].Value.Integer)
+}
+
 func TestParseErrors(t *testing.T) {
 	t.Run("list expected comma", func(t *testing.T) {
 		_, err := ParseList("a b")
@@ -259,6 +285,50 @@ func BenchmarkParseDictionary(b *testing.B) {
 		if _, err := ParseDictionary(in); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkParseDictionaryScaling(b *testing.B) {
+	for _, count := range []int{16, 256, 4096} {
+		b.Run(fmt.Sprintf("entries=%d", count), func(b *testing.B) {
+			var input strings.Builder
+			for i := range count {
+				if i > 0 {
+					input.WriteByte(',')
+				}
+				fmt.Fprintf(&input, "k%d=%d", i, i)
+			}
+			value := input.String()
+
+			b.ReportAllocs()
+			b.SetBytes(int64(len(value)))
+			for b.Loop() {
+				if _, err := ParseDictionary(value); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkParseParameterScaling(b *testing.B) {
+	for _, count := range []int{16, 256, 4096} {
+		b.Run(fmt.Sprintf("parameters=%d", count), func(b *testing.B) {
+			var input strings.Builder
+			input.WriteByte('1')
+			for i := range count {
+				fmt.Fprintf(&input, ";k%d=%d", i, i)
+			}
+			value := input.String()
+
+			b.ReportAllocs()
+			b.SetBytes(int64(len(value)))
+			for b.Loop() {
+				if _, err := ParseItem(value); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

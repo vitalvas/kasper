@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type testDefaultTransport struct{}
+
+func (*testDefaultTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("unused")
+}
 
 func TestNewTransport(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -49,6 +56,23 @@ func TestNewTransport(t *testing.T) {
 
 		transport := NewTransport(base, SignConfig{Signer: signer})
 		assert.Same(t, base, transport.base)
+	})
+
+	t.Run("copies covered component configuration", func(t *testing.T) {
+		components := []string{ComponentMethod}
+		transport := NewTransport(nil, SignConfig{Signer: signer, CoveredComponents: components})
+		components[0] = ComponentPath
+		assert.Equal(t, []string{ComponentMethod}, transport.config.CoveredComponents)
+	})
+
+	t.Run("custom global default does not panic", func(t *testing.T) {
+		original := http.DefaultTransport
+		custom := &testDefaultTransport{}
+		http.DefaultTransport = custom
+		t.Cleanup(func() { http.DefaultTransport = original })
+
+		transport := NewTransport(nil, SignConfig{Signer: signer})
+		assert.Same(t, custom, transport.base)
 	})
 
 	t.Run("signs requests automatically", func(t *testing.T) {

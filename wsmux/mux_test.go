@@ -507,3 +507,15 @@ func TestWebSocketBidirectionalStreams(t *testing.T) {
 		require.ErrorIs(t, err, io.EOF)
 	}
 }
+
+func TestNilConnectionIsClosed(t *testing.T) {
+	for _, m := range []*Mux{NewClient(nil, Options{}), NewServer(nil, Options{})} {
+		stream, err := m.Open()
+		require.ErrorIs(t, err, ErrClosed)
+		assert.Nil(t, stream)
+		stream, err = m.Accept()
+		require.ErrorIs(t, err, ErrClosed)
+		assert.Nil(t, stream)
+		require.NoError(t, m.Close())
+	}
+}

@@ -187,6 +187,21 @@ func TestSignMiddleware(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNoSigner)
 	})
 
+	t.Run("copies covered component configuration", func(t *testing.T) {
+		components := []string{ComponentStatus}
+		mw, err := SignMiddleware(SignConfig{Signer: signer, CoveredComponents: components})
+		require.NoError(t, err)
+		components[0] = ComponentMethod
+
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.NotEmpty(t, w.Header().Get("Signature"))
+	})
+
 	t.Run("signs buffered response verifiable by client", func(t *testing.T) {
 		r := mux.NewRouter()
 		r.HandleFunc("/api/test", func(w http.ResponseWriter, _ *http.Request) {
@@ -237,6 +252,39 @@ func TestSignMiddleware(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "ok", w.Body.String())
 		require.NoError(t, VerifyResponse(w.Result(), req, VerifyConfig{Resolver: resolver}))
+	})
+
+	t.Run("preserves responses without an HTTP body", func(t *testing.T) {
+		mw, err := SignMiddleware(SignConfig{Signer: signer, DigestAlgorithm: DigestSHA256})
+		require.NoError(t, err)
+
+		for _, tc := range []struct {
+			method string
+			status int
+		}{{http.MethodHead, http.StatusOK}, {http.MethodGet, http.StatusNoContent}, {http.MethodGet, http.StatusNotModified}} {
+			handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				n, writeErr := w.Write([]byte("not sent"))
+				if tc.method == http.MethodHead {
+					require.NoError(t, writeErr)
+					assert.Equal(t, len("not sent"), n)
+				} else {
+					require.ErrorIs(t, writeErr, http.ErrBodyNotAllowed)
+					assert.Zero(t, n)
+				}
+			}))
+			req := httptest.NewRequest(tc.method, "/api/empty", nil)
+			req.Host = "example.com"
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tc.status, rec.Code)
+			assert.Empty(t, rec.Body.String())
+			require.NoError(t, VerifyResponse(rec.Result(), req, VerifyConfig{
+				Resolver:      resolver,
+				RequireDigest: true,
+			}))
+		}
 	})
 
 	t.Run("signing failure returns 500", func(t *testing.T) {

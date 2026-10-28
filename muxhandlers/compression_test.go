@@ -443,6 +443,75 @@ func TestCompressionMiddleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
+
+	t.Run("preserves existing Vary values", func(t *testing.T) {
+		r := mux.NewRouter()
+		r.HandleFunc("/test", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Add("Vary", "Origin")
+			_, _ = w.Write([]byte("compress me"))
+		})
+
+		mw, err := CompressionMiddleware(CompressionConfig{})
+		require.NoError(t, err)
+		r.Use(mw)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		r.ServeHTTP(w, req)
+
+		assert.ElementsMatch(t, []string{"Origin", "Accept-Encoding"}, w.Header().Values("Vary"))
+	})
+
+	t.Run("preserves informational response handling", func(t *testing.T) {
+		mw, err := CompressionMiddleware(CompressionConfig{})
+		require.NoError(t, err)
+		rec := newInformationalRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusEarlyHints)
+			_, err := w.Write([]byte("final body"))
+			require.NoError(t, err)
+		})).ServeHTTP(rec, req)
+
+		require.Len(t, rec.informational, 1)
+		assert.Equal(t, http.StatusEarlyHints, rec.informational[0].code)
+		assert.Equal(t, http.StatusOK, rec.finalCode)
+	})
+
+	t.Run("rejects bodies forbidden by response status", func(t *testing.T) {
+		mw, err := CompressionMiddleware(CompressionConfig{})
+		require.NoError(t, err)
+		for _, status := range []int{http.StatusNoContent, http.StatusNotModified} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				n, err := w.Write([]byte("not allowed"))
+				require.ErrorIs(t, err, http.ErrBodyNotAllowed)
+				assert.Zero(t, n)
+			})).ServeHTTP(rec, req)
+			assert.Equal(t, status, rec.Code)
+			assert.Empty(t, rec.Body.String())
+			assert.Empty(t, rec.Header().Get("Content-Encoding"))
+		}
+	})
+
+	t.Run("suppresses HEAD response body", func(t *testing.T) {
+		mw, err := CompressionMiddleware(CompressionConfig{})
+		require.NoError(t, err)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, "/", nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			n, err := w.Write([]byte("representation"))
+			require.NoError(t, err)
+			assert.Equal(t, len("representation"), n)
+		})).ServeHTTP(rec, req)
+		assert.Empty(t, rec.Body.String())
+	})
 }
 
 func TestSelectEncoding(t *testing.T) {
@@ -469,6 +538,10 @@ func TestSelectEncoding(t *testing.T) {
 		{"identity only", "identity", ""},
 		{"mixed with unsupported", "br, gzip, zstd", "gzip"},
 		{"wildcard overridden by explicit gzip q=0", "gzip;q=0, *", "deflate"},
+		{"content coding is case insensitive", "GZip", "gzip"},
+		{"quality above one is rejected", "gzip;q=2", ""},
+		{"negative quality is rejected", "gzip;q=-0.1", ""},
+		{"quality parameter after extension is parsed", "gzip;level=5;Q=0", ""},
 	}
 
 	for _, tt := range tests {
@@ -496,6 +569,8 @@ func TestParseEncoding(t *testing.T) {
 		{"wildcard", "*", "*", ""},
 		{"wildcard with quality", "*;q=0.5", "*", "0.5"},
 		{"no quality param", "gzip;level=5", "gzip", ""},
+		{"case insensitive encoding and quality", "GZip;Q=0.7", "gzip", "0.7"},
+		{"quality after another parameter", "gzip;level=5;q=0.4", "gzip", "0.4"},
 	}
 
 	for _, tt := range tests {

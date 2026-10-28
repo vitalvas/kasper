@@ -56,6 +56,62 @@ func TestVerifyRequest(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("resolver cannot return a nil verifier", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/", nil)
+		req.Host = "example.com"
+		require.NoError(t, SignRequest(req, SignConfig{Signer: signer}))
+
+		nilResolver := func(*http.Request, string, Algorithm) (Verifier, error) {
+			return nil, nil
+		}
+		assert.NotPanics(t, func() {
+			assert.ErrorIs(t, VerifyRequest(req, VerifyConfig{Resolver: nilResolver}), ErrInvalidKey)
+		})
+	})
+
+	t.Run("resolver cannot return a typed nil verifier", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/", nil)
+		req.Host = "example.com"
+		require.NoError(t, SignRequest(req, SignConfig{Signer: signer}))
+
+		var typedNil *ed25519Verifier
+		typedNilResolver := func(*http.Request, string, Algorithm) (Verifier, error) {
+			return typedNil, nil
+		}
+		assert.NotPanics(t, func() {
+			assert.ErrorIs(t, VerifyRequest(req, VerifyConfig{Resolver: typedNilResolver}), ErrInvalidKey)
+		})
+	})
+
+	t.Run("resolver result must match signature parameters", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/", nil)
+		req.Host = "example.com"
+		require.NoError(t, SignRequest(req, SignConfig{Signer: signer}))
+
+		tests := []struct {
+			name     string
+			verifier Verifier
+		}{
+			{
+				name:     "algorithm",
+				verifier: verifierMetadataOverride{Verifier: verifier, algorithm: AlgorithmHMACSHA256, keyID: "test-key"},
+			},
+			{
+				name:     "key ID",
+				verifier: verifierMetadataOverride{Verifier: verifier, algorithm: AlgorithmEd25519, keyID: "other-key"},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				mismatchResolver := func(*http.Request, string, Algorithm) (Verifier, error) {
+					return tt.verifier, nil
+				}
+				assert.ErrorIs(t, VerifyRequest(req, VerifyConfig{Resolver: mismatchResolver}), ErrInvalidKey)
+			})
+		}
+	})
+
 	t.Run("tampered header fails verification", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "https://example.com/api/items", nil)
 		req.Host = "example.com"
@@ -375,6 +431,15 @@ func TestVerifyRequest(t *testing.T) {
 		assert.ErrorIs(t, err, ErrMalformedHeader)
 	})
 }
+
+type verifierMetadataOverride struct {
+	Verifier
+	algorithm Algorithm
+	keyID     string
+}
+
+func (v verifierMetadataOverride) Algorithm() Algorithm { return v.algorithm }
+func (v verifierMetadataOverride) KeyID() string        { return v.keyID }
 
 func TestFindSignatureInput(t *testing.T) {
 	t.Run("first entry when label empty", func(t *testing.T) {

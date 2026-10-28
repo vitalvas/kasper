@@ -1,5 +1,7 @@
 package httpsig
 
+import "reflect"
+
 // Algorithm identifies the HTTP message signature algorithm per RFC 9421
 // Section 3.3.
 type Algorithm string
@@ -54,4 +56,20 @@ type Verifier interface {
 
 	// KeyID returns the key identifier for this verifier.
 	KeyID() string
+}
+
+// isNilInterface reports whether value is nil, including an interface that
+// contains a typed nil pointer. Public SDK entry points use it before calling
+// user-provided Signer and Verifier implementations.
+func isNilInterface(value any) bool {
+	if value == nil {
+		return true
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }

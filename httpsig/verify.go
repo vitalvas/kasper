@@ -3,7 +3,6 @@ package httpsig
 import (
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -107,9 +106,15 @@ func verifyMessage(m sigMessage, cfg VerifyConfig) error {
 	}
 
 	// Check required components.
-	for _, req := range cfg.RequiredComponents {
-		if !slices.Contains(params.components, req) {
-			return fmt.Errorf("%w: %s", ErrMissingComponent, req)
+	if len(cfg.RequiredComponents) > 0 {
+		covered := make(map[string]struct{}, len(params.components))
+		for _, component := range params.components {
+			covered[component] = struct{}{}
+		}
+		for _, required := range cfg.RequiredComponents {
+			if _, present := covered[required]; !present {
+				return fmt.Errorf("%w: %s", ErrMissingComponent, required)
+			}
 		}
 	}
 
@@ -134,6 +139,9 @@ func verifyMessage(m sigMessage, cfg VerifyConfig) error {
 	verifier, err := cfg.Resolver(m.req, params.keyID, params.alg)
 	if err != nil {
 		return err
+	}
+	if isNilInterface(verifier) || verifier.Algorithm() != params.alg || verifier.KeyID() != params.keyID {
+		return ErrInvalidKey
 	}
 
 	// Reconstruct the signature base.

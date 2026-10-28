@@ -52,6 +52,16 @@ func TestSignRequest(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNoSigner)
 	})
 
+	t.Run("typed nil signer returns error without panicking", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "https://example.com/", nil)
+		var signer *ed25519Signer
+
+		assert.NotPanics(t, func() {
+			err := SignRequest(req, SignConfig{Signer: signer})
+			assert.ErrorIs(t, err, ErrNoSigner)
+		})
+	})
+
 	t.Run("ed25519 signing", func(t *testing.T) {
 		_, priv, err := ed25519.GenerateKey(rand.Reader)
 		require.NoError(t, err)
@@ -215,6 +225,23 @@ func TestSignRequest(t *testing.T) {
 		input := req.Header.Get("Signature-Input")
 		// Should appear exactly once.
 		assert.Equal(t, 1, strings.Count(input, "\"content-digest\""))
+	})
+
+	t.Run("adding content digest does not mutate caller backing array", func(t *testing.T) {
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		require.NoError(t, err)
+		signer, err := NewEd25519Signer("k", priv)
+		require.NoError(t, err)
+
+		backing := []string{ComponentMethod, "sentinel"}
+		req := httptest.NewRequest(http.MethodPost, "https://example.com/", strings.NewReader("body"))
+		err = SignRequest(req, SignConfig{
+			Signer:            signer,
+			CoveredComponents: backing[:1],
+			DigestAlgorithm:   DigestSHA256,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "sentinel", backing[1])
 	})
 
 	t.Run("multiple signatures on same request", func(t *testing.T) {

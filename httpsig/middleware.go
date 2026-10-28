@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"slices"
 
 	"go.vitalvas.com/kasper/mux"
 )
@@ -64,13 +65,14 @@ func defaultOnError(w http.ResponseWriter, _ *http.Request, _ error) {
 //
 // It returns ErrNoSigner if SignConfig.Signer is nil.
 func SignMiddleware(cfg SignConfig) (mux.MiddlewareFunc, error) {
-	if cfg.Signer == nil {
+	if isNilInterface(cfg.Signer) {
 		return nil, ErrNoSigner
 	}
 
+	cfg.CoveredComponents = slices.Clone(cfg.CoveredComponents)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rec := &responseRecorder{header: w.Header(), writer: w}
+			rec := &responseRecorder{header: w.Header(), writer: w, head: r.Method == http.MethodHead}
 			next.ServeHTTP(rec, r)
 
 			if rec.status == 0 {
@@ -105,6 +107,7 @@ type responseRecorder struct {
 	body   bytes.Buffer
 	status int
 	writer http.ResponseWriter
+	head   bool
 }
 
 func (r *responseRecorder) Header() http.Header { return r.header }
@@ -123,6 +126,12 @@ func (r *responseRecorder) WriteHeader(code int) {
 func (r *responseRecorder) Write(b []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
+	}
+	if r.status == http.StatusNoContent || r.status == http.StatusNotModified {
+		return 0, http.ErrBodyNotAllowed
+	}
+	if r.head {
+		return len(b), nil
 	}
 
 	return r.body.Write(b)

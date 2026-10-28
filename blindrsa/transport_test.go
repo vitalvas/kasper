@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type testDefaultTransport struct{}
+
+func (*testDefaultTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("unused")
+}
 
 func TestNewClient(t *testing.T) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -65,6 +72,21 @@ func TestNewClient(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, client)
+	})
+
+	t.Run("custom global default does not panic", func(t *testing.T) {
+		original := http.DefaultTransport
+		custom := &testDefaultTransport{}
+		http.DefaultTransport = custom
+		t.Cleanup(func() { http.DefaultTransport = original })
+
+		client, err := NewClient(ClientConfig{
+			Key:           pub,
+			Variant:       VariantSHA384PSSDeterministic,
+			TokenEndpoint: "http://localhost/issue",
+		})
+		require.NoError(t, err)
+		assert.Same(t, custom, client.httpClient.Transport)
 	})
 
 	t.Run("custom transport", func(t *testing.T) {
@@ -225,5 +247,23 @@ func TestClientObtainSignature(t *testing.T) {
 
 		_, _, err = client.ObtainSignature(context.Background(), msg)
 		assert.Error(t, err)
+	})
+
+	t.Run("oversized issuer response is rejected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(bytes.Repeat([]byte{0xAB}, keyLen(pub)+1024))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			Key:           pub,
+			Variant:       VariantSHA384PSSDeterministic,
+			TokenEndpoint: server.URL,
+		})
+		require.NoError(t, err)
+
+		_, _, err = client.ObtainSignature(context.Background(), msg)
+		assert.ErrorIs(t, err, ErrInvalidInput)
 	})
 }

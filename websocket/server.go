@@ -159,6 +159,11 @@ func (u *Upgrader) selectSubprotocol(r *http.Request) string {
 // This implements the server-side opening handshake per RFC 6455, section 4.2.2,
 // and RFC 8441 for HTTP/2 WebSocket bootstrapping.
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
+	if err := validateResponseHeader(responseHeader); err != nil {
+		u.returnError(w, r, http.StatusInternalServerError, err)
+		return nil, err
+	}
+
 	// Check for HTTP/2 WebSocket upgrade (RFC 8441).
 	if r.ProtoMajor == 2 && r.Method == http.MethodConnect {
 		return u.upgradeHTTP2(w, r, responseHeader)
@@ -191,12 +196,17 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 
 	// Extract challenge key per RFC 6455, section 4.2.1, item 5.
 	challengeKey := r.Header.Get("Sec-WebSocket-Key")
-	if challengeKey == "" {
-		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: missing Sec-WebSocket-Key"))
+	if !validChallengeKey(challengeKey) {
+		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: invalid Sec-WebSocket-Key"))
 		return nil, ErrBadHandshake
 	}
 
 	subprotocol := u.selectSubprotocol(r)
+	if subprotocol != "" && !validHeaderFieldName(subprotocol) {
+		err := fmt.Errorf("%w: invalid subprotocol", ErrInvalidResponseHeader)
+		u.returnError(w, r, http.StatusInternalServerError, err)
+		return nil, err
+	}
 
 	// Negotiate permessage-deflate extension per RFC 7692.
 	var compress bool
@@ -224,7 +234,10 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	}
 
 	if u.HandshakeTimeout > 0 {
-		_ = netConn.SetWriteDeadline(time.Now().Add(u.HandshakeTimeout))
+		if err := netConn.SetWriteDeadline(time.Now().Add(u.HandshakeTimeout)); err != nil {
+			netConn.Close()
+			return nil, err
+		}
 	}
 
 	// Send server handshake response per RFC 6455, section 4.2.2.
@@ -266,7 +279,10 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	}
 
 	if u.HandshakeTimeout > 0 {
-		_ = netConn.SetWriteDeadline(time.Time{})
+		if err := netConn.SetWriteDeadline(time.Time{}); err != nil {
+			netConn.Close()
+			return nil, err
+		}
 	}
 
 	conn := newConnFromBufio(netConn, brw, connConfig{
@@ -280,6 +296,68 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	u.applyConnPolicy(conn)
 
 	return conn, nil
+}
+
+var reservedResponseHeaders = map[string]struct{}{
+	"connection":               {},
+	"content-length":           {},
+	"sec-websocket-accept":     {},
+	"sec-websocket-extensions": {},
+	"sec-websocket-protocol":   {},
+	"transfer-encoding":        {},
+	"upgrade":                  {},
+}
+
+func validateResponseHeader(header http.Header) error {
+	for name, values := range header {
+		if !validHeaderFieldName(name) {
+			return fmt.Errorf("%w: invalid field name %q", ErrInvalidResponseHeader, name)
+		}
+		if _, reserved := reservedResponseHeaders[strings.ToLower(name)]; reserved {
+			return fmt.Errorf("%w: reserved field %q", ErrInvalidResponseHeader, name)
+		}
+		for _, value := range values {
+			if !validHeaderFieldValue(value) {
+				return fmt.Errorf("%w: invalid value for %q", ErrInvalidResponseHeader, name)
+			}
+		}
+	}
+	return nil
+}
+
+func validHeaderFieldName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range len(name) {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		switch c {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validHeaderFieldValue(value string) bool {
+	for i := range len(value) {
+		c := value[i]
+		if c == '\t' || c >= ' ' && c != 0x7f {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validChallengeKey(key string) bool {
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	return err == nil && len(decoded) == 16
 }
 
 // http2ConnAdapter adapts an HTTP/2 stream into an io.ReadWriteCloser
@@ -331,6 +409,11 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 	}
 
 	subprotocol := u.selectSubprotocol(r)
+	if subprotocol != "" && !validHeaderFieldName(subprotocol) {
+		err := fmt.Errorf("%w: invalid subprotocol", ErrInvalidResponseHeader)
+		u.returnError(w, r, http.StatusInternalServerError, err)
+		return nil, err
+	}
 
 	// Negotiate permessage-deflate extension per RFC 7692.
 	var compress bool

@@ -24,8 +24,9 @@ type ClientConfig struct {
 	TokenEndpoint string
 
 	// Transport is the HTTP transport used for requests to the issuer.
-	// When nil, a clone of [http.DefaultTransport] is used, giving an
-	// independent connection pool.
+	// When nil and [http.DefaultTransport] is an *http.Transport, a clone is
+	// used, giving an independent connection pool. Other default RoundTripper
+	// implementations are used directly.
 	Transport *http.Transport
 }
 
@@ -39,8 +40,9 @@ type Client struct {
 }
 
 // NewClient creates a blind signature [Client]. When [ClientConfig.Transport]
-// is nil, a clone of [http.DefaultTransport] is used, giving an independent
-// connection pool.
+// is nil and [http.DefaultTransport] is an *http.Transport, a clone is used,
+// giving an independent connection pool. Other default RoundTripper
+// implementations are used directly.
 func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Key == nil {
 		return nil, ErrNoVerifier
@@ -62,7 +64,14 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Transport != nil {
 		rt = cfg.Transport
 	} else {
-		rt = http.DefaultTransport.(*http.Transport).Clone()
+		if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+			rt = transport.Clone()
+		} else {
+			// Applications may replace http.DefaultTransport with an arbitrary
+			// RoundTripper. Honor that configuration instead of panicking on a
+			// type assertion; only *http.Transport supports cloning.
+			rt = http.DefaultTransport
+		}
 	}
 
 	return &Client{
@@ -107,7 +116,8 @@ func (c *Client) ObtainSignature(ctx context.Context, msg []byte) (sig []byte, s
 		return nil, nil, fmt.Errorf("%w: issuer returned status %d", ErrSignatureFailed, resp.StatusCode)
 	}
 
-	blindSig, err := io.ReadAll(resp.Body)
+	maxSignatureSize := int64(keyLen(c.pub)) + 1
+	blindSig, err := io.ReadAll(io.LimitReader(resp.Body, maxSignatureSize))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrSignatureFailed, err)
 	}

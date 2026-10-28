@@ -19,10 +19,17 @@ type Transport struct {
 
 // NewTransport creates an encrypting Transport that delegates to base after
 // encrypting each request and before returning the decrypted response. When
-// base is nil, a clone of http.DefaultTransport is used.
+// base is nil and http.DefaultTransport is an *http.Transport, a clone is
+// used. Other default RoundTripper implementations are used directly.
 func NewTransport(base http.RoundTripper, cfg ClientConfig) *Transport {
 	if base == nil {
-		base = http.DefaultTransport.(*http.Transport).Clone()
+		if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+			base = transport.Clone()
+		} else {
+			// http.DefaultTransport is replaceable by applications and is not
+			// required to be an *http.Transport.
+			base = http.DefaultTransport
+		}
 	}
 
 	return &Transport{
@@ -56,7 +63,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	resp, err := t.base.RoundTrip(clone)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		return nil, err
+	}
+	if resp == nil {
+		return nil, ErrMalformed
 	}
 
 	if isProblem(resp) {

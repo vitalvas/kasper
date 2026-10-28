@@ -59,6 +59,10 @@ var (
 	// installs a cache automatically, so it only affects direct DecryptRequest
 	// callers that did not set ServerConfig.Replay.
 	ErrNoReplayCache = errors.New("e2ee: no replay cache")
+
+	// ErrInvalidState is returned when a response encryptor or decryptor was
+	// not created by a successful request operation.
+	ErrInvalidState = errors.New("e2ee: invalid response state")
 )
 
 // errorCode returns the protocol error code string for a sentinel error,

@@ -60,15 +60,44 @@ type Options struct {
 }
 
 // NewClient wraps conn as the stream-initiating (odd-ID) side and starts the
-// read loop.
+// read loop. A nil conn produces a closed Mux whose operations return
+// [ErrClosed].
 func NewClient(conn *websocket.Conn, opts Options) *Mux {
+	if conn == nil {
+		return newClosedMux(opts, true)
+	}
 	return newMux(conn, opts, true)
 }
 
 // NewServer wraps conn as the accepting (even-ID) side and starts the read
-// loop. Peer-initiated streams arrive via Accept.
+// loop. Peer-initiated streams arrive via Accept. A nil conn produces a closed
+// Mux whose operations return [ErrClosed].
 func NewServer(conn *websocket.Conn, opts Options) *Mux {
+	if conn == nil {
+		return newClosedMux(opts, false)
+	}
 	return newMux(conn, opts, false)
+}
+
+// newClosedMux gives invalid nil-connection construction deterministic SDK
+// semantics: operations report ErrClosed instead of panicking in a background
+// read goroutine.
+func newClosedMux(opts Options, clientOdd bool) *Mux {
+	bufSize := opts.StreamBuffer
+	if bufSize <= 0 {
+		bufSize = defaultStreamBuffer
+	}
+	done := make(chan struct{})
+	close(done)
+	return &Mux{
+		bufSize:   bufSize,
+		clientOdd: clientOdd,
+		streams:   make(map[uint32]*Stream),
+		closed:    true,
+		accept:    make(chan *Stream),
+		resets:    make(chan uint32),
+		done:      done,
+	}
 }
 
 func newMux(conn messageConn, opts Options, clientOdd bool) *Mux {

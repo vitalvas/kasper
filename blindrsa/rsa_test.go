@@ -17,6 +17,13 @@ func TestValidatePublicKey(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidKey)
 	})
 
+	t.Run("zero value key", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			err := validatePublicKey(&rsa.PublicKey{})
+			assert.ErrorIs(t, err, ErrInvalidKey)
+		})
+	})
+
 	t.Run("small key", func(t *testing.T) {
 		key, err := rsa.GenerateKey(rand.Reader, 1024)
 		require.NoError(t, err)
@@ -49,6 +56,13 @@ func TestValidatePrivateKey(t *testing.T) {
 	t.Run("nil key", func(t *testing.T) {
 		err := validatePrivateKey(nil)
 		assert.ErrorIs(t, err, ErrInvalidKey)
+	})
+
+	t.Run("zero value key", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			err := validatePrivateKey(&rsa.PrivateKey{})
+			assert.ErrorIs(t, err, ErrInvalidKey)
+		})
 	})
 
 	t.Run("small key", func(t *testing.T) {

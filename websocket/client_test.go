@@ -69,6 +69,75 @@ func TestDialerDialContext(t *testing.T) {
 		_, _, err := d.DialContext(ctx, "ws://example.com", nil)
 		require.Error(t, err)
 	})
+
+	t.Run("cancellation interrupts stalled opening handshake", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer server.Close()
+		dialed := make(chan struct{})
+		d := &Dialer{NetDialContext: func(context.Context, string, string) (net.Conn, error) {
+			close(dialed)
+			return client, nil
+		}}
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() {
+			_, _, err := d.DialContext(ctx, "ws://example.com", nil)
+			errCh <- err
+		}()
+		<-dialed
+		cancel()
+		require.ErrorIs(t, <-errCh, context.Canceled)
+	})
+
+	t.Run("cancellation interrupts stalled proxy CONNECT", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer server.Close()
+		dialed := make(chan struct{})
+		proxyURL, _ := url.Parse("http://proxy.example.com")
+		d := &Dialer{
+			Proxy: func(*http.Request) (*url.URL, error) { return proxyURL, nil },
+			NetDialContext: func(context.Context, string, string) (net.Conn, error) {
+				close(dialed)
+				return client, nil
+			},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() {
+			_, _, err := d.DialContext(ctx, "ws://example.com", nil)
+			errCh <- err
+		}()
+		<-dialed
+		cancel()
+		require.ErrorIs(t, <-errCh, context.Canceled)
+	})
+}
+
+func TestInterruptConnOnCancelCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	cleanup := interruptConnOnCancel(ctx, client)
+	cleanup()
+	cleanup() // Cleanup is deliberately safe for deferred and explicit use.
+	cancel()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := server.Write([]byte("x"))
+		writeDone <- err
+	}()
+
+	buf := make([]byte, 1)
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	_, err := io.ReadFull(client, buf)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("x"), buf)
+	require.NoError(t, <-writeDone)
 }
 
 func TestDialerDial(t *testing.T) {
@@ -480,7 +549,7 @@ func TestDialerIsHTTP2(t *testing.T) {
 	}{
 		{"Nil transport is not HTTP/2", nil, false},
 		{"http.Transport is not HTTP/2", &http.Transport{}, false},
-		{"http2.Transport is HTTP/2", &http2.Transport{}, true},
+		{"http2.Transport is HTTP/2", &http2.Transport{}, true}, //nolint:staticcheck // exercises the supported RFC 8441 path
 	}
 
 	for _, tt := range tests {
@@ -523,7 +592,9 @@ func TestDialerGetProxyURL(t *testing.T) {
 	t.Run("No proxy when HTTPClient is nil", func(t *testing.T) {
 		d := &Dialer{}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(u))
+		proxyURL, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Nil(t, proxyURL)
 	})
 
 	t.Run("No proxy when Proxy function is nil", func(t *testing.T) {
@@ -531,7 +602,9 @@ func TestDialerGetProxyURL(t *testing.T) {
 			HTTPClient: &http.Client{Transport: &http.Transport{}},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(u))
+		proxyURL, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Nil(t, proxyURL)
 	})
 
 	t.Run("Returns proxy URL from transport", func(t *testing.T) {
@@ -546,7 +619,9 @@ func TestDialerGetProxyURL(t *testing.T) {
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Equal(t, proxyURL, d.getProxyURL(u))
+		got, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Equal(t, proxyURL, got)
 	})
 
 	t.Run("d.Proxy takes precedence over transport", func(t *testing.T) {
@@ -565,7 +640,24 @@ func TestDialerGetProxyURL(t *testing.T) {
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Equal(t, directProxyURL, d.getProxyURL(u))
+		got, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Equal(t, directProxyURL, got)
+	})
+
+	t.Run("nil HTTPClient uses default client transport", func(t *testing.T) {
+		original := http.DefaultClient
+		proxyURL, _ := url.Parse("http://default-proxy.example.com:8080")
+		http.DefaultClient = &http.Client{Transport: &http.Transport{
+			Proxy: func(*http.Request) (*url.URL, error) { return proxyURL, nil },
+		}}
+		t.Cleanup(func() { http.DefaultClient = original })
+
+		d := &Dialer{}
+		u, _ := url.Parse("http://example.com")
+		got, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Equal(t, proxyURL, got)
 	})
 }
 
@@ -2134,7 +2226,9 @@ func TestGetProxyURLErrors(t *testing.T) {
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(u))
+		proxyURL, err := d.getProxyURL(u)
+		assert.Nil(t, proxyURL)
+		require.EqualError(t, err, "proxy error")
 	})
 
 	t.Run("d.Proxy returns nil URL", func(t *testing.T) {
@@ -2144,7 +2238,9 @@ func TestGetProxyURLErrors(t *testing.T) {
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(u))
+		proxyURL, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Nil(t, proxyURL)
 	})
 
 	t.Run("transport.Proxy returns error", func(t *testing.T) {
@@ -2158,7 +2254,9 @@ func TestGetProxyURLErrors(t *testing.T) {
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(u))
+		proxyURL, err := d.getProxyURL(u)
+		assert.Nil(t, proxyURL)
+		require.EqualError(t, err, "transport proxy error")
 	})
 
 	t.Run("transport.Proxy returns nil URL", func(t *testing.T) {
@@ -2172,8 +2270,18 @@ func TestGetProxyURLErrors(t *testing.T) {
 			},
 		}
 		u, _ := url.Parse("http://example.com")
-		assert.Nil(t, d.getProxyURL(u))
+		proxyURL, err := d.getProxyURL(u)
+		require.NoError(t, err)
+		assert.Nil(t, proxyURL)
 	})
+}
+
+func TestDialContextReturnsProxyResolutionError(t *testing.T) {
+	want := errors.New("proxy configuration failed")
+	d := &Dialer{Proxy: func(*http.Request) (*url.URL, error) { return nil, want }}
+
+	_, _, err := d.DialContext(context.Background(), "ws://example.com", nil)
+	require.ErrorIs(t, err, want)
 }
 
 func TestDialTLSHandshakeFailure(t *testing.T) {
@@ -2200,7 +2308,7 @@ func TestDialContextHTTP2Path(t *testing.T) {
 	// The connection will fail because http2.Transport can't connect, but the dispatch is hit.
 	d := &Dialer{
 		HTTPClient: &http.Client{
-			Transport: &http2.Transport{},
+			Transport: &http2.Transport{}, //nolint:staticcheck // exercises the supported RFC 8441 path
 		},
 	}
 

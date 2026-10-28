@@ -23,8 +23,8 @@ func Finalize(variant Variant, pub *rsa.PublicKey, blindSig []byte, state *State
 		return nil, err
 	}
 
-	if state == nil {
-		return nil, fmt.Errorf("%w: state must not be nil", ErrInvalidInput)
+	if state == nil || state.blindInv == nil {
+		return nil, fmt.Errorf("%w: invalid blinding state", ErrInvalidInput)
 	}
 
 	kLen := keyLen(pub)

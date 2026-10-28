@@ -214,11 +214,15 @@ func TestOriginValidation(t *testing.T) {
 		wantStatus int
 	}{
 		{"same-origin allowed", "example.com", "https://example.com", http.StatusOK},
+		{"same-origin host is case insensitive", "example.com", "HTTPS://EXAMPLE.COM", http.StatusOK},
 		{"trusted origin allowed", "example.com", "https://trusted.example.com", http.StatusOK},
 		{"wildcard subdomain allowed", "example.com", "https://api.partner.com", http.StatusOK},
 		{"wildcard parent host rejected", "example.com", "https://partner.com", http.StatusForbidden},
 		{"untrusted origin rejected", "example.com", "https://evil.com", http.StatusForbidden},
 		{"null origin rejected", "example.com", "null", http.StatusForbidden},
+		{"origin path rejected", "example.com", "https://example.com/path", http.StatusForbidden},
+		{"origin query rejected", "example.com", "https://example.com?x=1", http.StatusForbidden},
+		{"origin userinfo rejected", "example.com", "https://user@example.com", http.StatusForbidden},
 	}
 
 	for _, tt := range tests {
@@ -1155,6 +1159,9 @@ func TestParseOriginPatternErrors(t *testing.T) {
 		"://nohost",   // no scheme/host
 		"justastring", // missing scheme
 		"http://",     // empty host
+		"https://example.com/path",
+		"https://example.com?query=1",
+		"https://user@example.com",
 	}
 	for _, in := range tests {
 		t.Run(in, func(t *testing.T) {

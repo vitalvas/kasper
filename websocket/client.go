@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -114,7 +115,9 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 	// Check if transport is HTTP/2.
 	if d.isHTTP2(client) {
 		conn, resp, err = d.dialHTTP2(ctx, client, u, requestHeader)
-	} else if proxyURL := d.getProxyURL(u); proxyURL != nil {
+	} else if proxyURL, proxyErr := d.getProxyURL(u); proxyErr != nil {
+		return nil, nil, proxyErr
+	} else if proxyURL != nil {
 		// Check if proxy is configured - need special handling for WebSocket.
 		conn, resp, err = d.dialWithProxy(ctx, u, proxyURL, requestHeader)
 	} else {
@@ -134,38 +137,46 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 
 // isHTTP2 checks if the client's transport is HTTP/2.
 func (d *Dialer) isHTTP2(client *http.Client) bool {
-	if client.Transport == nil {
-		return false
-	}
-	_, ok := client.Transport.(*http2.Transport)
+	// RFC 8441 still needs the explicit x/net transport path here because the
+	// SDK accepts it as a signal to build an extended CONNECT request.
+	_, ok := effectiveRoundTripper(client).(*http2.Transport) //nolint:staticcheck // compatibility with existing RFC 8441 callers
 	return ok
 }
 
-// getProxyURL returns the proxy URL for the given target URL, or nil if no proxy.
+// effectiveRoundTripper resolves the same default transport semantics as
+// http.Client: a nil client transport delegates to http.DefaultTransport.
+func effectiveRoundTripper(client *http.Client) http.RoundTripper {
+	if client != nil && client.Transport != nil {
+		return client.Transport
+	}
+	return http.DefaultTransport
+}
+
+func (d *Dialer) effectiveHTTPTransport() *http.Transport {
+	client := d.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	transport, _ := effectiveRoundTripper(client).(*http.Transport)
+	return transport
+}
+
+// getProxyURL returns the proxy URL for the given target URL, or nil if no
+// proxy. Proxy resolution errors are returned rather than silently bypassing
+// the configured proxy.
 // Resolution chain: d.Proxy -> transport.Proxy.
-func (d *Dialer) getProxyURL(u *url.URL) *url.URL {
+func (d *Dialer) getProxyURL(u *url.URL) (*url.URL, error) {
 	req := &http.Request{URL: u}
 
 	if d.Proxy != nil {
-		proxyURL, err := d.Proxy(req)
-		if err != nil || proxyURL == nil {
-			return nil
-		}
-		return proxyURL
+		return d.Proxy(req)
 	}
 
-	if d.HTTPClient != nil {
-		transport, ok := d.HTTPClient.Transport.(*http.Transport)
-		if ok && transport != nil && transport.Proxy != nil {
-			proxyURL, err := transport.Proxy(req)
-			if err != nil || proxyURL == nil {
-				return nil
-			}
-			return proxyURL
-		}
+	if transport := d.effectiveHTTPTransport(); transport != nil && transport.Proxy != nil {
+		return transport.Proxy(req)
 	}
 
-	return nil
+	return nil, nil
 }
 
 // tlsConfig returns the TLS configuration for the given server name.
@@ -179,14 +190,12 @@ func (d *Dialer) tlsConfig(serverName string) *tls.Config {
 		return cfg
 	}
 
-	if d.HTTPClient != nil {
-		if transport, ok := d.HTTPClient.Transport.(*http.Transport); ok && transport != nil && transport.TLSClientConfig != nil {
-			cfg := transport.TLSClientConfig.Clone()
-			if cfg.ServerName == "" {
-				cfg.ServerName = serverName
-			}
-			return cfg
+	if transport := d.effectiveHTTPTransport(); transport != nil && transport.TLSClientConfig != nil {
+		cfg := transport.TLSClientConfig.Clone()
+		if cfg.ServerName == "" {
+			cfg.ServerName = serverName
 		}
+		return cfg
 	}
 
 	return &tls.Config{ServerName: serverName}
@@ -196,10 +205,7 @@ func (d *Dialer) tlsConfig(serverName string) *tls.Config {
 // TLS fast-path (transport.DialTLSContext), then TCP dial (d.NetDialContext ->
 // transport.DialContext -> net.Dialer), then TLS handshake if needed.
 func (d *Dialer) dial(ctx context.Context, isTLS bool, hostPort, serverName string) (net.Conn, error) {
-	var transport *http.Transport
-	if d.HTTPClient != nil {
-		transport, _ = d.HTTPClient.Transport.(*http.Transport)
-	}
+	transport := d.effectiveHTTPTransport()
 
 	// TLS fast-path: use transport.DialTLSContext if available.
 	if isTLS && transport != nil && transport.DialTLSContext != nil {
@@ -323,10 +329,7 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 	var proxyConn net.Conn
 	var err error
 
-	var transport *http.Transport
-	if d.HTTPClient != nil {
-		transport, _ = d.HTTPClient.Transport.(*http.Transport)
-	}
+	transport := d.effectiveHTTPTransport()
 
 	switch {
 	case d.NetDialContext != nil:
@@ -340,6 +343,12 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		proxyConn.Close()
+		return nil, err
+	}
+	stopCancelWatch := interruptConnOnCancel(ctx, proxyConn)
+	defer stopCancelWatch()
 
 	// Send HTTP CONNECT request.
 	connectReq := &http.Request{
@@ -359,7 +368,7 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 
 	if err := connectReq.Write(proxyConn); err != nil {
 		proxyConn.Close()
-		return nil, err
+		return nil, preferContextError(ctx, err)
 	}
 
 	// Read proxy response.
@@ -367,7 +376,7 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 	resp, err := http.ReadResponse(br, connectReq)
 	if err != nil {
 		proxyConn.Close()
-		return nil, err
+		return nil, preferContextError(ctx, err)
 	}
 	resp.Body.Close()
 
@@ -383,17 +392,63 @@ func (d *Dialer) dialProxy(ctx context.Context, proxyURL *url.URL, targetURL *ur
 		tlsConn := tls.Client(proxyConn, tlsConf)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			proxyConn.Close()
+			return nil, preferContextError(ctx, err)
+		}
+		if err := ctx.Err(); err != nil {
+			proxyConn.Close()
+			return nil, err
+		}
+		stopCancelWatch()
+		if err := ctx.Err(); err != nil {
+			proxyConn.Close()
 			return nil, err
 		}
 		return tlsConn, nil
 	}
 
+	stopCancelWatch()
+	if err := ctx.Err(); err != nil {
+		proxyConn.Close()
+		return nil, err
+	}
 	return proxyConn, nil
+}
+
+// interruptConnOnCancel unblocks raw connection I/O when a context is
+// cancelled. The returned cleanup waits for an already-started callback so it
+// cannot set a deadline after ownership of the connection has moved on.
+func interruptConnOnCancel(ctx context.Context, conn net.Conn) func() {
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+		close(finished)
+	})
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if !stop() {
+				<-finished
+			}
+		})
+	}
+}
+
+func preferContextError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
 }
 
 // doHandshake performs the client-side opening handshake per RFC 6455, section 4.1.
 // Used for connections established via raw net.Conn (direct dial and proxy paths).
-func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
+func (d *Dialer) doHandshake(ctx context.Context, netConn net.Conn, u *url.URL, requestHeader http.Header) (*Conn, *http.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	stopCancelWatch := interruptConnOnCancel(ctx, netConn)
+	defer stopCancelWatch()
+
 	challengeKey, err := generateChallengeKey()
 	if err != nil {
 		return nil, nil, err
@@ -418,13 +473,13 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 	}
 
 	if err := req.Write(netConn); err != nil {
-		return nil, nil, err
+		return nil, nil, preferContextError(ctx, err)
 	}
 
 	br := bufio.NewReader(netConn)
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, preferContextError(ctx, err)
 	}
 
 	if d.Jar != nil {
@@ -436,6 +491,11 @@ func (d *Dialer) doHandshake(_ context.Context, netConn net.Conn, u *url.URL, re
 	subprotocol, compress, err := d.validateHTTP1Response(resp, challengeKey)
 	if err != nil {
 		defer resp.Body.Close()
+		return nil, resp, err
+	}
+	stopCancelWatch()
+	if err := ctx.Err(); err != nil {
+		resp.Body.Close()
 		return nil, resp, err
 	}
 

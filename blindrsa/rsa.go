@@ -24,7 +24,7 @@ var bigOne = big.NewInt(1)
 // validatePublicKey checks that pub is non-nil, at least minRSAKeyBits,
 // and has a public exponent of at least 65537.
 func validatePublicKey(pub *rsa.PublicKey) error {
-	if pub == nil {
+	if pub == nil || pub.N == nil || pub.N.Sign() <= 0 {
 		return fmt.Errorf("%w: rsa public key must not be nil", ErrInvalidKey)
 	}
 
@@ -35,6 +35,9 @@ func validatePublicKey(pub *rsa.PublicKey) error {
 	if pub.E < minRSAPublicExponent {
 		return fmt.Errorf("%w: rsa public exponent must be at least %d", ErrInvalidKey, minRSAPublicExponent)
 	}
+	if pub.N.Bit(0) == 0 {
+		return fmt.Errorf("%w: rsa modulus must be odd", ErrInvalidKey)
+	}
 
 	return nil
 }
@@ -42,7 +45,7 @@ func validatePublicKey(pub *rsa.PublicKey) error {
 // validatePrivateKey checks that priv is non-nil, at least minRSAKeyBits,
 // and has a public exponent of at least 65537.
 func validatePrivateKey(priv *rsa.PrivateKey) error {
-	if priv == nil {
+	if priv == nil || priv.N == nil || priv.N.Sign() <= 0 || priv.D == nil || priv.D.Sign() <= 0 {
 		return fmt.Errorf("%w: rsa private key must not be nil", ErrInvalidKey)
 	}
 
@@ -52,6 +55,9 @@ func validatePrivateKey(priv *rsa.PrivateKey) error {
 
 	if priv.E < minRSAPublicExponent {
 		return fmt.Errorf("%w: rsa public exponent must be at least %d", ErrInvalidKey, minRSAPublicExponent)
+	}
+	if priv.N.Bit(0) == 0 {
+		return fmt.Errorf("%w: rsa modulus must be odd", ErrInvalidKey)
 	}
 
 	return nil

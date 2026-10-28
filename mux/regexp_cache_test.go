@@ -34,14 +34,17 @@ func TestRegexpCompileFunc(t *testing.T) {
 	t.Run("uses custom compile function", func(t *testing.T) {
 		var called bool
 		original := RegexpCompileFunc
-		t.Cleanup(func() { RegexpCompileFunc = original })
+		regexpCache.Clear()
+		t.Cleanup(func() {
+			RegexpCompileFunc = original
+			regexpCache.Clear()
+		})
 
 		RegexpCompileFunc = func(expr string) (*regexp.Regexp, error) {
 			called = true
 			return regexp.Compile(expr)
 		}
 
-		// Use a unique pattern to avoid cache hit
 		re, err := compileRegexp(`^custom-compile-test-[a-z]+$`)
 		require.NoError(t, err)
 		assert.True(t, called)

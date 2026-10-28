@@ -1,14 +1,18 @@
 package e2ee
 
 import (
+	"bytes"
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"go.vitalvas.com/kasper/mux"
@@ -18,6 +22,10 @@ import (
 // encryption key set (draft-vasylenko-e2ee-http Section 4.1; IANA registration
 // Section 10.1).
 const WellKnownPath = "/.well-known/encryption-keys"
+
+// maxFetchedKeySetSize bounds metadata fetched from an untrusted issuer.
+// Application payload sizes remain entirely under caller control.
+const maxFetchedKeySetSize = 1 << 20
 
 // algX25519 is the only key agreement algorithm defined by this version
 // (draft-vasylenko-e2ee-http Section 4.2).
@@ -195,14 +203,19 @@ func validateKeyParams(kid string, maxSkew int, aeads []AEAD) ([]AEAD, error) {
 // public renders the server key as a published PublicKey entry.
 func (k *PrivateKey) public() PublicKey {
 	pubBytes := k.Priv.PublicKey().Bytes()
+	var notBefore *time.Time
+	if k.NotBefore != nil {
+		value := *k.NotBefore
+		notBefore = &value
+	}
 
 	return PublicKey{
 		KID:         k.KID,
 		Alg:         algX25519,
-		AEADs:       k.AEADs,
+		AEADs:       slices.Clone(k.AEADs),
 		PublicKey:   base64.RawURLEncoding.EncodeToString(pubBytes),
 		Fingerprint: base64.RawURLEncoding.EncodeToString(fingerprint(pubBytes)),
-		NotBefore:   k.NotBefore,
+		NotBefore:   notBefore,
 		NotAfter:    k.NotAfter,
 		MaxSkew:     k.MaxSkew,
 		pub:         k.Priv.PublicKey(),
@@ -236,8 +249,8 @@ type ServerKeySet struct {
 // NewServerKeySet creates a key set for issuer with the given keys, in
 // preference order (most preferred first). The issuer must be an HTTPS origin.
 func NewServerKeySet(issuer string, keys ...*PrivateKey) (*ServerKeySet, error) {
-	if issuer == "" {
-		return nil, fmt.Errorf("%w: issuer must not be empty", ErrInvalidKey)
+	if err := validateIssuerOrigin(issuer); err != nil {
+		return nil, fmt.Errorf("%w: invalid issuer: %s", ErrInvalidKey, err)
 	}
 
 	if len(keys) == 0 {
@@ -254,16 +267,40 @@ func NewServerKeySet(issuer string, keys ...*PrivateKey) (*ServerKeySet, error) 
 		if k == nil || k.Priv == nil {
 			return nil, fmt.Errorf("%w: nil key", ErrInvalidKey)
 		}
+		aeads, err := validateKeyParams(k.KID, k.MaxSkew, k.AEADs)
+		if err != nil {
+			return nil, err
+		}
 
 		if _, dup := set.keys[k.KID]; dup {
 			return nil, fmt.Errorf("%w: duplicate kid %q", ErrInvalidKey, k.KID)
 		}
 
-		set.keys[k.KID] = k
+		keyCopy := *k
+		keyCopy.AEADs = slices.Clone(aeads)
+		if k.NotBefore != nil {
+			notBefore := *k.NotBefore
+			keyCopy.NotBefore = &notBefore
+		}
+		set.keys[k.KID] = &keyCopy
 		set.order = append(set.order, k.KID)
 	}
 
 	return set, nil
+}
+
+func validateIssuerOrigin(issuer string) error {
+	u, err := url.Parse(issuer)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
+		return errors.New("issuer must be an HTTPS origin")
+	}
+	if u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return errors.New("issuer must contain only scheme and authority")
+	}
+	return nil
 }
 
 // Issuer returns the issuer origin for the key set.
@@ -335,14 +372,17 @@ func ParseKeySet(r io.Reader) (*ClientKeySet, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("%w: key set json: %s", ErrMalformed, err)
 	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: trailing data after key set", ErrMalformed)
+	}
 
 	return newClientKeySet(doc)
 }
 
 // newClientKeySet validates a decoded document into a ClientKeySet.
 func newClientKeySet(doc KeySetDocument) (*ClientKeySet, error) {
-	if doc.Issuer == "" {
-		return nil, fmt.Errorf("%w: issuer must not be empty", ErrMalformed)
+	if err := validateIssuerOrigin(doc.Issuer); err != nil {
+		return nil, fmt.Errorf("%w: invalid issuer: %s", ErrMalformed, err)
 	}
 
 	if len(doc.Keys) == 0 {
@@ -415,6 +455,12 @@ func (s *ClientKeySet) selectKey(t time.Time, preferred AEAD) (*PublicKey, AEAD,
 // case-sensitively against the document's issuer member. client must not be
 // nil.
 func FetchKeySet(client *http.Client, issuer string) (*ClientKeySet, error) {
+	if client == nil {
+		return nil, fmt.Errorf("%w: client must not be nil", ErrMalformed)
+	}
+	if err := validateIssuerOrigin(issuer); err != nil {
+		return nil, fmt.Errorf("%w: invalid issuer: %s", ErrMalformed, err)
+	}
 	req, err := http.NewRequest(http.MethodGet, issuer+WellKnownPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrMalformed, err)
@@ -431,7 +477,15 @@ func FetchKeySet(client *http.Client, issuer string) (*ClientKeySet, error) {
 		return nil, fmt.Errorf("%w: key set fetch status %d", ErrMalformed, resp.StatusCode)
 	}
 
-	set, err := ParseKeySet(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchedKeySetSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxFetchedKeySetSize {
+		return nil, fmt.Errorf("%w: key set exceeds %d bytes", ErrMalformed, maxFetchedKeySetSize)
+	}
+
+	set, err := ParseKeySet(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

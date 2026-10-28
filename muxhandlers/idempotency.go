@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -207,7 +208,7 @@ func idempotencyWriteError(w http.ResponseWriter, r *http.Request, statusCode in
 //
 // It returns ErrNoIdempotencyStore if Store is nil.
 func IdempotencyMiddleware(cfg IdempotencyConfig) (mux.MiddlewareFunc, error) {
-	if cfg.Store == nil {
+	if isNilIdempotencyDependency(cfg.Store) {
 		return nil, ErrNoIdempotencyStore
 	}
 
@@ -247,6 +248,9 @@ func IdempotencyMiddleware(cfg IdempotencyConfig) (mux.MiddlewareFunc, error) {
 	onCacheHit := cfg.OnCacheHit
 	onCacheMiss := cfg.OnCacheMiss
 	locker := cfg.Locker
+	if isNilIdempotencyDependency(locker) {
+		locker = nil
+	}
 	fingerprintFunc := cfg.FingerprintFunc
 	onConflict := cfg.OnConflict
 	onFingerprintMismatch := cfg.OnFingerprintMismatch
@@ -360,6 +364,16 @@ func IdempotencyMiddleware(cfg IdempotencyConfig) (mux.MiddlewareFunc, error) {
 				// implementation may have waited while another request stored
 				// the response.
 				if cached, ok := store.Get(r.Context(), cacheKey); ok {
+					if fingerprintFunc != nil {
+						var resp idempotencyResponse
+						if err := json.Unmarshal(cached, &resp); err == nil && resp.Fingerprint != fingerprint {
+							if onFingerprintMismatch != nil {
+								onFingerprintMismatch(r, key)
+							}
+							idempotencyWriteError(w, r, http.StatusUnprocessableEntity, errorHandler)
+							return
+						}
+					}
 					if onCacheHit != nil {
 						onCacheHit(r, key)
 					}
@@ -380,6 +394,9 @@ func IdempotencyMiddleware(cfg IdempotencyConfig) (mux.MiddlewareFunc, error) {
 			}
 
 			next.ServeHTTP(rec, r)
+			if rec.statusCode == 0 {
+				rec.statusCode = http.StatusOK
+			}
 
 			cacheable := cacheableSet == nil
 			if !cacheable {
@@ -415,10 +432,27 @@ func IdempotencyMiddleware(cfg IdempotencyConfig) (mux.MiddlewareFunc, error) {
 	}, nil
 }
 
+func isNilIdempotencyDependency(value any) bool {
+	if value == nil {
+		return true
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
 // replayResponse writes a cached response to the client.
 func replayResponse(w http.ResponseWriter, data []byte, headerName, key string) {
 	var resp idempotencyResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 999 {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}

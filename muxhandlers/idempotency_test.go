@@ -2,6 +2,7 @@ package muxhandlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -119,6 +120,31 @@ func TestIdempotencyMiddleware(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNoIdempotencyStore)
 	})
 
+	t.Run("config error typed nil store", func(t *testing.T) {
+		var store *memoryStore
+		assert.NotPanics(t, func() {
+			_, err := IdempotencyMiddleware(IdempotencyConfig{Store: store})
+			assert.ErrorIs(t, err, ErrNoIdempotencyStore)
+		})
+	})
+
+	t.Run("typed nil optional locker is ignored", func(t *testing.T) {
+		var locker *memoryLocker
+		mw, err := IdempotencyMiddleware(IdempotencyConfig{Store: newMemoryStore(), Locker: locker})
+		require.NoError(t, err)
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+		}))
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		req.Header.Set("Idempotency-Key", "key")
+
+		assert.NotPanics(t, func() {
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusCreated, w.Code)
+		})
+	})
+
 	t.Run("first request passes through and caches", func(t *testing.T) {
 		store := newMemoryStore()
 		mw, err := IdempotencyMiddleware(IdempotencyConfig{Store: store})
@@ -172,6 +198,39 @@ func TestIdempotencyMiddleware(t *testing.T) {
 		assert.Equal(t, "value", w2.Header().Get("X-Custom"))
 		assert.Equal(t, "key-1", w2.Header().Get("Idempotency-Key"))
 		assert.Equal(t, `{"id":"123"}`, w2.Body.String())
+	})
+
+	t.Run("implicit 200 response replays without panic", func(t *testing.T) {
+		store := newMemoryStore()
+		mw, err := IdempotencyMiddleware(IdempotencyConfig{Store: store})
+		require.NoError(t, err)
+
+		handler := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		for range 2 {
+			req := httptest.NewRequest(http.MethodPost, "/users", nil)
+			req.Header.Set("Idempotency-Key", "implicit")
+			w := httptest.NewRecorder()
+			assert.NotPanics(t, func() { handler.ServeHTTP(w, req) })
+			assert.Equal(t, http.StatusOK, w.Code)
+		}
+	})
+
+	t.Run("invalid cached status fails closed without panic", func(t *testing.T) {
+		store := newMemoryStore()
+		cached, err := json.Marshal(idempotencyResponse{StatusCode: 0})
+		require.NoError(t, err)
+		store.Set(context.Background(), "POST:/users:invalid", cached, time.Hour)
+		mw, err := IdempotencyMiddleware(IdempotencyConfig{Store: store})
+		require.NoError(t, err)
+		handler := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("handler must not run for a cache hit")
+		}))
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		req.Header.Set("Idempotency-Key", "invalid")
+		w := httptest.NewRecorder()
+
+		assert.NotPanics(t, func() { handler.ServeHTTP(w, req) })
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
 	t.Run("different keys are independent", func(t *testing.T) {
@@ -913,6 +972,58 @@ func TestIdempotencyMiddleware(t *testing.T) {
 		assert.Equal(t, 1, callCount)
 		assert.Equal(t, http.StatusCreated, w2.Code)
 		assert.Equal(t, "created", w2.Body.String())
+	})
+
+	t.Run("fingerprint mismatch after lock acquisition returns 422", func(t *testing.T) {
+		cached, err := json.Marshal(idempotencyResponse{
+			StatusCode:  http.StatusCreated,
+			Header:      make(http.Header),
+			Body:        []byte("created"),
+			Fingerprint: "hash-a",
+		})
+		require.NoError(t, err)
+
+		getCalls := 0
+		store := &testDelegatingStore{
+			getFn: func(_ context.Context, _ string) ([]byte, bool) {
+				getCalls++
+				if getCalls == 1 {
+					return nil, false
+				}
+				return cached, true
+			},
+			setFn: func(context.Context, string, []byte, time.Duration) {},
+		}
+		mismatches := 0
+		mw, err := IdempotencyMiddleware(IdempotencyConfig{
+			Store: store,
+			Locker: &testBlockingLocker{
+				lockFn:   func(context.Context, string) bool { return true },
+				unlockFn: func(context.Context, string) {},
+			},
+			FingerprintFunc: func(r *http.Request) string {
+				return r.Header.Get("X-Body-Hash")
+			},
+			OnFingerprintMismatch: func(*http.Request, string) {
+				mismatches++
+			},
+		})
+		require.NoError(t, err)
+
+		handlerCalls := 0
+		handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			handlerCalls++
+			w.WriteHeader(http.StatusCreated)
+		}))
+		req := httptest.NewRequest(http.MethodPost, "/users", nil)
+		req.Header.Set("Idempotency-Key", "key-1")
+		req.Header.Set("X-Body-Hash", "hash-b")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+		assert.Equal(t, 0, handlerCalls)
+		assert.Equal(t, 1, mismatches)
 	})
 
 	t.Run("fingerprint not set does not check", func(t *testing.T) {

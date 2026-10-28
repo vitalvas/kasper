@@ -1,6 +1,7 @@
 package httpsig
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -36,6 +37,8 @@ func JWKThumbprintEd25519(pub ed25519.PublicKey) (string, error) {
 
 // Minimum RSA key size in bits.
 const minRSAKeyBits = 2048
+
+const maxRSAPublicExponent = 1<<31 - 1
 
 // ECDSA signature element sizes in bytes per RFC 9421 Sections 3.3.3 and
 // 3.3.4: r and s are each zero-padded to the curve's field size.
@@ -95,7 +98,7 @@ func NewEd25519Signer(keyID string, key ed25519.PrivateKey) (Signer, error) {
 	}
 
 	return &ed25519Signer{
-		key:   key,
+		key:   append(ed25519.PrivateKey(nil), key...),
 		keyID: keyID,
 	}, nil
 }
@@ -119,7 +122,7 @@ func NewEd25519Verifier(keyID string, key ed25519.PublicKey) (Verifier, error) {
 	}
 
 	return &ed25519Verifier{
-		key:   key,
+		key:   append(ed25519.PublicKey(nil), key...),
 		keyID: keyID,
 	}, nil
 }
@@ -148,7 +151,7 @@ func NewECDSAP256Signer(keyID string, key *ecdsa.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: ecdsa private key must not be nil", ErrInvalidKey)
 	}
 
-	if key.Curve != elliptic.P256() {
+	if !validECDSAPrivateKey(key, elliptic.P256()) {
 		return nil, fmt.Errorf("%w: key curve must be P-256", ErrInvalidKey)
 	}
 
@@ -178,7 +181,7 @@ func NewECDSAP256Verifier(keyID string, key *ecdsa.PublicKey) (Verifier, error) 
 		return nil, fmt.Errorf("%w: ecdsa public key must not be nil", ErrInvalidKey)
 	}
 
-	if key.Curve != elliptic.P256() {
+	if !validECDSAPublicKey(key, elliptic.P256()) {
 		return nil, fmt.Errorf("%w: key curve must be P-256", ErrInvalidKey)
 	}
 
@@ -210,7 +213,7 @@ func NewECDSAP384Signer(keyID string, key *ecdsa.PrivateKey) (Signer, error) {
 		return nil, fmt.Errorf("%w: ecdsa private key must not be nil", ErrInvalidKey)
 	}
 
-	if key.Curve != elliptic.P384() {
+	if !validECDSAPrivateKey(key, elliptic.P384()) {
 		return nil, fmt.Errorf("%w: key curve must be P-384", ErrInvalidKey)
 	}
 
@@ -240,7 +243,7 @@ func NewECDSAP384Verifier(keyID string, key *ecdsa.PublicKey) (Verifier, error) 
 		return nil, fmt.Errorf("%w: ecdsa public key must not be nil", ErrInvalidKey)
 	}
 
-	if key.Curve != elliptic.P384() {
+	if !validECDSAPublicKey(key, elliptic.P384()) {
 		return nil, fmt.Errorf("%w: key curve must be P-384", ErrInvalidKey)
 	}
 
@@ -259,6 +262,47 @@ func (v *ecdsaP384Verifier) Verify(message, signature []byte) error {
 func (v *ecdsaP384Verifier) Algorithm() Algorithm { return AlgorithmECDSAP384SHA384 }
 func (v *ecdsaP384Verifier) KeyID() string        { return v.keyID }
 
+func validECDSAPublicKey(key *ecdsa.PublicKey, curve elliptic.Curve) bool {
+	if key == nil || key.Curve != curve {
+		return false
+	}
+	encoded, err := key.Bytes()
+	if err != nil {
+		return false
+	}
+	_, err = ecdsa.ParseUncompressedPublicKey(curve, encoded)
+	return err == nil
+}
+
+func validECDSAPrivateKey(key *ecdsa.PrivateKey, curve elliptic.Curve) bool {
+	if key == nil || key.Curve != curve || !validECDSAPublicKey(&key.PublicKey, curve) {
+		return false
+	}
+	raw, err := key.Bytes()
+	if err != nil {
+		return false
+	}
+	parsed, err := ecdsa.ParseRawPrivateKey(curve, raw)
+	if err != nil {
+		return false
+	}
+	want, err := key.PublicKey.Bytes()
+	if err != nil {
+		return false
+	}
+	got, err := parsed.PublicKey.Bytes()
+	return err == nil && bytes.Equal(got, want)
+}
+
+func validRSAPublicKey(key *rsa.PublicKey) bool {
+	return key != nil && key.N != nil && key.N.Sign() > 0 && key.N.Bit(0) == 1 &&
+		key.N.BitLen() >= minRSAKeyBits && key.E >= 3 && key.E <= maxRSAPublicExponent && key.E%2 == 1
+}
+
+func validRSAPrivateKey(key *rsa.PrivateKey) bool {
+	return key != nil && key.D != nil && key.D.Sign() > 0 && validRSAPublicKey(&key.PublicKey) && key.Validate() == nil
+}
+
 // --- RSA-PSS SHA-512 ---
 
 type rsaPSSSigner struct {
@@ -268,12 +312,8 @@ type rsaPSSSigner struct {
 
 // NewRSAPSSSigner creates a Signer using RSASSA-PSS with SHA-512.
 func NewRSAPSSSigner(keyID string, key *rsa.PrivateKey) (Signer, error) {
-	if key == nil {
+	if !validRSAPrivateKey(key) {
 		return nil, fmt.Errorf("%w: rsa private key must not be nil", ErrInvalidKey)
-	}
-
-	if key.N.BitLen() < minRSAKeyBits {
-		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
 	return &rsaPSSSigner{
@@ -300,12 +340,8 @@ type rsaPSSVerifier struct {
 
 // NewRSAPSSVerifier creates a Verifier using RSASSA-PSS with SHA-512.
 func NewRSAPSSVerifier(keyID string, key *rsa.PublicKey) (Verifier, error) {
-	if key == nil {
+	if !validRSAPublicKey(key) {
 		return nil, fmt.Errorf("%w: rsa public key must not be nil", ErrInvalidKey)
-	}
-
-	if key.N.BitLen() < minRSAKeyBits {
-		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
 	return &rsaPSSVerifier{
@@ -339,12 +375,8 @@ type rsaV15Signer struct {
 
 // NewRSAv15Signer creates a Signer using RSASSA-PKCS1-v1_5 with SHA-256.
 func NewRSAv15Signer(keyID string, key *rsa.PrivateKey) (Signer, error) {
-	if key == nil {
+	if !validRSAPrivateKey(key) {
 		return nil, fmt.Errorf("%w: rsa private key must not be nil", ErrInvalidKey)
-	}
-
-	if key.N.BitLen() < minRSAKeyBits {
-		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
 	return &rsaV15Signer{
@@ -369,12 +401,8 @@ type rsaV15Verifier struct {
 
 // NewRSAv15Verifier creates a Verifier using RSASSA-PKCS1-v1_5 with SHA-256.
 func NewRSAv15Verifier(keyID string, key *rsa.PublicKey) (Verifier, error) {
-	if key == nil {
+	if !validRSAPublicKey(key) {
 		return nil, fmt.Errorf("%w: rsa public key must not be nil", ErrInvalidKey)
-	}
-
-	if key.N.BitLen() < minRSAKeyBits {
-		return nil, fmt.Errorf("%w: rsa key must be at least %d bits", ErrInvalidKey, minRSAKeyBits)
 	}
 
 	return &rsaV15Verifier{
