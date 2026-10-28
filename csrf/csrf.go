@@ -75,6 +75,15 @@ var (
 	// session bound to the CSRF cookie does not match the session of the
 	// current request.
 	ErrSessionMismatch = errors.New("csrf: session mismatch")
+	// Cookie-prefix constraints (RFC 6265bis Section 4.1.3), checked at
+	// Middleware construction.
+	ErrHostPrefixRequiresSecure   = errors.New(`csrf: cookie name "__Host-" prefix requires CookieSecure: true`)
+	ErrHostPrefixForbidsDomain    = errors.New(`csrf: cookie name "__Host-" prefix forbids CookieDomain`)
+	ErrHostPrefixRequiresRootPath = errors.New(`csrf: cookie name "__Host-" prefix requires CookiePath "/"`)
+	ErrSecurePrefixRequiresSecure = errors.New(`csrf: cookie name "__Secure-" prefix requires CookieSecure: true`)
+	// Trusted-origin parse errors.
+	ErrOriginMissingSchemeHost = errors.New("origin must include scheme and host")
+	ErrOriginNotAuthority      = errors.New("origin must contain only scheme and authority")
 )
 
 // Config configures the CSRF middleware.
@@ -463,17 +472,17 @@ func resolveConfig(cfg Config) (*resolvedConfig, error) {
 	// cause browsers to reject the cookie.
 	if strings.HasPrefix(rc.cookieName, "__Host-") {
 		if !rc.cookieSecure {
-			return nil, errors.New(`csrf: cookie name "__Host-" prefix requires CookieSecure: true`)
+			return nil, ErrHostPrefixRequiresSecure
 		}
 		if rc.cookieDomain != "" {
-			return nil, errors.New(`csrf: cookie name "__Host-" prefix forbids CookieDomain`)
+			return nil, ErrHostPrefixForbidsDomain
 		}
 		if rc.cookiePath != "/" {
-			return nil, errors.New(`csrf: cookie name "__Host-" prefix requires CookiePath "/"`)
+			return nil, ErrHostPrefixRequiresRootPath
 		}
 	}
 	if strings.HasPrefix(rc.cookieName, "__Secure-") && !rc.cookieSecure {
-		return nil, errors.New(`csrf: cookie name "__Secure-" prefix requires CookieSecure: true`)
+		return nil, ErrSecurePrefixRequiresSecure
 	}
 
 	methods := cfg.SafeMethods
@@ -523,10 +532,10 @@ func parseOriginPattern(s string) (*originPattern, error) {
 		return nil, err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return nil, errors.New("origin must include scheme and host")
+		return nil, ErrOriginMissingSchemeHost
 	}
 	if u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-		return nil, errors.New("origin must contain only scheme and authority")
+		return nil, ErrOriginNotAuthority
 	}
 
 	host := strings.ToLower(u.Host)

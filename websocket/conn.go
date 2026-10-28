@@ -73,6 +73,15 @@ var (
 	ErrFrameSizeExceeded         = errors.New("websocket: frame payload exceeds size limit")
 	ErrNonEmptyPingPayload       = errors.New("websocket: non-empty ping payload not allowed")
 	ErrInvalidResponseHeader     = errors.New("websocket: invalid response header")
+	ErrInvalidCompressionLevel   = errors.New("websocket: invalid compression level")
+	ErrBadScheme                 = errors.New("websocket: bad scheme")
+	ErrEmptyHost                 = errors.New("websocket: empty host")
+	ErrBodyNotReadWriteCloser    = errors.New("websocket: response body is not ReadWriteCloser")
+	ErrUnsupportedVersion        = errors.New("websocket: unsupported version")
+	ErrOriginNotAllowed          = errors.New("websocket: origin not allowed")
+	ErrInvalidWebSocketKey       = errors.New("websocket: invalid Sec-WebSocket-Key")
+	ErrNotHijacker               = errors.New("websocket: response does not implement http.Hijacker")
+	ErrInvalidProtocolHTTP2      = errors.New("websocket: invalid :protocol for HTTP/2")
 )
 
 // CloseError represents a WebSocket close error.
@@ -640,7 +649,7 @@ func (c *Conn) EnableWriteCompression(enable bool) {
 // Per RFC 7692, compression uses the DEFLATE algorithm.
 func (c *Conn) SetCompressionLevel(level int) error {
 	if level < -2 || level > 9 {
-		return errors.New("websocket: invalid compression level")
+		return ErrInvalidCompressionLevel
 	}
 	c.compressionLevel = level
 	return nil

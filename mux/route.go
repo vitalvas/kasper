@@ -11,6 +11,18 @@ import (
 	"sync"
 )
 
+// Route inspection errors, returned by the Get* and URL* methods when the
+// requested component was never defined on the route.
+var (
+	ErrRouteNoHost          = errors.New("mux: route doesn't have a host")
+	ErrRouteNoPath          = errors.New("mux: route doesn't have a path")
+	ErrRouteNoMethods       = errors.New("mux: route doesn't have methods")
+	ErrRouteNoQueries       = errors.New("mux: route doesn't have queries")
+	ErrRouteNoHeaders       = errors.New("mux: route doesn't have headers")
+	ErrRouteNoHeaderRegexps = errors.New("mux: route doesn't have header regexps")
+	ErrRouteNoSchemes       = errors.New("mux: route doesn't have schemes")
+)
+
 // matcher is the interface implemented by route matchers.
 type matcher interface {
 	Match(*http.Request, *RouteMatch) bool
@@ -561,7 +573,7 @@ func (r *Route) URLHost(pairs ...string) (*url.URL, error) {
 		return nil, err
 	}
 	if r.regexp.host == nil {
-		return nil, errors.New("mux: route doesn't have a host")
+		return nil, ErrRouteNoHost
 	}
 	host, err := r.regexp.host.url(values)
 	if err != nil {
@@ -587,7 +599,7 @@ func (r *Route) URLPath(pairs ...string) (*url.URL, error) {
 		return nil, err
 	}
 	if r.regexp.path == nil {
-		return nil, errors.New("mux: route doesn't have a path")
+		return nil, ErrRouteNoPath
 	}
 	path, err := r.regexp.path.url(values)
 	if err != nil {
@@ -626,7 +638,7 @@ func (r *Route) GetPathTemplate() (string, error) {
 		return "", r.err
 	}
 	if r.regexp.path == nil {
-		return "", errors.New("mux: route doesn't have a path")
+		return "", ErrRouteNoPath
 	}
 	return r.regexp.path.template, nil
 }
@@ -637,7 +649,7 @@ func (r *Route) GetPathRegexp() (string, error) {
 		return "", r.err
 	}
 	if r.regexp.path == nil {
-		return "", errors.New("mux: route doesn't have a path")
+		return "", ErrRouteNoPath
 	}
 	return r.regexp.path.regexp.String(), nil
 }
@@ -648,7 +660,7 @@ func (r *Route) GetHostTemplate() (string, error) {
 		return "", r.err
 	}
 	if r.regexp.host == nil {
-		return "", errors.New("mux: route doesn't have a host")
+		return "", ErrRouteNoHost
 	}
 	return r.regexp.host.template, nil
 }
@@ -659,7 +671,7 @@ func (r *Route) GetHostRegexp() (string, error) {
 		return "", r.err
 	}
 	if r.regexp.host == nil {
-		return "", errors.New("mux: route doesn't have a host")
+		return "", ErrRouteNoHost
 	}
 	return r.regexp.host.regexp.String(), nil
 }
@@ -674,7 +686,7 @@ func (r *Route) GetMethods() ([]string, error) {
 			return []string(methods), nil
 		}
 	}
-	return nil, errors.New("mux: route doesn't have methods")
+	return nil, ErrRouteNoMethods
 }
 
 // GetQueriesTemplates returns the query templates for the route.
@@ -683,7 +695,7 @@ func (r *Route) GetQueriesTemplates() ([]string, error) {
 		return nil, r.err
 	}
 	if len(r.regexp.queries) == 0 {
-		return nil, errors.New("mux: route doesn't have queries")
+		return nil, ErrRouteNoQueries
 	}
 	templates := make([]string, len(r.regexp.queries))
 	for i, q := range r.regexp.queries {
@@ -698,7 +710,7 @@ func (r *Route) GetQueriesRegexp() ([]string, error) {
 		return nil, r.err
 	}
 	if len(r.regexp.queries) == 0 {
-		return nil, errors.New("mux: route doesn't have queries")
+		return nil, ErrRouteNoQueries
 	}
 	regexps := make([]string, len(r.regexp.queries))
 	for i, q := range r.regexp.queries {
@@ -718,7 +730,7 @@ func (r *Route) GetHeaders() (map[string]string, error) {
 			return map[string]string(headers), nil
 		}
 	}
-	return nil, errors.New("mux: route doesn't have headers")
+	return nil, ErrRouteNoHeaders
 }
 
 // GetHeadersRegexp returns the header regex matchers for the route as a map
@@ -733,7 +745,7 @@ func (r *Route) GetHeadersRegexp() (map[string]*regexp.Regexp, error) {
 			return map[string]*regexp.Regexp(headers), nil
 		}
 	}
-	return nil, errors.New("mux: route doesn't have header regexps")
+	return nil, ErrRouteNoHeaderRegexps
 }
 
 // GetSchemes returns the schemes the route matches against.
@@ -746,7 +758,7 @@ func (r *Route) GetSchemes() ([]string, error) {
 			return []string(schemes), nil
 		}
 	}
-	return nil, errors.New("mux: route doesn't have schemes")
+	return nil, ErrRouteNoSchemes
 }
 
 // GetVarNames returns the variable names for the route, including

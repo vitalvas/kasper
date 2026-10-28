@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -187,7 +186,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 
 	// Check WebSocket version per RFC 6455, section 4.2.1, item 6.
 	if !strings.EqualFold(r.Header.Get("Sec-WebSocket-Version"), websocketVersion) {
-		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: unsupported version"))
+		u.returnError(w, r, http.StatusBadRequest, ErrUnsupportedVersion)
 		return nil, ErrBadHandshake
 	}
 
@@ -196,7 +195,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		checkOrigin = checkSameOrigin
 	}
 	if !checkOrigin(r) {
-		u.returnError(w, r, http.StatusForbidden, errors.New("websocket: origin not allowed"))
+		u.returnError(w, r, http.StatusForbidden, ErrOriginNotAllowed)
 		return nil, ErrBadHandshake
 	}
 
@@ -207,7 +206,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	}
 	challengeKey := r.Header.Get("Sec-WebSocket-Key")
 	if !checkChallengeKey(r, challengeKey) {
-		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: invalid Sec-WebSocket-Key"))
+		u.returnError(w, r, http.StatusBadRequest, ErrInvalidWebSocketKey)
 		return nil, ErrBadHandshake
 	}
 
@@ -233,7 +232,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 
 	h, ok := w.(http.Hijacker)
 	if !ok {
-		u.returnError(w, r, http.StatusInternalServerError, errors.New("websocket: response does not implement http.Hijacker"))
+		u.returnError(w, r, http.StatusInternalServerError, ErrNotHijacker)
 		return nil, ErrBadHandshake
 	}
 
@@ -405,7 +404,7 @@ func (a *http2ConnAdapter) Close() error {
 // HTTP/2 connections do not support hijacking.
 func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
 	if r.Proto != "websocket" {
-		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: invalid :protocol for HTTP/2"))
+		u.returnError(w, r, http.StatusBadRequest, ErrInvalidProtocolHTTP2)
 		return nil, ErrBadHandshake
 	}
 
@@ -414,7 +413,7 @@ func (u *Upgrader) upgradeHTTP2(w http.ResponseWriter, r *http.Request, response
 		checkOrigin = checkSameOrigin
 	}
 	if !checkOrigin(r) {
-		u.returnError(w, r, http.StatusForbidden, errors.New("websocket: origin not allowed"))
+		u.returnError(w, r, http.StatusForbidden, ErrOriginNotAllowed)
 		return nil, ErrBadHandshake
 	}
 

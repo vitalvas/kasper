@@ -8,6 +8,13 @@ import (
 	"net/http"
 )
 
+// Trailing-data errors returned by BindJSON and BindXML when the body contains
+// more than one value.
+var (
+	ErrTrailingJSON = errors.New("unexpected trailing data after JSON value")
+	ErrTrailingXML  = errors.New("unexpected trailing data after XML value")
+)
+
 // BindJSON decodes the request body as JSON into v.
 // By default the decoder rejects unknown fields that do not map to exported
 // struct fields. Pass false to allow unknown fields.
@@ -24,7 +31,7 @@ func BindJSON(r *http.Request, v any, allowUnknownFields ...bool) error {
 	}
 
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return errors.New("unexpected trailing data after JSON value")
+		return ErrTrailingJSON
 	}
 
 	return nil
@@ -40,7 +47,7 @@ func BindXML(r *http.Request, v any) error {
 	}
 
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return errors.New("unexpected trailing data after XML value")
+		return ErrTrailingXML
 	}
 
 	return nil

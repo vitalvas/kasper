@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -97,11 +96,11 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 	case "wss":
 		u.Scheme = "https"
 	default:
-		return nil, nil, errors.New("websocket: bad scheme")
+		return nil, nil, ErrBadScheme
 	}
 
 	if u.Host == "" {
-		return nil, nil, errors.New("websocket: empty host")
+		return nil, nil, ErrEmptyHost
 	}
 
 	client := d.HTTPClient
@@ -667,7 +666,7 @@ func (d *Dialer) dialHTTP2(ctx context.Context, client *http.Client, u *url.URL,
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok {
 		resp.Body.Close()
-		return nil, resp, errors.New("websocket: response body is not ReadWriteCloser")
+		return nil, resp, ErrBodyNotReadWriteCloser
 	}
 
 	conn := newConnFromRWC(connConfig{

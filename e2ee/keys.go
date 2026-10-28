@@ -18,6 +18,13 @@ import (
 	"go.vitalvas.com/kasper/mux"
 )
 
+// Issuer-origin validation errors, returned by key-set loading when the issuer
+// URL is not a bare HTTPS origin.
+var (
+	ErrIssuerNotHTTPS  = errors.New("issuer must be an HTTPS origin")
+	ErrIssuerNotOrigin = errors.New("issuer must contain only scheme and authority")
+)
+
 // WellKnownPath is the well-known URI suffix where servers publish their
 // encryption key set (draft-vasylenko-e2ee-http Section 4.1; IANA registration
 // Section 10.1).
@@ -295,10 +302,10 @@ func validateIssuerOrigin(issuer string) error {
 		return err
 	}
 	if !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
-		return errors.New("issuer must be an HTTPS origin")
+		return ErrIssuerNotHTTPS
 	}
 	if u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-		return errors.New("issuer must contain only scheme and authority")
+		return ErrIssuerNotOrigin
 	}
 	return nil
 }
