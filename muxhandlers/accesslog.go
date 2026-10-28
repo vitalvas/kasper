@@ -221,7 +221,7 @@ func AccessLogMiddleware(router *mux.Router, cfg AccessLogConfig) mux.Middleware
 				logFunc(entry)
 				return
 			}
-			emitSlog(logger, entry, slowThreshold)
+			emitSlog(r.Context(), logger, entry, slowThreshold)
 		})
 	}
 }
@@ -292,7 +292,7 @@ func captureHeaders(h http.Header, include []string, redact map[string]struct{})
 // emitSlog writes the entry using a slog logger. Level selection:
 // 5xx -> Error, otherwise Info, escalated to Warn when SlowThreshold is
 // set and the request exceeded it.
-func emitSlog(logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Duration) {
+func emitSlog(ctx context.Context, logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Duration) {
 	level := slog.LevelInfo
 	switch {
 	case entry.Status >= http.StatusInternalServerError:
@@ -350,7 +350,7 @@ func emitSlog(logger *slog.Logger, entry *AccessLogEntry, slowThreshold time.Dur
 		attrs = append(attrs, slog.Group("headers", headerAttrs...))
 	}
 
-	logger.LogAttrs(context.Background(), level, "http access", attrs...)
+	logger.LogAttrs(ctx, level, "http access", attrs...)
 }
 
 // accessLogResponseWriter is the base wrapper that records the status
