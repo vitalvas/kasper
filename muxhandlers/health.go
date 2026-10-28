@@ -67,14 +67,14 @@ type HealthConfig struct {
 // Accept: application/json. It is exported so consumers can register
 // it as a response schema with the openapi package.
 type HealthReport struct {
-	Status string                       `json:"status"`
-	Checks map[string]HealthCheckReport `json:"checks,omitempty"`
+	Status string                       `json:"status"`           // "ok" when every check passes, else "degraded"
+	Checks map[string]HealthCheckReport `json:"checks,omitempty"` // per-check results, keyed by check name
 }
 
 // HealthCheckReport is the per-check entry in a HealthReport.
 type HealthCheckReport struct {
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Status string `json:"status"`          // "ok" or "fail"
+	Error  string `json:"error,omitempty"` // failure message, set only when Status is "fail"
 }
 
 // HealthHandler returns an http.Handler that runs the configured

@@ -121,12 +121,12 @@ func (k *PublicKey) validAt(t time.Time) bool {
 // PrivateKey is a server-side signing key: an X25519 private key plus the
 // metadata published in the key set.
 type PrivateKey struct {
-	KID       string
-	Priv      *ecdh.PrivateKey
-	AEADs     []AEAD
-	NotBefore *time.Time
-	NotAfter  time.Time
-	MaxSkew   int
+	KID       string           // unique identifier, matches the published PublicKey
+	Priv      *ecdh.PrivateKey // 32-byte X25519 private key
+	AEADs     []AEAD           // preferred AEADs, server order
+	NotBefore *time.Time       // start of validity window, optional
+	NotAfter  time.Time        // end of validity window
+	MaxSkew   int              // clock-skew tolerance in seconds
 }
 
 // GenerateServerKey creates a server PrivateKey with a fresh X25519 key pair.

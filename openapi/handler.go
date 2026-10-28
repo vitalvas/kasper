@@ -24,8 +24,11 @@ const SchemaDisabled = "-"
 type DocsUI int
 
 const (
+	// DocsSwaggerUI serves the Swagger UI documentation renderer (default).
 	DocsSwaggerUI DocsUI = iota
+	// DocsRapiDoc serves the RapiDoc documentation renderer.
 	DocsRapiDoc
+	// DocsRedoc serves the Redoc documentation renderer.
 	DocsRedoc
 )
 
