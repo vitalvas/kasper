@@ -22,9 +22,10 @@ type BasicAuthConfig struct {
 	// Defaults to "Restricted" when empty.
 	Realm string
 
-	// ValidateFunc is called to validate credentials dynamically.
-	// Takes priority over Credentials when both are set.
-	ValidateFunc func(username, password string) bool
+	// ValidateFunc is called to validate credentials dynamically. The request
+	// is passed so validation can depend on request context (route, client IP,
+	// tenant). Takes priority over Credentials when both are set.
+	ValidateFunc func(r *http.Request, username, password string) bool
 
 	// Credentials is a static map of username -> password pairs.
 	// Compared using SHA-256 hashed constant-time comparison to prevent
@@ -61,7 +62,7 @@ func BasicAuthMiddleware(cfg BasicAuthConfig) (mux.MiddlewareFunc, error) {
 			}
 
 			if validate != nil {
-				if !validate(username, password) {
+				if !validate(r, username, password) {
 					unauthorized(w, wwwAuthenticate)
 					return
 				}

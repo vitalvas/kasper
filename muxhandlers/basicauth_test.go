@@ -32,7 +32,7 @@ func TestBasicAuth(t *testing.T) {
 	}{
 		{
 			name:       "valid credentials via ValidateFunc",
-			config:     BasicAuthConfig{ValidateFunc: func(u, p string) bool { return u == "admin" && p == "secret" }},
+			config:     BasicAuthConfig{ValidateFunc: func(_ *http.Request, u, p string) bool { return u == "admin" && p == "secret" }},
 			authHeader: basicAuthHeader("admin", "secret"),
 			wantCode:   http.StatusOK,
 		},
@@ -86,7 +86,7 @@ func TestBasicAuth(t *testing.T) {
 		{
 			name: "ValidateFunc takes priority over Credentials",
 			config: BasicAuthConfig{
-				ValidateFunc: func(u, p string) bool { return u == "func-user" && p == "func-pass" },
+				ValidateFunc: func(_ *http.Request, u, p string) bool { return u == "func-user" && p == "func-pass" },
 				Credentials:  map[string]string{"map-user": "map-pass"},
 			},
 			authHeader: basicAuthHeader("func-user", "func-pass"),

@@ -65,7 +65,7 @@ to prevent timing attacks.
 | Field | Type | Description |
 |-------|------|-------------|
 | `Realm` | `string` | Authentication realm for `WWW-Authenticate` header |
-| `ValidateFunc` | `func(string, string) bool` | Dynamic credential validation callback |
+| `ValidateFunc` | `func(*http.Request, string, string) bool` | Dynamic credential validation callback; receives request, username, and password |
 | `Credentials` | `map[string]string` | Static username-to-password map |
 
 ### BasicAuth Usage with ValidateFunc
@@ -77,7 +77,7 @@ r.HandleFunc("/api/v1/users", listUsers).Methods(http.MethodGet)
 
 mw, err := muxhandlers.BasicAuthMiddleware(muxhandlers.BasicAuthConfig{
     Realm: "My App",
-    ValidateFunc: func(username, password string) bool {
+    ValidateFunc: func(r *http.Request, username, password string) bool {
         return username == "admin" && password == "secret"
     },
 })
