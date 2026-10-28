@@ -23,6 +23,10 @@ Kasper adds features on top without breaking the existing API.
 | -- | `kasper/openapi` | No Gorilla equivalent |
 | -- | `kasper/httpsig` | No Gorilla equivalent |
 | -- | `kasper/blindrsa` | No Gorilla equivalent |
+| -- | `kasper/privacypass` | No Gorilla equivalent |
+| -- | `kasper/e2ee` | No Gorilla equivalent |
+| -- | `kasper/wsmux` | No Gorilla equivalent |
+| -- | `kasper/sfv` | No Gorilla equivalent |
 
 ## Migration
 
@@ -129,6 +133,11 @@ requires migration.
 | `ErrNotFound` | Yes | Yes |
 | `ErrMetadataKeyNotFound` | No | Yes |
 | `SkipRouter` | Yes | Yes |
+| `ErrNoRouterInContext`, `ErrRouteNotFound` | No | Yes |
+| `ErrTemplatesNotSet`, `ErrTemplateNotFound` | No | Yes |
+| `ErrBindNotPointerToStruct`, `ErrEncodeNotStruct` | No | Yes |
+| `ErrTrailingJSON`, `ErrTrailingXML` | No | Yes |
+| Route-inspection sentinels (`ErrRouteNoHost`/`NoPath`/`NoMethods`/`NoQueries`/`NoHeaders`/`NoHeaderRegexps`/`NoSchemes`) | No | Yes |
 
 ### Pattern Macros
 
@@ -326,6 +335,7 @@ scheme := mux.Scheme(r)
 | Streaming write (`NextWriter`) | Yes | Yes |
 | JSON helpers (`ReadJSON`, `WriteJSON`) | Yes | Yes |
 | Pre-built messages (`PreparedMessage`) | Yes | Yes |
+| Message-type policy (binary-only / text-only enforcement) | No | Yes |
 | **Control Frames** | | |
 | Ping, pong, close frames | Yes | Yes |
 | Custom ping/pong/close handlers | Yes | Yes |
@@ -361,18 +371,22 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | Security headers (X-Frame-Options, HSTS, CSP) | No | Yes |
 | IP allow list (CIDR support) | No | Yes |
 | Content-Type validation | No | Yes |
+| Content-Digest (RFC 9530) | No | Yes |
+| Network Error Logging report-to (NEL) | No | Yes |
 | **Request Processing** | | |
 | Proxy headers (X-Forwarded-For/Proto/Host) | Yes | Yes |
 | RFC 7239 Forwarded header | No | Yes |
 | Request size limit | No | Yes |
 | Method override (X-HTTP-Method-Override) | No | Yes |
 | Request ID generation (UUID v4/v7) | No | Yes |
+| Connection ID (`ConnID`) | No | Yes |
 | Content negotiation (RFC 9110) | No | Yes |
 | PATCH content type routing (RFC 7396, RFC 6902) | No | Yes |
 | OPTIONS + Accept-Patch (RFC 5789) | No | Yes |
 | **Response Processing** | | |
 | Gzip/deflate compression | Yes | Yes |
 | Cache-Control header generation | No | Yes |
+| No-cache preset headers (`NoCache`) | No | Yes |
 | Server identification header | No | Yes |
 | Early Hints (RFC 8297) | No | Yes |
 | Problem Details (RFC 9457) | No | Yes |
@@ -380,6 +394,11 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | Panic recovery | Yes | Yes |
 | Handler timeout | No | Yes |
 | Idempotency (draft-ietf-httpapi-idempotency-key) | No | Yes |
+| Graceful shutdown drain | No | Yes |
+| Maintenance mode | No | Yes |
+| **Observability** | | |
+| Structured access log (`log/slog`) | No | Yes |
+| Health check endpoint (`HealthHandler`) | No | Yes |
 | **API Lifecycle** | | |
 | Sunset/deprecation headers (RFC 8594) | No | Yes |
 | **Static Files** | | |
@@ -390,7 +409,7 @@ gorilla/handlers and kasper/muxhandlers both provide HTTP middleware but with di
 | pprof profiler endpoints | No | Yes |
 | **Logging** | | |
 | Apache/combined log format | Yes | No |
-| Custom log formatting | Yes | No |
+| Custom log formatting | Yes | No (structured `log/slog` instead) |
 | **Other** | | |
 | Canonical host redirect | Yes | Yes |
 | Path-based redirects (exact + wildcard) | No | Yes |
@@ -410,16 +429,30 @@ handler = handlers.CompressHandler(handler)
 handler = handlers.RecoveryHandler()(handler)
 ```
 
-kasper/muxhandlers uses config structs and returns `mux.MiddlewareFunc`:
+kasper/muxhandlers uses config structs and returns a `mux.MiddlewareFunc`.
+Some constructors also take the `*mux.Router` as their first argument and/or
+return an error (for example `CORSMiddleware`, `CompressionMiddleware`):
 
 ```go
 // kasper/muxhandlers
-r.Use(muxhandlers.CORSMiddleware(muxhandlers.CORSConfig{
+// CORSMiddleware takes the router and returns an error.
+cors, err := muxhandlers.CORSMiddleware(r, muxhandlers.CORSConfig{
     AllowedOrigins: []string{"https://example.com"},
     AllowedMethods: []string{http.MethodGet, http.MethodPost},
-}))
+})
+if err != nil {
+    log.Fatal(err)
+}
+r.Use(cors)
 
-r.Use(muxhandlers.CompressionMiddleware(muxhandlers.CompressionConfig{}))
+// CompressionMiddleware also returns an error.
+compress, err := muxhandlers.CompressionMiddleware(muxhandlers.CompressionConfig{})
+if err != nil {
+    log.Fatal(err)
+}
+r.Use(compress)
+
+// RecoveryMiddleware returns a MiddlewareFunc directly.
 r.Use(muxhandlers.RecoveryMiddleware(muxhandlers.RecoveryConfig{}))
 ```
 
@@ -466,6 +499,72 @@ HTTP Message Signatures (RFC 9421) with optional Content-Digest (RFC 9530). No G
 
 ---
 
+## blindrsa (kasper only)
+
+RSA Blind Signatures (RFC 9474, RSABSSA) with an HTTP handler, client transport, and middleware. No Gorilla equivalent.
+
+| Feature | Details |
+|---------|---------|
+| Variants | `Variant` (RSABSSA-SHA384-PSS, randomized and deterministic salt) |
+| Blinding | `Prepare` produces a blinded message and client `State` |
+| Signing | `BlindSign` signs a blinded message with the RSA private key |
+| Finalize | `Finalize` unblinds the signature; `Verify` checks it |
+| Issuing handler | `IssueHandler` serves a signing endpoint |
+| Client transport | `Client` blinds, sends, and finalizes over `http.RoundTripper` |
+| Middleware | `VerifyMiddleware` returns a `mux.MiddlewareFunc` |
+
+## privacypass (kasper only)
+
+Privacy Pass tokens of token type 0x0002 (Blind RSA, RFC 9578) with the PrivateToken HTTP authentication scheme (RFC 9577), built on `kasper/blindrsa`. No Gorilla equivalent.
+
+| Feature | Details |
+|---------|---------|
+| Token type | 0x0002, publicly verifiable (RSABSSA-SHA384-PSS-Deterministic) |
+| Origin middleware | `Middleware` requires a valid token, issues `WWW-Authenticate` challenges |
+| Challenge header | `BuildChallengeHeader` advertises challenge and issuer key |
+| Redemption headers | `BuildAuthorizationHeader`, `ParseAuthorizationHeader` |
+| Token verification | `VerifyToken` checks a redeemed token against the issuer public key |
+
+## e2ee (kasper only)
+
+End-to-end encryption of HTTP request/response bodies per draft-vasylenko-e2ee-http, independent of TLS so terminating intermediaries cannot read payloads. No Gorilla equivalent.
+
+| Feature | Details |
+|---------|---------|
+| Cryptography | X25519 (RFC 7748) + HKDF-SHA256 (RFC 5869) + AES-GCM (128/192/256) |
+| Session metadata | `E2EE-Session` RFC 9651 field, bound into AES-GCM AAD |
+| Key discovery | Key set published at `WellKnownPath` (`/.well-known/encryption-keys`) |
+| Server keys | `GenerateServerKey`, `NewServerKeySet`, `ServerKeySet.Handler` |
+| Client transport | `NewTransport` encrypts requests and decrypts responses |
+| Server middleware | `Middleware` decrypts requests and encrypts responses |
+| Replay protection | Per-message nonce id (`nid`) with a replay cache and skew window |
+| Errors | RFC 9457 Problem Details returned undecrypted |
+
+## wsmux (kasper only)
+
+Stream multiplexing over a single `kasper/websocket` connection. No Gorilla equivalent.
+
+| Feature | Details |
+|---------|---------|
+| Server | `NewServer` + `Accept` for inbound streams |
+| Client | `NewClient` + `Open` for outbound streams |
+| Framing | 5-byte header (`[type][big-endian stream id]`) per message |
+| Stream ids | Fixed parity per side (client odd, server even); no collisions |
+| Backpressure | Non-blocking delivery; a full-buffer stream is reset, not head-of-line blocked |
+
+## sfv (kasper only)
+
+Structured Field Values for HTTP per RFC 9651 (obsoletes RFC 8941; adds Date and Display String). No Gorilla equivalent.
+
+| Feature | Details |
+|---------|---------|
+| Top-level types | `Item`, `List`, `Dictionary` |
+| Bare items | Integer, Decimal, String, Token, Byte Sequence, Boolean, Date, Display String |
+| Parsing | `ParseItem`, `ParseList`, `ParseDictionary` |
+| Serialization | Canonical `String()` per RFC 9651 Section 4 |
+
+---
+
 ## csrf
 
 gorilla/csrf and kasper/csrf both protect against Cross-Site Request Forgery but use different validation models and cookie cryptography.
@@ -485,7 +584,7 @@ gorilla/csrf and kasper/csrf both protect against Cross-Site Request Forgery but
 | Trusted origins with wildcards | Limited | Yes (`https://*.example.com`) |
 | Trusted origin predicate (`TrustedOriginFunc`) | No | Yes |
 | Strict scheme matching (CVE-2025-47909) | Bug (host-only) | Yes (scheme + host) |
-| `Origin: null` handling | Bug (rejected as parse error) | Yes (treated as missing per RFC 6454) |
+| `Origin: null` handling | Bug (rejected as parse error) | Yes (rejected outright per RFC 6454) |
 | **Token Transport** | | |
 | Header submission (`X-CSRF-Token`) | Yes | Yes |
 | Form field submission (`csrf_token`) | Yes | Yes (`csrf_token`, no dots) |
@@ -546,7 +645,7 @@ gorilla/securecookie and kasper/securecookie both provide authenticated, encrypt
 | Embedded timestamp | Yes | Yes |
 | MaxAge | Yes (default 30 days) | Yes (default 30 days) |
 | MinAge | Yes | Yes |
-| Future timestamp rejection | No | Yes (5 min skew) |
+| Future timestamp rejection | No | Yes (configurable, `FutureSkew`; default 5 min) |
 | **Key Rotation** | | |
 | Multi-key encode | `EncodeMulti` | `EncodeMulti` |
 | Multi-key decode | `DecodeMulti` | `DecodeMulti` |
@@ -596,9 +695,10 @@ gorilla/securecookie and kasper/securecookie both provide authenticated, encrypt
 | Key generation | `GenerateRandomKey(length int) []byte` | `GenerateKey` (encrypted) / `GenerateSignedKey` (sign-only) |
 | AAD | N/A (cookie name always used) | `AdditionalData(data []byte) *SecureCookie` |
 | Serializer | `SetSerializer(sz Serializer) *SecureCookie` | `SetSerializer(sz Serializer) *SecureCookie` |
-| MaxAge | `MaxAge(value int) *SecureCookie` | `MaxAge(seconds int) *SecureCookie` |
-| MinAge | `MinAge(value int) *SecureCookie` | `MinAge(seconds int) *SecureCookie` |
+| MaxAge | `MaxAge(value int) *SecureCookie` | `MaxAge(seconds int64) *SecureCookie` |
+| MinAge | `MinAge(value int) *SecureCookie` | `MinAge(seconds int64) *SecureCookie` |
 | MaxLength | `MaxLength(value int) *SecureCookie` | `MaxLength(length int) *SecureCookie` |
+| FutureSkew | N/A | `FutureSkew(seconds int64) *SecureCookie` (default `DefaultFutureSkew`, 5 min) |
 | Hash function | `HashFunc(f func() hash.Hash) *SecureCookie` | N/A |
 | Block cipher | `BlockFunc(f func([]byte) (cipher.Block, error)) *SecureCookie` | N/A |
 
@@ -629,8 +729,10 @@ HMAC for authentication and AES-CTR for encryption.
 This requires two keys and two passes over the data,
 and allows an "auth-only" mode where data is signed but not encrypted.
 
-kasper/securecookie uses AES-GCM, which provides authenticated encryption
-in a single pass with a single key. There is no auth-only mode -- data is
-always both encrypted and authenticated. This eliminates the risk of
-accidentally deploying without encryption (a common gorilla/securecookie
-misconfiguration when the block key is nil).
+kasper/securecookie uses AES-GCM for the default (encrypted) path, which
+provides authenticated encryption in a single pass with a single key. The
+auth-only mode is a separate, explicit type -- `SignedCookie` (via `NewSigned`),
+which authenticates with HMAC-SHA256 but does not encrypt. Encryption is never
+silently disabled: a nil block key cannot drop you into sign-only mode the way
+it can in gorilla/securecookie. Choosing `SignedCookie` is a deliberate opt-in
+to unencrypted-but-authenticated cookies.
