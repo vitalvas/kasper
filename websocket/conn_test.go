@@ -4356,3 +4356,105 @@ func TestStartKeepaliveZeroIntervalDoesNotPanic(t *testing.T) {
 	conn := newConn(local, true, 0, 0)
 	require.NotPanics(t, func() { conn.StartKeepalive(KeepaliveOptions{}) })
 }
+
+func TestWriteMessageHonorsWriteDeadlineWhileLocked(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	conn := newConn(server, true, 0, 0)
+
+	// An open NextWriter holds writeMu without releasing it, so WriteMessage
+	// must fall back to the write deadline instead of blocking forever.
+	w, err := conn.NextWriter(BinaryMessage)
+	require.NoError(t, err)
+	defer w.Close()
+
+	require.NoError(t, conn.SetWriteDeadline(time.Now().Add(50*time.Millisecond)))
+
+	done := make(chan error, 1)
+	go func() { done <- conn.WriteMessage(BinaryMessage, []byte("blocked")) }()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WriteMessage ignored the write deadline while acquiring the lock")
+	}
+}
+
+func TestNextWriterOnClosedConnection(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	conn := newConn(server, true, 0, 0)
+	require.NoError(t, conn.CloseNow())
+
+	w, err := conn.NextWriter(BinaryMessage)
+	assert.Nil(t, w)
+	assert.ErrorIs(t, err, ErrWriteToClosedConnection)
+}
+
+func TestWriteMessageBlockedOnLockUnblocksOnClose(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	conn := newConn(server, true, 0, 0)
+
+	// Hold writeMu with an open writer and set a distant deadline so lockWrite
+	// takes the context-aware path. A concurrent WriteMessage then blocks on the
+	// lock until the connection closes, exercising the done branch of
+	// lockContext rather than the deadline branch.
+	w, err := conn.NextWriter(BinaryMessage)
+	require.NoError(t, err)
+	defer w.Close()
+	require.NoError(t, conn.SetWriteDeadline(time.Now().Add(10*time.Second)))
+
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		done <- conn.WriteMessage(BinaryMessage, []byte("blocked"))
+	}()
+
+	<-started
+	// Give the goroutine time to reach the blocking lock acquisition.
+	time.Sleep(50 * time.Millisecond)
+	require.NoError(t, conn.CloseNow())
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, ErrWriteToClosedConnection)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WriteMessage did not unblock when the connection closed")
+	}
+}
+
+func TestNextWriterHonorsWriteDeadlineWhileLocked(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	conn := newConn(server, true, 0, 0)
+
+	w, err := conn.NextWriter(BinaryMessage)
+	require.NoError(t, err)
+	defer w.Close()
+
+	require.NoError(t, conn.SetWriteDeadline(time.Now().Add(50*time.Millisecond)))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := conn.NextWriter(BinaryMessage)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * time.Second):
+		t.Fatal("NextWriter ignored the write deadline while acquiring the lock")
+	}
+}

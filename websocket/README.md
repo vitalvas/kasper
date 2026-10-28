@@ -189,6 +189,20 @@ var upgrader = websocket.Upgrader{
 }
 ```
 
+## Challenge Key Validation
+
+By default the server requires `Sec-WebSocket-Key` to be a base64-encoded
+16-byte value per RFC 6455. Override `CheckChallengeKey` only to interoperate
+with non-conforming clients; a laxer check weakens the handshake:
+
+```go
+var upgrader = websocket.Upgrader{
+    CheckChallengeKey: func(r *http.Request, key string) bool {
+        return key != "" // accept any non-empty key
+    },
+}
+```
+
 ## Frame Size Limit
 
 Limit the maximum payload size of a single WebSocket frame. Frames exceeding the

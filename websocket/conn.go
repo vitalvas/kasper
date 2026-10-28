@@ -253,6 +253,7 @@ type Conn struct {
 	pingErr     error
 
 	writeMu         writeMutex
+	writeDeadline   atomic.Pointer[time.Time]
 	writeErr        error
 	writeBuf        []byte
 	writePos        int
@@ -476,13 +477,32 @@ func (c *Conn) SetReadDeadline(t time.Time) error {
 	return ErrDeadlineNotSupported
 }
 
-// SetWriteDeadline sets the write deadline on the underlying network connection.
-// Returns ErrDeadlineNotSupported if the underlying connection does not support deadlines (e.g., HTTP/2).
+// SetWriteDeadline sets the write deadline. The deadline bounds both the
+// network write and the wait to acquire the write lock, so a stalled writer
+// cannot block WriteMessage or NextWriter past the deadline. A zero t clears it.
+// Returns ErrDeadlineNotSupported if the underlying connection does not support
+// deadlines (e.g., HTTP/2); the lock-acquisition deadline still applies.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.writeDeadline.Store(&t)
 	if c.netConn != nil {
 		return c.netConn.SetWriteDeadline(t)
 	}
 	return ErrDeadlineNotSupported
+}
+
+// lockWrite acquires the write lock, honoring the write deadline set via
+// SetWriteDeadline. Without this a stalled writer (e.g. an open NextWriter)
+// would block WriteMessage indefinitely despite a deadline, because the
+// deadline only governs the socket write, not lock acquisition (gorilla #704).
+func (c *Conn) lockWrite() error {
+	deadline := c.writeDeadline.Load()
+	if deadline == nil || deadline.IsZero() {
+		c.writeMu.Lock()
+		return nil
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), *deadline)
+	defer cancel()
+	return c.writeMu.lockContext(ctx, c.pingDone)
 }
 
 // SetReadLimit sets the maximum size in bytes for a message read from the peer.
@@ -808,7 +828,9 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 		return ErrInvalidMessageType
 	}
 
-	c.writeMu.Lock()
+	if err := c.lockWrite(); err != nil {
+		return err
+	}
 	defer c.unlockWrite()
 
 	if c.writeErr != nil {
@@ -827,7 +849,9 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 		return nil, ErrInvalidMessageType
 	}
 
-	c.writeMu.Lock()
+	if err := c.lockWrite(); err != nil {
+		return nil, err
+	}
 
 	if c.writeErr != nil {
 		c.unlockWrite()

@@ -421,6 +421,55 @@ func TestUpgraderUpgrade(t *testing.T) {
 		})
 	}
 
+	t.Run("CheckChallengeKey rejects an otherwise valid key", func(t *testing.T) {
+		called := false
+		u := &Upgrader{CheckChallengeKey: func(*http.Request, string) bool { called = true; return false }}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Connection", "upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		r.Header.Set("Sec-WebSocket-Version", "13")
+		r.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+		conn, err := u.Upgrade(w, r, nil)
+		assert.Nil(t, conn)
+		assert.ErrorIs(t, err, ErrBadHandshake)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.True(t, called, "custom validator was not consulted")
+	})
+
+	t.Run("CheckChallengeKey accepts a non-conforming key", func(t *testing.T) {
+		gotKey := ""
+		var gotReq *http.Request
+		u := &Upgrader{CheckChallengeKey: func(r *http.Request, key string) bool {
+			gotReq, gotKey = r, key
+			return true
+		}}
+
+		server, client := net.Pipe()
+		hijacker := &mockHijacker{
+			ResponseWriter: httptest.NewRecorder(),
+			conn:           server,
+			reader:         bufio.NewReader(strings.NewReader("")),
+			writer:         bufio.NewWriter(new(bytes.Buffer)),
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Connection", "upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		r.Header.Set("Sec-WebSocket-Version", "13")
+		r.Header.Set("Sec-WebSocket-Key", "non-conforming")
+
+		conn, err := u.Upgrade(hijacker, r, nil)
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		assert.Equal(t, "non-conforming", gotKey)
+		assert.Same(t, r, gotReq)
+
+		client.Close()
+		conn.Close()
+	})
+
 	t.Run("Invalid selected subprotocol is rejected before hijacking", func(t *testing.T) {
 		invalid := "chat\r\nInjected: true"
 		u := &Upgrader{Subprotocols: []string{invalid}}

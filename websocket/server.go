@@ -46,6 +46,12 @@ type Upgrader struct {
 	// CheckOrigin returns true if the request Origin header is acceptable.
 	CheckOrigin func(r *http.Request) bool
 
+	// CheckChallengeKey returns true if the Sec-WebSocket-Key header value is
+	// acceptable. When nil, the key must be a base64-encoded 16-byte value per
+	// RFC 6455, section 4.1. Override only to interoperate with non-conforming
+	// clients; a laxer check weakens the handshake.
+	CheckChallengeKey func(r *http.Request, key string) bool
+
 	// EnableCompression specifies if the server should attempt to negotiate
 	// per message compression (RFC 7692).
 	EnableCompression bool
@@ -195,8 +201,12 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	}
 
 	// Extract challenge key per RFC 6455, section 4.2.1, item 5.
+	checkChallengeKey := u.CheckChallengeKey
+	if checkChallengeKey == nil {
+		checkChallengeKey = func(_ *http.Request, key string) bool { return validChallengeKey(key) }
+	}
 	challengeKey := r.Header.Get("Sec-WebSocket-Key")
-	if !validChallengeKey(challengeKey) {
+	if !checkChallengeKey(r, challengeKey) {
 		u.returnError(w, r, http.StatusBadRequest, errors.New("websocket: invalid Sec-WebSocket-Key"))
 		return nil, ErrBadHandshake
 	}
