@@ -50,7 +50,7 @@
 // fails closed with ErrNoNonceCache; a reused nonce returns ErrReplay:
 //
 //	cache := privacypass.NewMemoryNonceCache()
-//	err := privacypass.VerifyToken(issuerPublicKey, challenge, token, cache, 0)
+//	err := privacypass.VerifyToken(ctx, issuerPublicKey, challenge, token, cache, 0)
 //
 // NonceCache is an interface. MemoryNonceCache is process-local; for a
 // multi-instance cluster, implement NonceCache over a shared store so a nonce
@@ -58,7 +58,7 @@
 //
 //	type redisNonceCache struct{ client *redis.Client }
 //
-//	func (c *redisNonceCache) StoreUnique(nonce []byte, ttl time.Duration) bool {
+//	func (c *redisNonceCache) StoreUnique(ctx context.Context, nonce []byte, ttl time.Duration) bool {
 //	    key := fmt.Sprintf("pp:%x", nonce)
 //	    ok, _ := c.client.SetNX(ctx, key, 1, ttl).Result()
 //	    return ok

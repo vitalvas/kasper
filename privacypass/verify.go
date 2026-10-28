@@ -2,6 +2,7 @@ package privacypass
 
 import (
 	"container/heap"
+	"context"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -38,9 +39,10 @@ var (
 // safe for concurrent use. StoreUnique atomically records nonce and returns
 // true when it was newly inserted (not previously redeemed) and false when it
 // was already present. A zero ttl requires indefinite retention; a positive ttl
-// requires retention for at least that duration.
+// requires retention for at least that duration. The context carries the
+// request deadline and cancellation for network-backed implementations.
 type NonceCache interface {
-	StoreUnique(nonce []byte, ttl time.Duration) bool
+	StoreUnique(ctx context.Context, nonce []byte, ttl time.Duration) bool
 }
 
 // VerifyToken verifies a redeemed token against the issuer public key and the
@@ -52,7 +54,7 @@ type NonceCache interface {
 // closed with ErrNoNonceCache. A zero ttl retains nonces indefinitely. With a
 // positive ttl, the caller must stop accepting this challenge before any cache
 // entry can expire: the token itself contains no expiration timestamp.
-func VerifyToken(pub *rsa.PublicKey, challenge *TokenChallenge, tok *Token, cache NonceCache, ttl time.Duration) error {
+func VerifyToken(ctx context.Context, pub *rsa.PublicKey, challenge *TokenChallenge, tok *Token, cache NonceCache, ttl time.Duration) error {
 	if isNilNonceCache(cache) {
 		return ErrNoNonceCache
 	}
@@ -92,7 +94,7 @@ func VerifyToken(pub *rsa.PublicKey, challenge *TokenChallenge, tok *Token, cach
 
 	// Insert the nonce only after signature verification succeeds, so an
 	// unauthenticated token cannot poison the cache.
-	if !cache.StoreUnique(tok.Nonce, ttl) {
+	if !cache.StoreUnique(ctx, tok.Nonce, ttl) {
 		return ErrReplay
 	}
 	return nil
@@ -146,8 +148,8 @@ func NewMemoryNonceCache() *MemoryNonceCache {
 }
 
 // StoreUnique records nonce with the given ttl and reports whether it was newly
-// inserted.
-func (c *MemoryNonceCache) StoreUnique(nonce []byte, ttl time.Duration) bool {
+// inserted. The in-memory cache does no I/O, so ctx is unused.
+func (c *MemoryNonceCache) StoreUnique(_ context.Context, nonce []byte, ttl time.Duration) bool {
 	if c == nil {
 		return false
 	}

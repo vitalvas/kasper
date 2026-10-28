@@ -107,7 +107,7 @@ func Middleware(cfg Config) (mux.MiddlewareFunc, error) {
 				onError(w, r, err)
 				return
 			}
-			if err := VerifyToken(cfg.PublicKey, cfg.Challenge, tok, cache, ttl); err != nil {
+			if err := VerifyToken(r.Context(), cfg.PublicKey, cfg.Challenge, tok, cache, ttl); err != nil {
 				onError(w, r, err)
 				return
 			}

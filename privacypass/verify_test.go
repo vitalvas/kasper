@@ -1,6 +1,7 @@
 package privacypass
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/asn1"
@@ -69,7 +70,7 @@ func TestVerifyTokenEndToEnd(t *testing.T) {
 	tok := issueToken(t, priv, challenge)
 
 	cache := NewMemoryNonceCache()
-	err := VerifyToken(&priv.PublicKey, challenge, tok, cache, time.Hour)
+	err := VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, cache, time.Hour)
 	require.NoError(t, err)
 }
 
@@ -79,16 +80,16 @@ func TestVerifyTokenReplay(t *testing.T) {
 	tok := issueToken(t, priv, challenge)
 	cache := NewMemoryNonceCache()
 
-	require.NoError(t, VerifyToken(&priv.PublicKey, challenge, tok, cache, time.Hour))
+	require.NoError(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, cache, time.Hour))
 	// Second redemption of the same nonce is rejected.
-	require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, cache, time.Hour), ErrReplay)
+	require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, cache, time.Hour), ErrReplay)
 }
 
 func TestVerifyTokenNilCacheFailsClosed(t *testing.T) {
 	priv := testRSAKey(t)
 	challenge := testChallenge()
 	tok := issueToken(t, priv, challenge)
-	require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, nil, time.Hour), ErrNoNonceCache)
+	require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, nil, time.Hour), ErrNoNonceCache)
 }
 
 func TestVerifyTokenTypedNilCacheFailsClosed(t *testing.T) {
@@ -98,7 +99,7 @@ func TestVerifyTokenTypedNilCacheFailsClosed(t *testing.T) {
 	var cache *MemoryNonceCache
 
 	assert.NotPanics(t, func() {
-		require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, cache, time.Hour), ErrNoNonceCache)
+		require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, cache, time.Hour), ErrNoNonceCache)
 	})
 }
 
@@ -108,7 +109,7 @@ func TestVerifyTokenKeyIDMismatch(t *testing.T) {
 	challenge := testChallenge()
 	tok := issueToken(t, priv, challenge)
 
-	err := VerifyToken(&other.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour)
+	err := VerifyToken(context.Background(), &other.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour)
 	require.ErrorIs(t, err, ErrKeyIDMismatch)
 }
 
@@ -117,7 +118,7 @@ func TestVerifyTokenChallengeMismatch(t *testing.T) {
 	tok := issueToken(t, priv, testChallenge())
 
 	other := &TokenChallenge{TokenType: TokenType, IssuerName: "different.example"}
-	err := VerifyToken(&priv.PublicKey, other, tok, NewMemoryNonceCache(), time.Hour)
+	err := VerifyToken(context.Background(), &priv.PublicKey, other, tok, NewMemoryNonceCache(), time.Hour)
 	require.ErrorIs(t, err, ErrChallengeMismatch)
 }
 
@@ -128,7 +129,7 @@ func TestVerifyTokenBadSignature(t *testing.T) {
 	// Corrupt the authenticator.
 	tok.Authenticator[0] ^= 0xff
 
-	err := VerifyToken(&priv.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour)
+	err := VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour)
 	require.ErrorIs(t, err, ErrBadSignature)
 }
 
@@ -139,7 +140,7 @@ func TestVerifyTokenMalformedChallenge(t *testing.T) {
 	// A challenge that cannot be marshalled surfaces the encode error, after
 	// the key id check passes.
 	bad := &TokenChallenge{TokenType: TokenType, RedemptionContext: []byte{1, 2, 3}}
-	err := VerifyToken(&priv.PublicKey, bad, tok, NewMemoryNonceCache(), time.Hour)
+	err := VerifyToken(context.Background(), &priv.PublicKey, bad, tok, NewMemoryNonceCache(), time.Hour)
 	require.ErrorIs(t, err, ErrMalformed)
 }
 
@@ -149,21 +150,21 @@ func TestMemoryNonceCacheExpiry(t *testing.T) {
 	cache.now = func() time.Time { return now }
 
 	nonce := []byte("n1")
-	assert.True(t, cache.StoreUnique(nonce, time.Minute))
-	assert.False(t, cache.StoreUnique(nonce, time.Minute))
+	assert.True(t, cache.StoreUnique(context.Background(), nonce, time.Minute))
+	assert.False(t, cache.StoreUnique(context.Background(), nonce, time.Minute))
 
 	// After expiry the nonce may be stored again.
 	now = now.Add(2 * time.Minute)
-	assert.True(t, cache.StoreUnique(nonce, time.Minute))
+	assert.True(t, cache.StoreUnique(context.Background(), nonce, time.Minute))
 }
 
 func TestMemoryNonceCacheZeroValueAndNilReceiver(t *testing.T) {
 	var zero MemoryNonceCache
-	assert.True(t, zero.StoreUnique([]byte("nonce"), time.Minute))
-	assert.False(t, zero.StoreUnique([]byte("nonce"), time.Minute))
+	assert.True(t, zero.StoreUnique(context.Background(), []byte("nonce"), time.Minute))
+	assert.False(t, zero.StoreUnique(context.Background(), []byte("nonce"), time.Minute))
 
 	var cache *MemoryNonceCache
-	assert.False(t, cache.StoreUnique([]byte("nonce"), time.Minute))
+	assert.False(t, cache.StoreUnique(context.Background(), []byte("nonce"), time.Minute))
 }
 
 func BenchmarkVerifyToken(b *testing.B) {
@@ -185,7 +186,7 @@ func BenchmarkVerifyToken(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		// Fresh cache each iteration so replay does not trip.
-		_ = VerifyToken(&priv.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour)
+		_ = VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour)
 	}
 }
 
@@ -194,7 +195,7 @@ func TestVerifyRejectsWrongTokenType(t *testing.T) {
 	challenge := testChallenge()
 	tok := issueToken(t, priv, challenge)
 	tok.TokenType = 1
-	require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour), ErrWrongTokenType)
+	require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, NewMemoryNonceCache(), time.Hour), ErrWrongTokenType)
 }
 
 func TestVerifyMalformedInputs(t *testing.T) {
@@ -202,22 +203,22 @@ func TestVerifyMalformedInputs(t *testing.T) {
 	challenge := testChallenge()
 	tok := issueToken(t, priv, challenge)
 	cache := NewMemoryNonceCache()
-	require.ErrorIs(t, VerifyToken(nil, challenge, tok, cache, time.Hour), ErrInvalidPublicKey)
-	require.ErrorIs(t, VerifyToken(&priv.PublicKey, nil, tok, cache, time.Hour), ErrMalformed)
-	require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, nil, cache, time.Hour), ErrMalformed)
+	require.ErrorIs(t, VerifyToken(context.Background(), nil, challenge, tok, cache, time.Hour), ErrInvalidPublicKey)
+	require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, nil, tok, cache, time.Hour), ErrMalformed)
+	require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, nil, cache, time.Hour), ErrMalformed)
 	_, err := MarshalPublicKey(&rsa.PublicKey{})
 	require.ErrorIs(t, err, ErrInvalidPublicKey)
 	tok.Nonce = tok.Nonce[:31]
-	require.ErrorIs(t, VerifyToken(&priv.PublicKey, challenge, tok, cache, time.Hour), ErrMalformed)
+	require.ErrorIs(t, VerifyToken(context.Background(), &priv.PublicKey, challenge, tok, cache, time.Hour), ErrMalformed)
 }
 
 func TestNoncesWithoutExpirationRemainSpent(t *testing.T) {
 	cache := NewMemoryNonceCache()
 	now := time.Now()
 	cache.now = func() time.Time { return now }
-	require.True(t, cache.StoreUnique([]byte("nonce"), 0))
+	require.True(t, cache.StoreUnique(context.Background(), []byte("nonce"), 0))
 	now = now.Add(24 * time.Hour)
-	require.False(t, cache.StoreUnique([]byte("nonce"), 0))
+	require.False(t, cache.StoreUnique(context.Background(), []byte("nonce"), 0))
 }
 
 func TestMemoryNonceCachePrunesThroughExpiryHeap(t *testing.T) {
@@ -227,13 +228,13 @@ func TestMemoryNonceCachePrunesThroughExpiryHeap(t *testing.T) {
 
 	for i := range 1000 {
 		nonce := []byte{byte(i >> 8), byte(i)}
-		require.True(t, cache.StoreUnique(nonce, time.Second))
+		require.True(t, cache.StoreUnique(context.Background(), nonce, time.Second))
 	}
 	require.Len(t, cache.entries, 1000)
 	require.Len(t, cache.expiries, 1000)
 
 	now = now.Add(2 * time.Second)
-	require.True(t, cache.StoreUnique([]byte("fresh"), time.Minute))
+	require.True(t, cache.StoreUnique(context.Background(), []byte("fresh"), time.Minute))
 	require.Len(t, cache.entries, 1)
 	require.Len(t, cache.expiries, 1)
 }
@@ -247,12 +248,12 @@ func BenchmarkMemoryNonceCachePruning(b *testing.B) {
 				cache := NewMemoryNonceCache()
 				cache.now = func() time.Time { return now }
 				for i := range count {
-					cache.StoreUnique([]byte(fmt.Sprintf("nonce-%d", i)), time.Second)
+					cache.StoreUnique(context.Background(), []byte(fmt.Sprintf("nonce-%d", i)), time.Second)
 				}
 				now = now.Add(2 * time.Second)
 				b.StartTimer()
 
-				if !cache.StoreUnique([]byte("fresh"), time.Minute) {
+				if !cache.StoreUnique(context.Background(), []byte("fresh"), time.Minute) {
 					b.Fatal("fresh nonce was rejected")
 				}
 
@@ -289,5 +290,5 @@ func TestRFC9578TokenVector(t *testing.T) {
 	require.NoError(t, err)
 	tok, err := UnmarshalToken(encodedToken)
 	require.NoError(t, err)
-	require.NoError(t, VerifyToken(pub, challenge, tok, NewMemoryNonceCache(), 0))
+	require.NoError(t, VerifyToken(context.Background(), pub, challenge, tok, NewMemoryNonceCache(), 0))
 }

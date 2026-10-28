@@ -140,7 +140,7 @@ challenge before its deadline; expired challenges are rejected. Direct
 
 ```go
 type NonceCache interface {
-    StoreUnique(nonce []byte, ttl time.Duration) bool
+    StoreUnique(ctx context.Context, nonce []byte, ttl time.Duration) bool
 }
 ```
 
@@ -152,7 +152,7 @@ prevented cluster-wide:
 ```go
 type redisNonceCache struct{ client *redis.Client }
 
-func (c *redisNonceCache) StoreUnique(nonce []byte, ttl time.Duration) bool {
+func (c *redisNonceCache) StoreUnique(ctx context.Context, nonce []byte, ttl time.Duration) bool {
     key := fmt.Sprintf("pp:%x", nonce)
     ok, _ := c.client.SetNX(ctx, key, 1, ttl).Result()
     return ok
