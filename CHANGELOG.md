@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.0](https://github.com/vitalvas/kasper/compare/v0.29.0...v1.0.0) (2026-10-28)
+
+
+### Features
+
+* add security policy ([76257ce](https://github.com/vitalvas/kasper/commit/76257ce4ef95944eb2f491251934e3733d2db4b2))
+* add websocket challenge-key validator and write-deadline lock ([2362151](https://github.com/vitalvas/kasper/commit/236215164968313bb483a9bf2e20eb6ba8b61ba4))
+* exclude examples from codecov coverage report ([9710131](https://github.com/vitalvas/kasper/commit/9710131afcdbb50458878229429c578fe054aafb))
+* export inline errors as sentinels for errors.Is matching ([0bf405c](https://github.com/vitalvas/kasper/commit/0bf405cff9ee4637b8439098a89cf387ae1484bd))
+* export sentinel errors and apply code-policy cleanups ([1a9cc7f](https://github.com/vitalvas/kasper/commit/1a9cc7fcb9346d8d31cea11a3e6cbb9391b6dab8))
+* pass request to basicauth ValidateFunc for request-aware auth ([d517f1b](https://github.com/vitalvas/kasper/commit/d517f1bf04094f4d49fead8a8acec79ad69ca3ab))
+* thread context through privacypass NonceCache and VerifyToken ([c0d4b81](https://github.com/vitalvas/kasper/commit/c0d4b81d2f44054e2dd98023a83c109ba42c3ef2))
+
+
+### Bug Fixes
+
+* add FutureSkew tests for SignedCookie ([7928aeb](https://github.com/vitalvas/kasper/commit/7928aeb7c3042c7e9b509366f6cd98b5dd93dd9e))
+* document exported fields and consts in e2ee, muxhandlers, openapi ([951b8c6](https://github.com/vitalvas/kasper/commit/951b8c6a3c77c5259f1c883b85991c62d6057615))
+* harden input validation and trust boundaries across packages ([b6c776c](https://github.com/vitalvas/kasper/commit/b6c776c264c6e371cee9cde7bce1d436bd719e3c))
+* use request context for access log slog emission ([a58ab9c](https://github.com/vitalvas/kasper/commit/a58ab9cff4b59ff28ee6a6807c9fe4b38fd06af4))
+
+
+### Miscellaneous Chores
+
+* force release version 1.0.0 ([3aec957](https://github.com/vitalvas/kasper/commit/3aec957ea84f931234f740b779c113f9fa13458c))
+
 ## [0.29.0](https://github.com/vitalvas/kasper/compare/v0.28.0...v0.29.0) (2026-10-21)
 
 
