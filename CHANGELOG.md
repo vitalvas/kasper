@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/vitalvas/kasper/compare/v1.0.0...v1.1.0) (2026-11-11)
+
+
+### Features
+
+* **httpsig:** expose verified key ID to handlers via context ([e4b0765](https://github.com/vitalvas/kasper/commit/e4b0765036945d60e78e83fa673d1c056f6f5a28))
+
 ## [1.0.0](https://github.com/vitalvas/kasper/compare/v0.29.0...v1.0.0) (2026-10-28)
 
 
