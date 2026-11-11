@@ -341,6 +341,22 @@ router.Use(mw)
 router.HandleFunc("/api/v1/orders", handleOrders).Methods(http.MethodPost)
 ```
 
+After successful verification, `Middleware` stores the verified key ID on the
+request context. Downstream handlers read it with `KeyIDFromContext` to act as
+the authenticated identity. The boolean is false when the request did not pass
+through `Middleware`.
+
+```go
+func handleOrders(w http.ResponseWriter, r *http.Request) {
+    keyID, ok := httpsig.KeyIDFromContext(r.Context())
+    if !ok {
+        http.Error(w, "unauthenticated", http.StatusUnauthorized)
+        return
+    }
+    // Look up the caller's data by keyID.
+}
+```
+
 ### Response Signing Middleware
 
 `SignMiddleware` signs every outgoing response via `SignResponse`. The

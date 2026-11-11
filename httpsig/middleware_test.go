@@ -1,6 +1,7 @@
 package httpsig
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
@@ -58,6 +59,36 @@ func TestMiddleware(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("verified key id reaches the handler", func(t *testing.T) {
+		r := mux.NewRouter()
+
+		var gotKeyID string
+		var gotOK bool
+		r.HandleFunc("/api/test", func(w http.ResponseWriter, req *http.Request) {
+			gotKeyID, gotOK = KeyIDFromContext(req.Context())
+			w.WriteHeader(http.StatusOK)
+		}).Methods(http.MethodGet)
+
+		mw, err := Middleware(MiddlewareConfig{
+			Verify: VerifyConfig{Resolver: resolver},
+		})
+		require.NoError(t, err)
+		r.Use(mw)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Host = "example.com"
+
+		err = SignRequest(req, SignConfig{Signer: signer})
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.True(t, gotOK)
+		assert.Equal(t, "mw-key", gotKeyID)
 	})
 
 	t.Run("unsigned request returns 401", func(t *testing.T) {
@@ -162,6 +193,21 @@ func TestMiddleware(t *testing.T) {
 		defer resp.Body.Close()
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+}
+
+func TestKeyIDFromContext(t *testing.T) {
+	t.Run("missing key id", func(t *testing.T) {
+		keyID, ok := KeyIDFromContext(context.Background())
+		assert.False(t, ok)
+		assert.Empty(t, keyID)
+	})
+
+	t.Run("present key id", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), keyIDContextKey{}, "ctx-key")
+		keyID, ok := KeyIDFromContext(ctx)
+		assert.True(t, ok)
+		assert.Equal(t, "ctx-key", keyID)
 	})
 }
 

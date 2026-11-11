@@ -122,6 +122,11 @@
 //	}
 //	router.Use(mw)
 //
+// After successful verification, Middleware stores the verified key ID on the
+// request context. Downstream handlers read it with KeyIDFromContext:
+//
+//	keyID, ok := httpsig.KeyIDFromContext(r.Context())
+//
 // SignMiddleware signs outgoing responses. The handler's response is
 // buffered so the signature covers the final status, headers, and body:
 //

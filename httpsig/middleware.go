@@ -2,12 +2,23 @@ package httpsig
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"slices"
 
 	"go.vitalvas.com/kasper/mux"
 )
+
+type keyIDContextKey struct{}
+
+// KeyIDFromContext returns the key ID that Middleware verified for the request.
+// The boolean is false when no verified key ID is present, for example when the
+// request did not pass through Middleware.
+func KeyIDFromContext(ctx context.Context) (string, bool) {
+	keyID, ok := ctx.Value(keyIDContextKey{}).(string)
+	return keyID, ok
+}
 
 // MiddlewareConfig configures the server-side signature verification
 // middleware.
@@ -38,11 +49,13 @@ func Middleware(cfg MiddlewareConfig) (mux.MiddlewareFunc, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if err := VerifyRequest(r, verifyCfg); err != nil {
+			keyID, err := verifyRequestKeyID(r, verifyCfg)
+			if err != nil {
 				onError(w, r, err)
 				return
 			}
 
+			r = r.WithContext(context.WithValue(r.Context(), keyIDContextKey{}, keyID))
 			next.ServeHTTP(w, r)
 		})
 	}, nil

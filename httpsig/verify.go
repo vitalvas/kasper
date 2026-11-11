@@ -44,14 +44,22 @@ type VerifyConfig struct {
 
 // VerifyRequest verifies an HTTP request signature per RFC 9421.
 func VerifyRequest(r *http.Request, cfg VerifyConfig) error {
+	_, err := verifyRequestKeyID(r, cfg)
+	return err
+}
+
+// verifyRequestKeyID verifies an HTTP request signature like VerifyRequest and
+// returns the verified key ID. Middleware uses it to expose the key ID to
+// downstream handlers via the request context.
+func verifyRequestKeyID(r *http.Request, cfg VerifyConfig) (string, error) {
 	if cfg.Resolver == nil {
-		return ErrNoResolver
+		return "", ErrNoResolver
 	}
 
 	// Optionally verify Content-Digest.
 	if cfg.RequireDigest {
 		if err := VerifyContentDigest(r); err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -80,29 +88,31 @@ func VerifyResponse(resp *http.Response, req *http.Request, cfg VerifyConfig) er
 		}
 	}
 
-	return verifyMessage(sigMessage{req: req, resp: resp}, cfg)
+	_, err := verifyMessage(sigMessage{req: req, resp: resp}, cfg)
+	return err
 }
 
 // verifyMessage locates the target signature on the message, reconstructs
-// the signature base, and verifies it with the resolved key.
-func verifyMessage(m sigMessage, cfg VerifyConfig) error {
+// the signature base, and verifies it with the resolved key. On success it
+// returns the verified key ID.
+func verifyMessage(m sigMessage, cfg VerifyConfig) (string, error) {
 	hdr := m.header()
 
 	// Parse the Signature-Input header to find the target signature.
 	sigInputHeader := strings.Join(hdr.Values("Signature-Input"), ", ")
 	if sigInputHeader == "" {
-		return ErrSignatureNotFound
+		return "", ErrSignatureNotFound
 	}
 
 	label, sigParamsRaw, err := findSignatureInput(sigInputHeader, cfg.Label)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Parse signature parameters.
 	params, err := parseSignatureParams(sigParamsRaw)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Check required components.
@@ -113,55 +123,59 @@ func verifyMessage(m sigMessage, cfg VerifyConfig) error {
 		}
 		for _, required := range cfg.RequiredComponents {
 			if _, present := covered[required]; !present {
-				return fmt.Errorf("%w: %s", ErrMissingComponent, required)
+				return "", fmt.Errorf("%w: %s", ErrMissingComponent, required)
 			}
 		}
 	}
 
 	// Check signature expiration.
 	if !params.expires.IsZero() && time.Now().After(params.expires) {
-		return ErrSignatureExpired
+		return "", ErrSignatureExpired
 	}
 
 	// Check signature age.
 	if cfg.MaxAge > 0 {
 		if params.created.IsZero() {
-			return ErrCreatedRequired
+			return "", ErrCreatedRequired
 		}
 
 		age := time.Since(params.created)
 		if age < 0 || age > cfg.MaxAge {
-			return ErrSignatureExpired
+			return "", ErrSignatureExpired
 		}
 	}
 
 	// Resolve the verifier.
 	verifier, err := cfg.Resolver(m.req, params.keyID, params.alg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if isNilInterface(verifier) || verifier.Algorithm() != params.alg || verifier.KeyID() != params.keyID {
-		return ErrInvalidKey
+		return "", ErrInvalidKey
 	}
 
 	// Reconstruct the signature base.
 	base, _, err := buildSignatureBase(m, params)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Extract the signature value.
 	sigHeader := strings.Join(hdr.Values("Signature"), ", ")
 	if sigHeader == "" {
-		return ErrSignatureNotFound
+		return "", ErrSignatureNotFound
 	}
 
 	sigBytes, err := extractSignatureValue(sigHeader, label)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return verifier.Verify(base, sigBytes)
+	if err := verifier.Verify(base, sigBytes); err != nil {
+		return "", err
+	}
+
+	return params.keyID, nil
 }
 
 // findSignatureInput finds the signature input for the given label in the
